@@ -7,6 +7,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import net.lingala.zip4j.ZipFile
+import net.lingala.zip4j.model.ZipParameters
 import java.io.File
 
 class CompressTask(
@@ -114,7 +115,11 @@ class CompressTask(
                 return
             }
 
+            val pwd = parameters?.password
             ZipFile(parameters?.destPath).use { zipOut ->
+                if (!pwd.isNullOrEmpty()) {
+                    zipOut.setPassword(pwd.toCharArray())
+                }
                 pendingContent.forEachIndexed { index, itemToCompress ->
                     if (aborted) {
                         markAsAborted()
@@ -172,12 +177,34 @@ class CompressTask(
         }
     }
 
+    private fun getZipParameters(): ZipParameters {
+        val params = ZipParameters()
+        val p = parameters
+        if (p != null) {
+            if (!p.password.isNullOrEmpty()) {
+                params.isEncryptFiles = true
+                params.encryptionMethod = net.lingala.zip4j.model.enums.EncryptionMethod.AES
+                params.aesKeyStrength = net.lingala.zip4j.model.enums.AesKeyStrength.KEY_STRENGTH_256
+            }
+            params.compressionLevel = when (p.compressionLevel) {
+                0 -> net.lingala.zip4j.model.enums.CompressionLevel.NO_COMPRESSION
+                1 -> net.lingala.zip4j.model.enums.CompressionLevel.FASTEST
+                3 -> net.lingala.zip4j.model.enums.CompressionLevel.FAST
+                5 -> net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
+                7 -> net.lingala.zip4j.model.enums.CompressionLevel.MAXIMUM
+                9 -> net.lingala.zip4j.model.enums.CompressionLevel.ULTRA
+                else -> net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
+            }
+        }
+        return params
+    }
+
     private fun addFileToZip(zipOut: ZipFile, fileToCompress: ContentHolder) {
-        zipOut.addFile(File(fileToCompress.uniquePath))
+        zipOut.addFile(File(fileToCompress.uniquePath), getZipParameters())
     }
 
     private fun addFolderToZip(zipOut: ZipFile, folderToCompress: ContentHolder) {
-        zipOut.addFolder(File(folderToCompress.uniquePath))
+        zipOut.addFolder(File(folderToCompress.uniquePath), getZipParameters())
     }
 
     override fun setParameters(params: TaskParameters) {

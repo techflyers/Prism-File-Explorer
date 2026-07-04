@@ -15,6 +15,15 @@ object FileMimeType {
     const val anyFileType = "*/*"
 
     @JvmField
+    val latexFileType = arrayOf("tex", "latex")
+
+    @JvmField
+    val officeFileType = arrayOf("doc", "docx", "xls", "xlsx", "ppt", "pptx")
+
+    @JvmField
+    val htmlFileType = arrayOf("html", "htm")
+
+    @JvmField
     val docFileType = arrayOf("doc", "docx")
 
     @JvmField
@@ -39,7 +48,10 @@ object FileMimeType {
     )
 
     @JvmField
-    val supportedArchiveFileType = arrayOf("zip", "jar", "apk", "apks")
+    val supportedArchiveFileType = arrayOf(
+        "zip", "jar", "apk", "apks",
+        "7z", "rar", "iso", "cab", "xz", "war", "ear"
+    )
 
     @JvmField
     val videoFileType = arrayOf(
@@ -49,14 +61,14 @@ object FileMimeType {
 
     @JvmField
     val codeFileType = arrayOf(
-        javaFileType, "xml", "py", "css", kotlinFileType, "cs", "xml", jsonFileType, "html",
+        javaFileType, "xml", "py", "css", kotlinFileType, "cs", "xml", jsonFileType,
         "js", "ts", "php", "rb", "pl", "sh", "cpp", "c", "h", "swift", "go", "rs",
-        "scala", "sql", "r", "md", "ini", "yaml", "yml"
+        "scala", "sql", "r", "ini", "yaml", "yml"
     )
 
     @JvmField
     val editableFileType = arrayOf(
-        "txt", "text", "log", "dsc", "apt", "rtf", "rtx", "md",
+        "txt", "text", "log", "dsc", "apt", "rtf", "rtx",
         "csv", "tsv", "ini", "conf", "cfg", "nfo", "json", "xml"
     )
 

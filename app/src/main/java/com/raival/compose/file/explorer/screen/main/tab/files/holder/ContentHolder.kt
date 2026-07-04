@@ -7,6 +7,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ContentCount
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkBundleFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SIZE
@@ -118,6 +119,8 @@ abstract class ContentHolder {
     }
 
     fun isApk(): Boolean = extension == apkFileType
+
+    fun isApkBundle(): Boolean = apkBundleFileType.contains(extension.lowercase())
 
     fun isHidden(): Boolean = displayName.startsWith(".")
 

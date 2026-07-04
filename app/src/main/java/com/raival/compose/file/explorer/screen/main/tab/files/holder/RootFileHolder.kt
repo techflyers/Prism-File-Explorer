@@ -31,14 +31,28 @@ class RootFileHolder : ContentHolder() {
     override val canWrite = false
 
     override suspend fun listContent(): ArrayList<out ContentHolder> {
-        val content = ArrayList<LocalFileHolder>()
+        val content = ArrayList<ContentHolder>()
 
         virtualRootContent.forEach { item ->
             File(item).let { file ->
                 if (file.exists()) {
                     content.add(LocalFileHolder(file))
+                } else if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                    content.add(com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder.fromPath(item))
                 }
             }
+        }
+
+        // Try listing the actual root directory "/" using Shizuku/root if privileged
+        if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+            val rootHolder = com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder.fromPath("/")
+            try {
+                rootHolder.listContent().forEach { item ->
+                    if (content.none { it.displayName == item.displayName }) {
+                        content.add(item)
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         contentsCount = ContentCount(folders = content.size)
@@ -48,6 +62,6 @@ class RootFileHolder : ContentHolder() {
 
     override suspend fun getParent() = null
     override suspend fun getContentCount() = contentsCount
-    override suspend fun findFile(name: String) = content.find { it.displayName == name }
+    override suspend fun findFile(name: String) = listContent().find { it.displayName == name }
     override suspend fun isValid() = true
 }

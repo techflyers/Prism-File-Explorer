@@ -486,7 +486,12 @@ class TextEditorManager {
 
         activeFile = getFileInstance(localFileHolder)?.file ?: localFileHolder
 
-        context.startActivity(Intent(context, TextEditorActivity::class.java))
+        val intent = Intent(context, TextEditorActivity::class.java).apply {
+            if (context !is android.app.Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        context.startActivity(intent)
 
         return true
     }

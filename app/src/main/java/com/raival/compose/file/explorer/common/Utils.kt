@@ -640,10 +640,17 @@ fun Long.toFormattedDate(
     hideSeconds: Boolean = false,
     customFormat: String? = null
 ): String {
-    val format = when {
+    var format = when {
         customFormat != null -> customFormat
         hideSeconds -> globalClass.preferencesManager.dateTimeFormat.replace(":ss", "")
         else -> globalClass.preferencesManager.dateTimeFormat
+    }
+    if (globalClass.preferencesManager.use12HourFormat) {
+        format = format.replace("HH", "hh")
+        // Append AM/PM marker if not already present
+        if (!format.contains("a")) {
+            format = "$format a"
+        }
     }
     return SimpleDateFormat(format).format(this)
 }
@@ -717,4 +724,51 @@ fun showMsg(msg: String) {
 
 fun showMsg(msgId: Int) {
     globalClass.showMsg(msgId)
+}
+
+fun resolveUriToPath(context: Context, uri: Uri): String {
+    if (uri.scheme == "file") {
+        return uri.path ?: ""
+    }
+
+    var path = ""
+    try {
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val idx = it.getColumnIndex("_data")
+                    if (idx >= 0) {
+                        path = it.getString(idx) ?: ""
+                    }
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    if (path.isEmpty()) {
+        path = uri.path ?: ""
+    }
+
+    if (path.startsWith("/storage_root")) {
+        path = path.removePrefix("/storage_root")
+    }
+
+    // If the path still doesn't exist/isn't readable, copy it to a temp file
+    val file = File(path)
+    if (!file.exists() || !file.canRead()) {
+        try {
+            val extension = uri.name?.substringAfterLast('.', "tmp") ?: "tmp"
+            val tempFile = File.createTempFile("prism_temp_", ".$extension", context.cacheDir)
+            tempFile.deleteOnExit()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                tempFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return tempFile.absolutePath
+        } catch (_: Exception) {}
+    }
+
+    return path
 }

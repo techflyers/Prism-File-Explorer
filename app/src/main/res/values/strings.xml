@@ -46,6 +46,8 @@
     <string name="invalid_folder_name">Invalid folder name</string>
     <string name="confirm">Confirm</string>
     <string name="dismiss">Dismiss</string>
+    <string name="paste_here">Paste here</string>
+    <string name="move_here">Move here</string>
     <string name="delete_confirmation">Delete Confirmation</string>
     <string name="move_to_recycle_bin">Move to Recycle Bin</string>
     <string name="create_archive">Create Archive</string>

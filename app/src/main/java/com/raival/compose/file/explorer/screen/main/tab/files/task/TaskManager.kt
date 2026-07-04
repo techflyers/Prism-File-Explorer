@@ -23,6 +23,8 @@ class TaskManager {
 
     private val allTasks = ConcurrentHashMap<String, Task>()
 
+    var pendingTasksVersion by mutableStateOf(0)
+
     val pendingTasks: MutableCollection<Task> = Collections.synchronizedList(mutableListOf<Task>())
     val runningTasks: MutableCollection<Task> = Collections.synchronizedList(mutableListOf<Task>())
     val pausedTasks: MutableCollection<Task> = Collections.synchronizedList(mutableListOf<Task>())
@@ -41,6 +43,7 @@ class TaskManager {
     ) {
         allTasks[task.id] = task
         pendingTasks.add(task)
+        pendingTasksVersion++
         if (notifyUser) globalClass.showMsg(globalClass.resources.getString(R.string.new_task_has_been_added))
     }
 
@@ -53,7 +56,10 @@ class TaskManager {
         allTasks[id]?.abortTask()
         allTasks.remove(id)
 
-        pendingTasks.removeIf { it.id == id }
+        val removed = pendingTasks.removeIf { it.id == id }
+        if (removed) {
+            pendingTasksVersion++
+        }
         runningTasks.removeIf { it.id == id }
         pausedTasks.removeIf { it.id == id }
         failedTasks.removeIf { it.id == id }
@@ -63,13 +69,18 @@ class TaskManager {
 
     suspend fun validateTasks(onFinished: (() -> Unit)? = null) {
         val iterator = pendingTasks.iterator()
+        var changed = false
         while (iterator.hasNext()) {
             val task = iterator.next()
             if (!task.validate()) {
                 invalidTasks.add(task)
                 // Use the iterator's remove method, which is safe
                 iterator.remove()
+                changed = true
             }
+        }
+        if (changed) {
+            pendingTasksVersion++
         }
         onFinished?.invoke()
     }
@@ -128,7 +139,10 @@ class TaskManager {
     }
 
     private fun moveTaskToRunning(task: Task) {
-        pendingTasks.removeIf { it.id == task.id }
+        val removed = pendingTasks.removeIf { it.id == task.id }
+        if (removed) {
+            pendingTasksVersion++
+        }
         pausedTasks.removeIf { it.id == task.id }
         failedTasks.removeIf { it.id == task.id }
 

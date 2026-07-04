@@ -32,6 +32,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.rounded.ContentPaste
+import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -110,6 +116,47 @@ fun ColumnScope.FilesList(tab: FilesTab) {
         }
 
         LoadingOverlay(tab)
+
+        val taskManager = globalClass.taskManager
+        val version = taskManager.pendingTasksVersion
+        val mostRecentCopyTask = remember(version) {
+            taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+        }
+
+        if (mostRecentCopyTask != null && tab.activeFolder.canAddNewContent && tab.activeFolder !is VirtualFileHolder) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        taskManager.runTask(
+                            mostRecentCopyTask.id,
+                            CopyTaskParameters(tab.activeFolder)
+                        )
+                    },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentPaste,
+                            contentDescription = null
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = if (mostRecentCopyTask.deleteSourceFiles) {
+                                stringResource(R.string.move_here)
+                            } else {
+                                stringResource(R.string.paste_here)
+                            }
+                        )
+                    }
+                )
+            }
+        }
     }
 }
 

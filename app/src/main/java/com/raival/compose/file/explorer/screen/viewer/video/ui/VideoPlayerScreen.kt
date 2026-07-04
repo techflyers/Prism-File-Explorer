@@ -63,6 +63,8 @@ import net.engawapg.lib.zoomable.rememberZoomState
 import net.engawapg.lib.zoomable.zoomable
 import kotlin.math.abs
 
+private val SPEED_OPTIONS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+
 @Composable
 fun VideoPlayerScreen(
     videoUri: Uri,
@@ -131,6 +133,7 @@ fun VideoPlayerScreen(
                     },
                     onBackPressed = onBackPressed,
                     onToggleMute = { videoPlayerInstance.toggleMute() },
+                    onSpeedChange = { speed -> videoPlayerInstance.setPlaybackSpeed(speed) },
                 )
             }
 
@@ -158,7 +161,8 @@ fun VideoControls(
     onSeekForward: () -> Unit,
     onSeekBackward: () -> Unit,
     onSeek: (Long) -> Unit,
-    onBackPressed: () -> Unit
+    onBackPressed: () -> Unit,
+    onSpeedChange: (Float) -> Unit
 ) {
     val defaultColor = colorScheme.surface
 
@@ -182,6 +186,7 @@ fun VideoControls(
             playerState = state,
             onBackPressed = onBackPressed,
             onToggleMute = onToggleMute,
+            onSpeedChange = onSpeedChange,
             modifier = Modifier.align(Alignment.TopStart)
         )
 
@@ -209,6 +214,7 @@ fun TopBar(
     playerState: VideoPlayerState,
     onBackPressed: () -> Unit,
     onToggleMute: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
     modifier: Modifier,
 ) {
     Row(
@@ -238,7 +244,29 @@ fun TopBar(
             modifier = Modifier.weight(1f),
         )
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Speed button
+        Surface(
+            onClick = {
+                val currentIndex = SPEED_OPTIONS.indexOf(playerState.playbackSpeed)
+                val nextIndex = if (currentIndex < 0 || currentIndex >= SPEED_OPTIONS.size - 1) 0 else currentIndex + 1
+                onSpeedChange(SPEED_OPTIONS[nextIndex])
+            },
+            shape = CircleShape,
+            color = Color.Transparent
+        ) {
+            Text(
+                text = if (playerState.playbackSpeed == playerState.playbackSpeed.toLong().toFloat())
+                    "${playerState.playbackSpeed.toInt()}\u00d7"
+                else
+                    "${playerState.playbackSpeed}\u00d7",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (playerState.playbackSpeed != 1.0f) colorScheme.primary else colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+        }
 
         IconButton(
             onClick = onToggleMute,

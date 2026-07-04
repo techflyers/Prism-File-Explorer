@@ -1,6 +1,6 @@
 [versions]
 accompanistSystemuicontroller = "0.36.0"
-agp = "8.6.1"
+agp = "8.9.1"
 apksig = "8.12.0"
 commonsNet = "3.12.0"
 desugar_jdk_libs = "2.1.5"
@@ -35,6 +35,11 @@ profileinstaller = "1.4.1"
 reorderable = "2.5.1"
 uiToolingPreviewAndroid = "1.9.0"
 zoomableImageCoil3 = "0.16.0"
+markwon = "4.6.2"
+okhttp = "4.12.0"
+onnxruntime = "1.22.0"
+pdfbox-android = "2.0.27.0"
+sshj = "0.39.0"
 
 [libraries]
 accompanist-systemuicontroller = { module = "com.google.accompanist:accompanist-systemuicontroller", version.ref = "accompanistSystemuicontroller" }
@@ -53,13 +58,21 @@ desugar_jdk_libs = { module = "com.android.tools:desugar_jdk_libs", version.ref 
 grid = { module = "com.cheonjaeung.compose.grid:grid", version.ref = "grid" }
 lazycolumnscrollbar = { module = "com.github.nanihadesuka:LazyColumnScrollbar", version.ref = "lazycolumnscrollbar" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+markwon-core = { module = "io.noties.markwon:core", version.ref = "markwon" }
+markwon-tables = { module = "io.noties.markwon:ext-tables", version.ref = "markwon" }
+markwon-latex = { module = "io.noties.markwon:ext-latex", version.ref = "markwon" }
+markwon-strikethrough = { module = "io.noties.markwon:ext-strikethrough", version.ref = "markwon" }
+markwon-tasklist = { module = "io.noties.markwon:ext-tasklist", version.ref = "markwon" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "androidxComposeBom" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-lifecycle-runtime-compose-android = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose-android", version.ref = "lifecycle_runtime_compose_android" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity_compose" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+pdfbox = { module = "com.tom-roush:pdfbox-android", version.ref = "pdfbox-android" }
 sora-editor = { group = "io.github.Rosemoe.sora-editor", name = "editor", version.ref = "soraEditor" }
 sora-editor-language-java = { group = "io.github.Rosemoe.sora-editor", name = "language-java", version.ref = "soraEditor" }
 sora-editor-language-textmate = { group = "io.github.Rosemoe.sora-editor", name = "language-textmate", version.ref = "soraEditor" }
@@ -80,6 +93,7 @@ androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profi
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 androidx-ui-tooling-preview-android = { group = "androidx.compose.ui", name = "ui-tooling-preview-android", version.ref = "uiToolingPreviewAndroid" }
 zoomable-image-coil3 = { module = "me.saket.telephoto:zoomable-image-coil3", version.ref = "zoomableImageCoil3" }
+sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -87,5 +101,3 @@ jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = 
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-test = { id = "com.android.test", version.ref = "agp" }
 baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
-
-

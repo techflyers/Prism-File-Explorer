@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Allow androidx.pdf which requires minSdk 31 — we override to support our minSdk=26 -->
+    <uses-sdk tools:overrideLibrary="androidx.pdf,androidx.pdf.viewer,androidx.pdf.viewer.fragment,androidx.pdf.document.service,androidx.pdf.core" />
+
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
@@ -18,6 +21,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Shizuku binder permission -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
     <uses-feature
         android:glEsVersion="0x00020000"
         android:required="true" />
@@ -33,6 +43,7 @@
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:requestLegacyExternalStorage="true"
+        android:extractNativeLibs="true"
         android:theme="@style/Theme.FileExplorer"
         tools:targetApi="34" >
 
@@ -150,6 +161,103 @@
             android:theme="@style/Theme.FileExplorer"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- LaTeX Viewer -->
+        <activity
+            android:name=".screen.viewer.latex.LatexViewerActivity"
+            android:exported="true"
+            android:label="LaTeX Viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/x-tex"/>
+                <data android:mimeType="application/x-latex"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Markdown Viewer -->
+        <activity
+            android:name=".screen.viewer.markdown.MarkdownViewerActivity"
+            android:exported="true"
+            android:label="Markdown Viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/markdown"/>
+                <data android:mimeType="text/x-markdown"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
+            </intent-filter>
+        </activity>
+
+        <!-- HTML Viewer -->
+        <activity
+            android:name=".screen.viewer.html.HtmlViewerActivity"
+            android:exported="true"
+            android:label="HTML Viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/html"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Office Document Viewer -->
+        <activity
+            android:name=".screen.viewer.document.DocumentViewerActivity"
+            android:exported="true"
+            android:label="Document Viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/msword"/>
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>
+                <data android:mimeType="application/vnd.ms-excel"/>
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+                <data android:mimeType="application/vnd.ms-powerpoint"/>
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Copied Docreader layout rendering engine activities -->
+        <activity
+            android:name="com.ahmadullahpk.alldocumentreader.activity.PDF_Reader_Activity"
+            android:exported="false" />
+        <activity
+            android:name="com.ahmadullahpk.alldocumentreader.activity.PrintPdfActivity"
+            android:exported="false"
+            android:theme="@style/NewAppTheme" />
+        <activity
+            android:name="com.ahmadullahpk.alldocumentreader.activity.ViewFiles_Activity"
+            android:theme="@style/NewAppTheme" />
+        <activity
+            android:name="com.ahmadullahpk.alldocumentreader.activity.CSVViewer_Activity"
+            android:theme="@style/NewAppTheme" />
+        <activity
+            android:name="com.ahmadullahpk.alldocumentreader.activity.ViewRtf_Activity"
+            android:theme="@style/NewAppTheme" />
+
         <activity
             android:name=".screen.main.MainActivity"
             android:exported="true"
@@ -165,6 +273,14 @@
             android:name=".screen.main.tab.files.service.ContentOperationService"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".screen.main.tab.files.service.FtpForegroundService"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".screen.main.tab.files.service.WebSharingForegroundService"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.raival.compose.file.explorer.provider"
@@ -174,6 +290,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
         </provider>
+
+        <!-- Shizuku Provider (must be registered for Shizuku binding) -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:exported="true"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
     </application>
 

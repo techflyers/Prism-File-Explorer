@@ -9,5 +9,7 @@ data class PlayerState(
     val isLoading: Boolean = false,
     val playbackSpeed: Float = 1.0f,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
-    val volume: Float = 1.0f
+    val volume: Float = 1.0f,
+    val currentTrackIndex: Int = 0,
+    val totalTracks: Int = 1
 )

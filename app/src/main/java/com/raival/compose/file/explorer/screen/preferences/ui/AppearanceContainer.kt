@@ -2,6 +2,7 @@ package com.raival.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
+import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Nightlight
 import androidx.compose.material.icons.rounded.VerticalAlignTop
@@ -85,6 +86,19 @@ fun AppearanceContainer() {
                     onSelect = { prefs.dateTimeFormat = commonDateFormat[it] }
                 )
             }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "12-hour time format",
+            supportingText = if (prefs.use12HourFormat) "Using 12-hour format" else "Using 24-hour format",
+            icon = Icons.Rounded.AccessTime,
+            switchState = prefs.use12HourFormat,
+            onSwitchChange = { prefs.use12HourFormat = it }
         )
 
         HorizontalDivider(

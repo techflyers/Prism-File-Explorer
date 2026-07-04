@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddTask
 import androidx.compose.material.icons.rounded.Bookmark
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.rounded.FileCopy
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +50,7 @@ import com.raival.compose.file.explorer.common.block
 import com.raival.compose.file.explorer.common.detectVerticalSwipe
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 
 @Composable
@@ -133,6 +136,26 @@ fun BottomOptionsBar(tab: FilesTab) {
                     )
                 }
 
+                // Open With — only for a single local file (not folder)
+                val singleLocalFile = tab.selectedFiles.size == 1 &&
+                        tab.selectedFiles.values.first().let {
+                            it is LocalFileHolder && it.isFile()
+                        }
+                if (singleLocalFile) {
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            tab.targetFile = tab.selectedFiles.values.first()
+                            tab.toggleOpenWithDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = null
+                        )
+                    }
+                }
+
                 // Properties
                 IconButton(
                     modifier = Modifier.weight(1f),
@@ -166,6 +189,12 @@ fun BottomOptionsBar(tab: FilesTab) {
                 }
                 tab.quickReloadFiles()
                 tab.toggleDeleteConfirmationDialog(true)
+            }
+
+            if (state.showRestoreButton && tab.selectedFiles.isNotEmpty()) {
+                BottomOptionsBarButton(Icons.Rounded.RestoreFromTrash, "Restore") {
+                    tab.restoreSelectedFiles()
+                }
             }
         } else {
             BottomOptionsBarButton(Icons.Rounded.AddTask, stringResource(R.string.task)) {

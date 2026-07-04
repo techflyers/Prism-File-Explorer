@@ -139,33 +139,6 @@ class CopyTask(
     }
 
     private fun validateDestination(destHolder: ContentHolder): Boolean {
-        val firstSource = sourceFiles.first()
-
-        // Prevent copying into self for local files
-        if (firstSource is LocalFileHolder && destHolder is LocalFileHolder) {
-            val sourceParent = firstSource.file.parentFile?.canonicalPath
-            val destPath = destHolder.file.canonicalPath
-            if (sourceParent == destPath) {
-                markAsFailed(globalClass.resources.getString(R.string.task_summary_invalid_dest))
-                return false
-            }
-        }
-
-        // Prevent copying zip directory into itself
-        if (firstSource is ZipFileHolder && destHolder is ZipFileHolder) {
-            val sourceFile = firstSource.zipTree.source.file.canonicalPath
-            val destFile = destHolder.zipTree.source.file.canonicalPath
-
-            if (sourceFile == destFile) {
-                runBlocking {
-                    if (firstSource.getParent()?.uniquePath == destHolder.uniquePath) {
-                        markAsFailed(globalClass.resources.getString(R.string.task_summary_invalid_dest))
-                        return@runBlocking false
-                    }
-                }
-            }
-        }
-
         return true
     }
 
@@ -225,6 +198,7 @@ class CopyTask(
 
     private fun preparePendingFiles(sourcePath: String) {
         val destHolder = parameters!!.destHolder
+        val renameInSameFolder = destHolder.uniquePath == sourcePath
         var hasInvalidNesting = false
         val isSameZipFiles = (sourceFiles.first() is ZipFileHolder && destHolder is ZipFileHolder)
                 && (sourceFiles.first() as ZipFileHolder).zipTree.source.uniquePath == destHolder.zipTree.source.uniquePath
@@ -241,10 +215,10 @@ class CopyTask(
                     if (!hasInvalidNesting && destPath.startsWith(source.uniquePath)) {
                         hasInvalidNesting = true
                     } else {
-                        pendingFiles.addAll(listFilesWithRelativePath(sourcePath, source))
+                        pendingFiles.addAll(listFilesWithRelativePath(sourcePath, source, renameInSameFolder))
                     }
                 } else {
-                    pendingFiles.addAll(listFilesWithRelativePath(sourcePath, source))
+                    pendingFiles.addAll(listFilesWithRelativePath(sourcePath, source, renameInSameFolder))
                 }
             }
 
@@ -776,15 +750,35 @@ class CopyTask(
         }
     }
 
+    private fun getRenamedCopyName(name: String, isFile: Boolean): String {
+        if (isFile) {
+            val dotIndex = name.lastIndexOf('.')
+            return if (dotIndex == -1 || dotIndex == 0) {
+                "$name (copy)"
+            } else {
+                val base = name.substring(0, dotIndex)
+                val ext = name.substring(dotIndex) // includes the dot, e.g. ".jpg"
+                "$base (copy)$ext"
+            }
+        } else {
+            return "$name (copy)"
+        }
+    }
+
     private fun listFilesWithRelativePath(
         basePath: String,
-        startFile: ContentHolder
+        startFile: ContentHolder,
+        renameInSameFolder: Boolean
     ): List<TaskContentItem> {
-        if (startFile.isFile()) {
+        val isFile = startFile.isFile()
+        val startName = startFile.displayName
+        val renamedName = if (renameInSameFolder) getRenamedCopyName(startName, isFile) else startName
+
+        if (isFile) {
             return listOf(
                 TaskContentItem(
                     content = startFile,
-                    relativePath = startFile.displayName,
+                    relativePath = renamedName,
                     status = TaskContentStatus.PENDING
                 )
             )
@@ -793,10 +787,22 @@ class CopyTask(
         return when (startFile) {
             is LocalFileHolder -> {
                 startFile.file.listFilesAndEmptyDirs().map { file ->
+                    val relPath = file.toRelativeString(File(basePath))
+                        .orIf(startName) { it.isEmpty() }
+                    val adjustedPath = if (renameInSameFolder) {
+                        if (relPath == startName) {
+                            renamedName
+                        } else if (relPath.startsWith("$startName/")) {
+                            renamedName + relPath.substring(startName.length)
+                        } else {
+                            relPath
+                        }
+                    } else {
+                        relPath
+                    }
                     TaskContentItem(
                         content = LocalFileHolder(file),
-                        relativePath = file.toRelativeString(File(basePath))
-                            .orIf(startFile.displayName) { it.isEmpty() },
+                        relativePath = adjustedPath,
                         status = TaskContentStatus.PENDING
                     )
                 }
@@ -804,10 +810,22 @@ class CopyTask(
 
             is ZipFileHolder -> {
                 startFile.node.listFilesAndEmptyDirs().map { node ->
+                    val relPath = node.path.toRelativeString(basePath)
+                        .orIf(startName) { it.isEmpty() }
+                    val adjustedPath = if (renameInSameFolder) {
+                        if (relPath == startName) {
+                            renamedName
+                        } else if (relPath.startsWith("$startName/")) {
+                            renamedName + relPath.substring(startName.length)
+                        } else {
+                            relPath
+                        }
+                    } else {
+                        relPath
+                    }
                     TaskContentItem(
                         content = ZipFileHolder(startFile.zipTree, node),
-                        relativePath = node.path.toRelativeString(basePath)
-                            .orIf(startFile.displayName) { it.isEmpty() },
+                        relativePath = adjustedPath,
                         status = TaskContentStatus.PENDING
                     )
                 }

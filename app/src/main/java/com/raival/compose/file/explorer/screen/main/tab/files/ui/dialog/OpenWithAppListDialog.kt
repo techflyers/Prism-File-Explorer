@@ -13,6 +13,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.OpenWithAct
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.DefaultOpeningMethods
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.anyFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.OpeningMethod
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithApps
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRow
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRowIcon
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +60,7 @@ fun OpenWithAppListDialog(
     if (show) {
         val contentHolder = tab.targetFile!! as LocalFileHolder
         val context = LocalContext.current
+        val extension = contentHolder.extension.lowercase()
 
         val appsList = remember {
             mutableStateListOf<OpenWithActivityHolder>()
@@ -73,14 +76,39 @@ fun OpenWithAppListDialog(
             loading.value = true
             scope.launch(Dispatchers.IO) {
                 val list = contentHolder.getAppsHandlingFile(mimeType)
+
+                val recentHistory: RecentOpenWithApps =
+                    fromJson(globalClass.preferencesManager.recentOpenWithApps)
+                        ?: RecentOpenWithApps()
+
+                val recentForExt = recentHistory.history
+                    .filter { it.extension == extension }
+                    .mapIndexed { index, entry -> Pair(entry.packageName + "/" + entry.className, index) }
+                    .toMap()
+
+                val sorted = list.sortedWith(
+                    compareBy { item ->
+                        recentForExt[item.packageName + "/" + item.name] ?: Int.MAX_VALUE
+                    }
+                )
+
                 appsList.clear()
-                appsList.addAll(list)
+                appsList.addAll(sorted)
                 loading.value = false
             }
         }
 
         LaunchedEffect(Unit) {
             loadActivities(emptyString)
+        }
+
+        val recentHistory: RecentOpenWithApps =
+            fromJson(globalClass.preferencesManager.recentOpenWithApps) ?: RecentOpenWithApps()
+        val recentKeys = remember(recentHistory.history) {
+            recentHistory.history
+                .filter { it.extension == extension }
+                .map { it.packageName + "/" + it.className }
+                .toSet()
         }
 
         BottomSheetDialog(
@@ -131,6 +159,41 @@ fun OpenWithAppListDialog(
 
                 LazyColumn {
                     itemsIndexed(appsList, key = { index, item -> item.id }) { index, item ->
+                        val itemKey = item.packageName + "/" + item.name
+                        val isRecent = itemKey in recentKeys
+
+                        if (index == 0 && isRecent) {
+                            Text(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                text = "Recent",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        val prevIsRecent = appsList.getOrNull(index - 1)
+                            ?.let { (it.packageName + "/" + it.name) in recentKeys } == true
+                        if (!isRecent && index > 0 && prevIsRecent) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(
+                                    horizontal = 16.dp,
+                                    vertical = 4.dp
+                                )
+                            )
+                            Text(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                text = "All apps",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         var showOptionsMenu by remember(item.id) {
                             mutableStateOf(false)
                         }
@@ -141,6 +204,11 @@ fun OpenWithAppListDialog(
                                 .animateItem()
                                 .combinedClickable(
                                     onClick = {
+                                        globalClass.preferencesManager.recordOpenWith(
+                                            extension = extension,
+                                            packageName = item.packageName,
+                                            className = item.name
+                                        )
                                         contentHolder.openFileWithPackage(
                                             context,
                                             item.packageName,
@@ -192,6 +260,11 @@ fun OpenWithAppListDialog(
                                                     className = item.name
                                                 ))
                                             ).toJson()
+                                        globalClass.preferencesManager.recordOpenWith(
+                                            extension = extension,
+                                            packageName = item.packageName,
+                                            className = item.name
+                                        )
                                         contentHolder.openFileWithPackage(
                                             context,
                                             item.packageName,

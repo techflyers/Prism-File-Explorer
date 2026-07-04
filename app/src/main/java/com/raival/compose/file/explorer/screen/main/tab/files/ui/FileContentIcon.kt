@@ -76,7 +76,7 @@ private fun getContentIcon(content: ContentHolder): FileContentIcon {
     if (extension == isoFileType) return FileContentIcon(PrismIcons.Iso)
     if (extension == sqlFileType) return FileContentIcon(PrismIcons.Sql)
     if (extension == pdfFileType) return FileContentIcon(PrismIcons.Pdf)
-    if (extension == apkFileType) return FileContentIcon(Icons.Default.Android)
+    if (extension == apkFileType || content.isApkBundle()) return FileContentIcon(Icons.Default.Android)
 
     if (videoFileType.contains(extension)) return FileContentIcon(Icons.Default.Videocam)
     if (imageFileType.contains(extension)) return FileContentIcon(Icons.Default.Image)

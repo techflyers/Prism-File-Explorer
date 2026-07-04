@@ -20,11 +20,16 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.ui.CheckableText
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.raival.compose.file.explorer.screen.main.tab.files.task.DeleteTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.DeleteTaskParameters
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 @Composable
 fun DeleteConfirmationDialog(
@@ -56,31 +61,42 @@ fun DeleteConfirmationDialog(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        // Snapshot target files before any state changes
+                        val filesToProcess = targetFiles.toList()
                         onDismissRequest()
-                        tab.unselectAllFiles()
+
+                        if (filesToProcess.isEmpty()) return@TextButton
+
                         if (showRememberChoice && rememberChoice) {
                             preferencesManager.moveToRecycleBin =
                                 moveToRecycleBin
                         }
                         tab.scope.launch {
                             if (!bottomOptionsBarState.value.showEmptyRecycleBinButton && moveToRecycleBin) {
+                                val timestamp = System.currentTimeMillis().toString()
                                 globalClass.recycleBinDir.createSubFolder(
-                                    System.currentTimeMillis().toString()
+                                    timestamp
                                 ) { newDir ->
                                     if (newDir != null) {
+                                        // Save metadata.json with original paths for restore
+                                        saveRecycleBinMetadata(newDir, filesToProcess)
+                                        // Unselect after snapshotting
+                                        tab.unselectAllFiles()
                                         globalClass.taskManager.addTaskAndRun(
-                                            CopyTask(targetFiles, true),
+                                            CopyTask(filesToProcess, true),
                                             CopyTaskParameters(
                                                 newDir
                                             )
                                         )
                                     } else {
+                                        tab.unselectAllFiles()
                                         globalClass.showMsg(globalClass.getString(R.string.unable_to_move_to_recycle_bin))
                                     }
                                 }
                             } else {
+                                tab.unselectAllFiles()
                                 globalClass.taskManager.addTaskAndRun(
-                                    DeleteTask(targetFiles),
+                                    DeleteTask(filesToProcess),
                                     DeleteTaskParameters()
                                 )
                             }
@@ -138,5 +154,33 @@ fun DeleteConfirmationDialog(
                 }
             }
         )
+    }
+}
+
+/**
+ * Saves a metadata.json file in the recycle bin folder that records the original
+ * paths of deleted files, enabling restore to their original locations.
+ */
+private fun saveRecycleBinMetadata(recycleBinFolder: ContentHolder, files: List<ContentHolder>) {
+    try {
+        if (recycleBinFolder is LocalFileHolder) {
+            val metadataFile = File(recycleBinFolder.file, "metadata.json")
+            val jsonArray = JSONArray()
+            files.forEach { file ->
+                val entry = JSONObject().apply {
+                    put("name", file.displayName)
+                    put("originalPath", file.uniquePath)
+                    put("isDirectory", file.isFolder)
+                    put("deletedAt", System.currentTimeMillis())
+                }
+                jsonArray.put(entry)
+            }
+            val root = JSONObject().apply {
+                put("items", jsonArray)
+            }
+            metadataFile.writeText(root.toString(2))
+        }
+    } catch (_: Exception) {
+        // Non-critical: metadata save failure should not block deletion
     }
 }

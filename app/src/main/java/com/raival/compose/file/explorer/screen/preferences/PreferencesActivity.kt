@@ -35,6 +35,7 @@ import com.raival.compose.file.explorer.screen.preferences.ui.BehaviorContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.FileListContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.FileOperationContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.RecentFilesContainer
+import com.raival.compose.file.explorer.screen.preferences.ui.ShizukuContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.SingleChoiceDialog
 import com.raival.compose.file.explorer.screen.preferences.ui.TextEditorContainer
 import com.raival.compose.file.explorer.theme.FileExplorerTheme
@@ -90,6 +91,7 @@ class PreferencesActivity : BaseActivity() {
                         FileListContainer()
                         FileOperationContainer()
                         BehaviorContainer()
+                        ShizukuContainer()
                         RecentFilesContainer()
                         TextEditorContainer()
                         AppInfoContainer()

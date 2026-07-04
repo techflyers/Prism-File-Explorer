@@ -323,6 +323,75 @@ fun FileOptionsMenuDialog(
                     onDismissRequest()
                     tab.unselectAllFiles()
                 }
+
+                val isArchive = targetFiles.isNotEmpty() && targetFiles.all {
+                    it is LocalFileHolder && (
+                        it.file.extension.lowercase() == "zip" ||
+                        it.file.extension.lowercase() == "rar" ||
+                        it.file.extension.lowercase() == "7z" ||
+                        com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isNativeArchive(it.file.extension.lowercase())
+                    )
+                }
+
+                if (isArchive) {
+                    var showPasswordPrompt by remember { mutableStateOf(false) }
+
+                    FileOption(Icons.Rounded.Merge, "Extract") {
+                        val hasEncryptedZip = targetFiles.any { file ->
+                            file is LocalFileHolder && file.file.extension.lowercase() == "zip" && try {
+                                net.lingala.zip4j.ZipFile(file.file).isEncrypted
+                            } catch (e: Exception) {
+                                false
+                            }
+                        }
+                        if (hasEncryptedZip) {
+                            showPasswordPrompt = true
+                        } else {
+                            onDismissRequest()
+                            val task = com.raival.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
+                            globalClass.taskManager.addTaskAndRun(task, com.raival.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters())
+                            tab.unselectAllFiles()
+                        }
+                    }
+
+                    if (showPasswordPrompt) {
+                        com.raival.compose.file.explorer.screen.viewer.pdf.ui.PdfPasswordDialog(
+                            onPasswordSubmit = { password ->
+                                showPasswordPrompt = false
+                                onDismissRequest()
+                                val task = com.raival.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
+                                globalClass.taskManager.addTaskAndRun(task, com.raival.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters(password))
+                                tab.unselectAllFiles()
+                            },
+                            onDismiss = {
+                                showPasswordPrompt = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            val isAllImages = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+            }
+
+            if (isAllImages) {
+                var showMergeImagesDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Images") {
+                    showMergeImagesDialog = true
+                }
+
+                if (showMergeImagesDialog) {
+                    MergeImagesDialog(
+                        show = showMergeImagesDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeImagesDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
             }
 
             if (isSingleFile && targetContentHolder is LocalFileHolder) {

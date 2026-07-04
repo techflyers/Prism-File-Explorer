@@ -20,6 +20,11 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
+-keep class ai.onnxruntime.** { *; }
+-keep class com.ahmadullahpk.alldocumentreader.** { *; }
+-keep class org.apache.harmony.** { *; }
+-dontwarn org.apache.commons.compress.**
+-dontwarn com.github.luben.zstd.**
 -keep class com.raival.compose.file.explorer.** { *; }
 -keep class org.eclipse.tm4e.** { *; }
 -keep class org.joni.** { *; }
@@ -27,3 +32,8 @@
 -keep class com.android.apksig.** { *; }
 
 -keepnames interface * { *; }
+
+# Suppress warnings from missing classes in PDFBox and SSHJ/EdDSA
+-dontwarn com.gemalto.jp2.JP2Decoder
+-dontwarn com.gemalto.jp2.JP2Encoder
+-dontwarn sun.security.x509.X509Key

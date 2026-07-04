@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
@@ -53,10 +54,14 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,11 +97,23 @@ fun SearchDialog(
     onDismissRequest: () -> Unit
 ) {
     val searchManager = globalClass.searchManager
+    val scope = rememberCoroutineScope()
 
     if (show) {
         val context = LocalContext.current
         val useDarkIcons = !isSystemInDarkTheme()
         var showAdvancedOptions by remember { mutableStateOf(false) }
+
+        // Auto-trigger search on type with debounce
+        LaunchedEffect(searchManager.searchQuery) {
+            if (searchManager.searchQuery.length >= 2 && !searchManager.isAiMode) {
+                if (searchManager.isSearching) {
+                    searchManager.stopSearch()
+                }
+                delay(300)
+                searchManager.startSearch(tab)
+            }
+        }
 
         Dialog(
             onDismissRequest = onDismissRequest,
@@ -129,7 +146,8 @@ fun SearchDialog(
                     searchManager = searchManager,
                     onBackClick = onDismissRequest,
                     onSearchClick = { searchManager.startSearch(tab) },
-                    onAdvancedToggle = { showAdvancedOptions = !showAdvancedOptions }
+                    onAdvancedToggle = { showAdvancedOptions = !showAdvancedOptions },
+                    onAiToggle = { searchManager.toggleAiMode(tab) }
                 )
 
                 // Advanced Options
@@ -146,7 +164,7 @@ fun SearchDialog(
 
                 // Search Progress
                 AnimatedVisibility(
-                    visible = searchManager.isSearching,
+                    visible = searchManager.isSearching || searchManager.isIndexing,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
@@ -165,6 +183,31 @@ fun SearchDialog(
                     onDismissRequest = onDismissRequest
                 )
             }
+
+            // AI Model Choice and Download Dialogs
+            if (com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog) {
+                com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelChoiceDialog(
+                    onChoose = { variant ->
+                        com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog = false
+                        scope.launch {
+                            com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.downloadModel(context, variant)
+                        }
+                    },
+                    onDismiss = {
+                        com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog = false
+                        searchManager.isAiMode = false
+                    }
+                )
+            }
+
+            if (com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.isDownloading) {
+                com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadProgressDialog(
+                    onCancel = {
+                        com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.cancelDownload()
+                        searchManager.isAiMode = false
+                    }
+                )
+            }
         }
     }
 }
@@ -174,7 +217,8 @@ private fun SearchHeader(
     searchManager: SearchManager,
     onBackClick: () -> Unit,
     onSearchClick: () -> Unit,
-    onAdvancedToggle: () -> Unit
+    onAdvancedToggle: () -> Unit,
+    onAiToggle: () -> Unit
 ) {
     Column {
         Row(
@@ -245,6 +289,13 @@ private fun SearchHeader(
                 singleLine = true,
             )
 
+            IconButton(onClick = onAiToggle) {
+                Icon(
+                    imageVector = Icons.Rounded.AutoAwesome,
+                    contentDescription = "AI Mode",
+                    tint = if (searchManager.isAiMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+            }
             IconButton(onClick = onAdvancedToggle) {
                 Icon(
                     imageVector = Icons.Rounded.Tune,
@@ -421,6 +472,32 @@ private fun OptionSwitch(
 
 @Composable
 private fun SearchProgressPanel(searchManager: SearchManager) {
+    val title = if (searchManager.isIndexing) {
+        "AI Semantic Indexing: ${searchManager.indexingPhase}"
+    } else {
+        stringResource(R.string.searching)
+    }
+
+    val progress = if (searchManager.isIndexing) {
+        if (searchManager.indexingTotal > 0) {
+            searchManager.indexingCurrent.toFloat() / searchManager.indexingTotal.toFloat()
+        } else {
+            -1f
+        }
+    } else {
+        searchManager.searchProgress
+    }
+
+    val currentFile = if (searchManager.isIndexing) {
+        if (searchManager.indexingTotal > 0) {
+            "File ${searchManager.indexingCurrent} of ${searchManager.indexingTotal}"
+        } else {
+            ""
+        }
+    } else {
+        searchManager.currentSearchingFile
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -433,15 +510,15 @@ private fun SearchProgressPanel(searchManager: SearchManager) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = stringResource(R.string.searching),
+                text = title,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium
             )
 
-            if (searchManager.searchProgress > 0) {
+            if (progress > 0) {
                 Text(
-                    text = "${(searchManager.searchProgress * 100).toInt()}%",
+                    text = "${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -450,9 +527,9 @@ private fun SearchProgressPanel(searchManager: SearchManager) {
 
         Space(size = 8.dp)
 
-        if (searchManager.searchProgress > -1) {
+        if (progress > -1f) {
             LinearProgressIndicator(
-                progress = { searchManager.searchProgress },
+                progress = { progress },
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -465,11 +542,10 @@ private fun SearchProgressPanel(searchManager: SearchManager) {
             )
         }
 
-
-        if (searchManager.currentSearchingFile.isNotEmpty()) {
+        if (currentFile.isNotEmpty()) {
             Space(size = 8.dp)
             Text(
-                text = searchManager.currentSearchingFile,
+                text = currentFile,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

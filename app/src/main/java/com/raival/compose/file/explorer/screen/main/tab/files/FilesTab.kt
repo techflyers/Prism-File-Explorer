@@ -37,6 +37,8 @@ import com.raival.compose.file.explorer.screen.main.tab.files.provider.StoragePr
 import com.raival.compose.file.explorer.screen.main.tab.files.state.BottomOptionsBarState
 import com.raival.compose.file.explorer.screen.main.tab.files.state.DialogsState
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTask
+import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +50,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
+import org.json.JSONObject
 import java.io.File
 
 class FilesTab(
@@ -89,6 +92,9 @@ class FilesTab(
     // Holds the file that has been long-clicked
     var targetFile: ContentHolder? = null
     var compressTaskHolder: CompressTask? = null
+
+    // The archive waiting for a password to be entered before opening
+    var pendingPasswordArchive: com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder? = null
 
     // Used to detect changes to an already updated ZipTree in ZipManager
     var zipSourceTimestamp = -1L
@@ -249,7 +255,7 @@ class FilesTab(
     }
 
     fun openFile(context: Context, item: ContentHolder) {
-        if (item is LocalFileHolder && item.isApk()) {
+        if (item is LocalFileHolder && (item.isApk() || item.isApkBundle())) {
             toggleApkDialog(item)
         } else {
             item.open(
@@ -512,6 +518,10 @@ class FilesTab(
                     showMoreOptionsButton = selectedFiles.isNotEmpty(),
                     showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
                             ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
+                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath),
+                    showRestoreButton = activeFolder is LocalFileHolder &&
+                            selectedFiles.isNotEmpty() &&
+                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                                     activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
                 )
             }
@@ -539,6 +549,10 @@ class FilesTab(
                     showQuickOptions = selectedFiles.isNotEmpty(),
                     showMoreOptionsButton = selectedFiles.isNotEmpty(),
                     showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
+                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
+                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath),
+                    showRestoreButton = activeFolder is LocalFileHolder &&
+                            selectedFiles.isNotEmpty() &&
                             ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                                     activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
                 )
@@ -608,14 +622,26 @@ class FilesTab(
     }
 
     private suspend fun updatePathList() {
+        val cleanOnExitPath = globalClass.cleanOnExitDir.uniquePath
+
         // Walk through parent files
         val paths = generateSequence(activeFolder) {
             runBlocking { it.getParent() }
         }
 
-        // Filter those that accessible, reverse the list
-        val newPathSegments =
-            paths.filter { it.canRead && runBlocking { it.isValid() } }.toList().reversed()
+        // Filter those that are accessible and valid, then reverse the list.
+        // Also strip any segments that resolve to the temp extraction cache dir
+        // (cleanOnExitDir) — these appear when browsing nested archives and
+        // would otherwise expose cache paths in the breadcrumb.
+        val newPathSegments = paths
+            .filter { holder ->
+                holder.canRead
+                    && runBlocking { holder.isValid() }
+                    && !(holder is LocalFileHolder
+                        && holder.uniquePath.startsWith(cleanOnExitPath))
+            }
+            .toList()
+            .reversed()
 
         if (!currentPathSegments.joinToString(emptyString) { it.displayName }.startsWith(
                 newPathSegments.joinToString(emptyString) { it.displayName })
@@ -789,5 +815,58 @@ class FilesTab(
     fun toggleImportPrefsDialog(file: LocalFileHolder?) {
         targetFile = file
         _dialogsState.update { it.copy(showImportPrefsDialog = file != null) }
+    }
+
+    fun toggleArchivePasswordDialog(archive: LocalFileHolder?) {
+        pendingPasswordArchive = archive
+        _dialogsState.update { it.copy(showArchivePasswordDialog = archive != null) }
+    }
+
+    /**
+     * Restores selected files from the recycle bin to their original locations
+     * by reading metadata.json from each timestamped recycle bin subfolder.
+     */
+    fun restoreSelectedFiles() {
+        val filesToRestore = selectedFiles.values.toList()
+        if (filesToRestore.isEmpty()) return
+
+        unselectAllFiles()
+        scope.launch {
+            filesToRestore.forEach { file ->
+                if (file is LocalFileHolder) {
+                    // The file is inside a timestamped folder under .prism/bin/
+                    // Read metadata.json from the parent timestamped folder
+                    val parentDir = file.file.parentFile ?: return@forEach
+                    val metadataFile = File(parentDir, "metadata.json")
+                    if (metadataFile.exists()) {
+                        try {
+                            val json = JSONObject(metadataFile.readText())
+                            val items = json.getJSONArray("items")
+                            for (i in 0 until items.length()) {
+                                val item = items.getJSONObject(i)
+                                if (item.getString("name") == file.displayName) {
+                                    val originalPath = item.getString("originalPath")
+                                    val originalParent = File(originalPath).parentFile
+                                    if (originalParent != null) {
+                                        originalParent.mkdirs()
+                                        val destHolder = LocalFileHolder(originalParent)
+                                        globalClass.taskManager.addTaskAndRun(
+                                            CopyTask(listOf(file), deleteSourceFiles = true),
+                                            CopyTaskParameters(destHolder)
+                                        )
+                                        break
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            globalClass.showMsg("Failed to restore: ${file.displayName}")
+                        }
+                    } else {
+                        // No metadata - can't determine original path
+                        globalClass.showMsg("No restore info for: ${file.displayName}")
+                    }
+                }
+            }
+        }
     }
 }

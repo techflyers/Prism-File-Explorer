@@ -100,6 +100,11 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
 
+        // androidx.pdf spawns a sandboxed :androidx.pdf.service.PdfDocumentServiceImpl process
+        // which also triggers App.onCreate(). In that isolated process StorageManager is unavailable,
+        // so we skip all main-process initialization here to avoid a NullPointerException.
+        if (isRemoteServiceProcess()) return
+
         logger = FileExplorerLogger(this, applicationScope)
         setupGlobalExceptionHandler()
 
@@ -107,6 +112,30 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
 
         cleanOnExitDir()
     }
+
+    /**
+     * Returns true when the App is being initialized inside a remote service process
+     * (e.g. androidx.pdf's PdfDocumentServiceImpl) rather than the main app process.
+     *
+     * Uses /proc/self/cmdline which is always readable — even inside fully-isolated
+     * sandboxed processes where ActivityManager.getRunningAppProcesses() returns null.
+     */
+    private fun isRemoteServiceProcess(): Boolean {
+        return try {
+            val cmdline = java.io.File("/proc/self/cmdline")
+                .readBytes()
+                .takeWhile { it != 0.toByte() }   // cmdline is null-terminated
+                .toByteArray()
+                .toString(Charsets.UTF_8)
+                .trim()
+            cmdline != packageName
+        } catch (e: Exception) {
+            // If we can't read the process name assume it's the main process
+            false
+        }
+    }
+
+
 
     fun cleanOnExitDir() {
         applicationScope.launch {

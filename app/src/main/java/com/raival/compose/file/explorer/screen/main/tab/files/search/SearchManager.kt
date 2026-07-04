@@ -15,6 +15,11 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHo
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.SEARCH
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.AiSearchResult
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.FileIndexer
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.FileSearchIndex
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.SemanticSearchEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +41,20 @@ class SearchManager {
 
     val searchResults = mutableStateListOf<SearchResult>()
 
+    // --- AI Search State ---
+    var isAiMode by mutableStateOf(false)
+    var isAiSearching by mutableStateOf(false)
+    var isIndexing by mutableStateOf(false)
+    var indexingPhase by mutableStateOf("")
+    var indexingCurrent by mutableStateOf(0)
+    var indexingTotal by mutableStateOf(0)
+    val aiSearchResults = mutableStateListOf<AiSearchResult>()
+
+    private var searchEngine: SemanticSearchEngine? = null
+    private var fileIndex: FileSearchIndex? = null
+    private var indexedFolderPath: String? = null
+    private var aiSearchJob: Job? = null
+
     private var searchJob: Job? = null
     private var uiUpdateJob: Job? = null
     private val editableExtensions = FileMimeType.editableFileType.toSet()
@@ -50,7 +69,130 @@ class SearchManager {
     private val pendingResults = ConcurrentLinkedQueue<SearchResult>()
     private val resultsBatchSize = 20 // Add results in batches of 20
 
+    /**
+     * Toggle AI search mode.
+     */
+    fun toggleAiMode(tab: FilesTab) {
+        isAiMode = !isAiMode
+        clearResults()
+        aiSearchResults.clear()
+
+        if (isAiMode) {
+            // Check if model is downloaded
+            if (!ModelDownloadManager.isModelDownloaded(globalClass)) {
+                ModelDownloadManager.requestModelDownload {
+                    // Model is now ready, initialize engine
+                    initializeAiEngine()
+                    if (tab.activeFolder is LocalFileHolder) {
+                        indexFolder(tab, (tab.activeFolder as LocalFileHolder).file.absolutePath)
+                    }
+                }
+            } else {
+                initializeAiEngine()
+                if (tab.activeFolder is LocalFileHolder) {
+                    indexFolder(tab, (tab.activeFolder as LocalFileHolder).file.absolutePath)
+                }
+            }
+        }
+    }
+
+    private fun initializeAiEngine() {
+        if (searchEngine != null) return
+        try {
+            val modelPath = ModelDownloadManager.getModelPath(globalClass)
+            val tokenizerPath = ModelDownloadManager.getTokenizerPath(globalClass)
+            searchEngine = SemanticSearchEngine.fromPath(modelPath, tokenizerPath)
+        } catch (e: Exception) {
+            logger.logError(e)
+            globalClass.showMsg("Failed to load AI model: ${e.message}")
+            isAiMode = false
+        }
+    }
+
+    /**
+     * Index the current folder for AI search.
+     */
+    fun indexFolder(tab: FilesTab, folderPath: String) {
+        if (folderPath == indexedFolderPath && fileIndex != null) return
+        val engine = searchEngine ?: return
+
+        aiSearchJob?.cancel()
+        aiSearchJob = tab.scope.launch {
+            isIndexing = true
+            try {
+                fileIndex = FileIndexer.buildIndex(
+                    rootPath = folderPath,
+                    engine = engine,
+                    onProgress = { phase, current, total ->
+                        indexingPhase = phase
+                        indexingCurrent = current
+                        indexingTotal = total
+                    }
+                )
+                indexedFolderPath = folderPath
+            } catch (e: Exception) {
+                if (e !is CancellationException) {
+                    logger.logError(e)
+                    globalClass.showMsg("Indexing failed: ${e.message}")
+                }
+            } finally {
+                isIndexing = false
+            }
+        }
+    }
+
+    /**
+     * Perform AI semantic search.
+     */
+    fun aiSearch(tab: FilesTab) {
+        if (searchQuery.isBlank() || searchEngine == null || fileIndex == null) {
+            aiSearchResults.clear()
+            return
+        }
+
+        aiSearchJob?.cancel()
+        aiSearchJob = tab.scope.launch {
+            isAiSearching = true
+            delay(300) // Debounce
+
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    searchEngine!!.search(searchQuery, fileIndex!!, topK = 20)
+                }
+                aiSearchResults.clear()
+                aiSearchResults.addAll(results)
+
+                // Populate UI search results
+                searchResults.clear()
+                results.forEach { aiRes ->
+                    val file = java.io.File(aiRes.filePath)
+                    if (file.exists()) {
+                        searchResults.add(
+                            SearchResult(
+                                file = LocalFileHolder(file),
+                                matchType = SearchResult.MatchType.CONTENT,
+                                lineNumber = 1,
+                                matchedLine = "Semantic match score: ${(aiRes.score * 100).toInt()}%"
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e !is CancellationException) {
+                    logger.logError(e)
+                }
+            } finally {
+                isAiSearching = false
+            }
+        }
+    }
+
     fun startSearch(tab: FilesTab) {
+        if (isAiMode) {
+            aiSearch(tab)
+            return
+        }
+
         if (searchQuery.isEmpty()) {
             clearResults()
             return
@@ -150,7 +292,9 @@ class SearchManager {
     fun stopSearch() {
         searchJob?.cancel()
         uiUpdateJob?.cancel()
+        aiSearchJob?.cancel()
         isSearching = false
+        isAiSearching = false
         searchProgress = 0f
         currentSearchingFile = emptyString
         flushPendingResults() // Ensure any pending results are added

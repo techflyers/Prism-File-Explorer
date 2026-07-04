@@ -1,5 +1,7 @@
-> [!IMPORTANT]  
-> **This repository is no longer actively maintained.** I am unable to provide support, fix bugs, or merge pull requests. If you’d like to take over maintenance, feel free to fork the project and I’m happy to add a link to your fork in this README.
+> [!NOTE]  
+> **This repository is a feature-rich fork of the original [Prism File Explorer](https://github.com/Raival-e/Prism-File-Explorer) project.** 
+> It integrates premium companion features from [`NFile`](https://github.com/Senzme/NFile) (including a Private Wallet, Local FTP Server, and Web Sharing with port-forwarding), replaces the PDF viewer with Jetpack's native `androidx.pdf:pdf-viewer-fragment`, introduces a custom Compose Excel spreadsheet viewer, integrates the office document layout engine from [`all-documents-reader`](https://github.com/ahmadullahpk/all-documents-reader), implements split APK bundle installation, and adds support for Shizuku/root privileged file access.
+
 
 <div align="center">
 
@@ -42,103 +44,103 @@
 
 ## ✨ Key Features
 
-### 🎨 **Modern User Interface**
+### 🎨 **Modern User Interface & Navigation**
+*   **Jetpack Compose & Material 3**: Fully declarative, highly responsive, and beautiful layouts with automatic light/dark theme support.
+*   **NFile Navigation Drawer**: Quick-navigation sidebar for accessing the **Dashboard**, **System Root**, **Recycle Bin**, and server/network configuration wizard.
+*   **Multi-Tab Layout**: Seamlessly open, navigate, and manage multiple folders at once.
+*   **Intuitive Breadcrumbs**: Quick hierarchical folder traversal.
 
-- **Jetpack Compose UI**: Fully declarative and responsive interface
-- **Material Design 3**: Beautiful, consistent design language
-- **Dark/Light Theme**: Automatic theme switching support
-- **Smooth Animations**: Fluid transitions and interactions
+### 📁 **Advanced File Management**
+*   **Comprehensive Operations**: Copy, cut, paste, rename, delete, batch select, and inspect detailed properties of files and folders.
+*   **Interactive Clipboard FAB**: An `ExtendedFloatingActionButton` dynamically shows "Paste here" / "Move here" options for pending clipboard items.
+*   **Intelligent Duplicate Renaming**: Same-folder copy operations automatically bypass directory validation and append a ` (copy)` suffix.
+*   **Recycle Bin Restore**: Preserves the original file paths by writing a `metadata.json` sidecar, allowing you to restore deleted files to their exact source.
+*   **Privileged Explorer Mode**: Complete root and **Shizuku** integration to display file sizes, timestamps, and contents count for restricted folders.
 
-### 📁 **Comprehensive File Management**
+### 🔒 **Private Wallet (Vault)**
+*   **Secure PIN Protection**: Set up a custom 4-digit PIN with a haptic-feedback keypad to lock your sensitive files.
+*   **Cryptographic Scrambling**: Encrypts and decrypts files using **SHA-256 password salting** and custom **byte XOR-scrambling**.
+*   **Seamless Temporary Viewing**: Decrypts files temporarily to the cache for inline viewer viewing and automatically scrubs them on exit.
 
-- **Complete File Operations**: Create, copy, move, rename, delete files and folders
-- **Advanced Selection**: Multi-select with intuitive gestures
-- **Smart Cut/Copy/Paste**: Clipboard operations with visual feedback
-- **Batch Operations**: Perform actions on multiple files simultaneously
-- **File Properties**: Detailed information about files and directories
-
-### 🗂️ **Advanced Features**
-
-- **Multi-Tab Interface**: Manage multiple directories simultaneously
-- **Quick Navigation**: Breadcrumb navigation and quick access shortcuts
-- **Search Functionality**: Find files and folders quickly
-- **Sorting Options**: Sort by name, size, date, type with ascending/descending order
-- **View Modes**: Grid and list view options
-
-### 📺 **Built-in Media Viewers**
-
-- **Image Viewer**: Support for JPEG, PNG, GIF, WebP, and more
-- **Video Player**: Play MP4, AVI, MKV, MOV, and other formats
-- **Audio Player**: MP3, WAV, FLAC, OGG playback support
-- **PDF Viewer**: View PDF documents natively
-- **Text Editor**: Syntax highlighting for code files
+### 🌐 **Servers & Remote Connections**
+*   **Local FTP Server**: Run a background FTP server via a persistent `FtpForegroundService` with notification-area status controls.
+*   **Web Sharing Portal**: Host an offline directory listing server, support chunked/range media streaming for browser viewing, accept remote POST file uploads, and establish secure public tunnels via SSH client port-forwarding to `localhost.run`.
+*   **Local QR Code Generation**: Swapped online sharing APIs for the **ZXing** library to render secure, local QR codes for Web Sharing URLs without transmitting data.
+*   **Remote Connection Wizard**: Configure and save connections for **FTP**, **SFTP** (via `sshj`), **WebDAV**, and simulated **SMB/LAN** servers.
+*   **Remote Explorer**: Manage remote archives directly, download, upload, create folders, and delete remote files.
 
 ### 🗜️ **Archive Management**
+*   **Quick Context Actions**: Right-click context menus enable rapid extraction of `.zip`, `.7z`, and `.rar` archives.
+*   **Configurable Compression**: Choose password protection (**AES-256**) and compression scales (Store, Fastest, Fast, Normal, Maximum, Ultra) when creating archives.
+*   **Encrypted Archive Listing**: Decoupled from the UI thread using `zip4j`, allowing users to enter passwords to list or browse encrypted entries cleanly.
+*   **Logical Nesting Fix**: Browse nested sub-archives without exposing temporary folder paths in breadcrumbs.
 
-- **Extract Archives**: Support for ZIP format
-- **Create Archives**: Compress files and folders into ZIP format
-- **Archive Preview**: Browse archive contents without extraction
+### 📺 **Premium Built-in Viewers & Editors**
+*   **Jetpack PDF Viewer**: Rewritten from legacy PDFBox loading to Jetpack's native `androidx.pdf:pdf-viewer-fragment` (reducing load times from 6.4s to under 1.5s). Features native text selection, copy-paste, find-in-document search, coordinate-aligned highlights, high-resolution rendering on zoom, page indicator bubble, and a Go-to-Page dialog.
+*   **Native Excel Spreadsheet Viewer**: Renders `.xls` and `.xlsx` sheets in a custom Compose-based scrollable grid with coordinate headers (A, B, C... / 1, 2, 3...) and cell borders. Includes filter/sorting controls and tab-based sheet navigation.
+*   **Embedded Office Layout Engine (Docreader)**: High-fidelity layout rendering of Word (`.doc`, `.docx`) and PowerPoint (`.ppt`, `.pptx`) files, powered by the core engine from [`all-documents-reader`](https://github.com/ahmadullahpk/all-documents-reader).
+*   **LaTeX Compiler & Editor**: Compile LaTeX offline using the built-in **Tectonic** compiler. Includes search/scroll navigation in the source view.
+*   **Markdown Viewer**: Render markdown syntax, block/inline equations (`flutter_math_fork`), and search highlights in raw text.
+*   **HTML Viewer**: Switch between styled WebView previews and monospace code editing with search highlights.
+*   **Enhanced Audio Player**: Scan directories, auto-queue tracks, navigate next/prev, and queue tracks interactively using a sliding bottom sheet.
+*   **Video Player Speed Control**: Toggle playback speeds directly from the video interface.
+*   **Image Merger**: Multi-select images and stitch them vertically or horizontally into a single output JPEG.
 
-### ⚡ **Performance & Efficiency**
+### 🔍 **Smart Search & AI Integrations**
+*   **Auto-Trigger Search**: Debounced search-on-type execution immediately fires when query lengths hit 2+ characters.
+*   **AI Semantic Search**: Integrates semantic matching with similarity scores (e.g. `Semantic match score: 92%`) shown in search results.
 
-- **Lightweight**: Minimal resource usage and fast startup
-- **Optimized**: Smooth performance on low-end devices
-- **Background Operations**: Non-blocking file operations
-- **Memory Efficient**: Smart memory management for large directories
-
----
-
-## 📥 Download Options
-
-| Platform            | Link                                                                                                                                                                                                                                                                                                                                                                        |
-|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **GitHub Releases** | [![GitHub](https://img.shields.io/badge/GitHub-Download-black?style=for-the-badge&logo=github)](https://github.com/Raival-e/Prism-File-Explorer/releases)                                                                                                                                                                                                                   |
-| **IzzyOnDroid**     | [![IzzyOnDroid](https://img.shields.io/badge/IzzyOnDroid-Download-green?style=for-the-badge)](https://apt.izzysoft.de/fdroid/index/apk/com.raival.compose.file.explorer)                                                                                                                                                                                                    |
-| **Obtainium**       | [![Obtainium](https://img.shields.io/badge/Obtainium-Download-blue?style=for-the-badge)](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.raival.compose.file.explorer%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FRaival-e%2FPrism-File-Explorer%22%2C%22author%22%3A%22Raival-e%22%2C%22name%22%3A%22File%20Explorer%20Compose%22%7D) |
-| **OpenApk**         | [![OpenApk](https://img.shields.io/badge/OpenApk-Download-purple?style=for-the-badge)](https://www.openapk.net/file-explorer/com.raival.compose.file.explorer/)                                                                                                                                                                                                             |
-
-### 📋 System Requirements
-
-- **Android Version**: 6.0 (API 23) or higher
-- **Permissions**: Storage access for file management
+### 📦 **System Integrations**
+*   **Split APK Installation**: Support for `.apks`, `.xapk`, and `.apkm` split bundles with session install progress indicators.
+*   **"Open With" History**: Bubbles recently used applications to the top of the dialog based on file extensions.
+*   **Open In New Button**: Launch a file directly with alternative system apps via the quick action bar.
 
 ---
 
 ## 🛠️ Built With
 
-| Technology                                                                                                               | Purpose                  | Version       |
-|--------------------------------------------------------------------------------------------------------------------------|--------------------------|---------------|
-| ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=flat&logo=kotlin&logoColor=white)                             | **Programming Language** | Latest        |
-| ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=flat&logo=jetpackcompose&logoColor=white) | **UI Framework**         | Latest Stable |
-| ![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)                          | **Platform**             | SDK 34+       |
-| ![Material Design](https://img.shields.io/badge/Material%20Design-757575?style=flat&logo=materialdesign&logoColor=white) | **Design System**        | Material 3    |
-
+| Technology | Purpose | Version |
+| :--- | :--- | :--- |
+| **Kotlin** | Programming Language | `2.2.0` |
+| **Jetpack Compose** | Modern Declarative UI Framework | `2025.07.00` |
+| **Android SDK** | Native Android Platform APIs | API `36` (Android 15+) |
+| **androidx.pdf** | Native PDFium-backed document viewer | `1.0.0-alpha19` |
+| **SSHJ** | SFTP connections and SSH port-forwarding | `0.39.0` |
+| **Zip4j** | Comprehensive ZIP archive handling & encryption | `2.11.5` |
+| **ZXing** | Offline QR Code generation | `3.5.3` |
+| **ONNX Runtime** | Offline AI semantic vector search models | `1.22.0` |
+| **Sora Editor** | Syntax-highlighted text and code editor | `0.23.6` |
 
 ---
 
 ## 🔨 Building from Source
 
 ### Prerequisites
-
-- **JDK**: 17 or higher
-- **Android SDK**: API level 34+
-- **Git**: For cloning the repository
+*   **JDK**: 17 or higher
+*   **Android SDK**: API level 36+
+*   **Git**: For cloning the repository
 
 ### Build Instructions
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/Raival-e/Prism-File-Explorer.git
-   cd Prism-File-Explorer
-   ```
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/Raival-e/Prism-File-Explorer.git
+    cd Prism-File-Explorer
+    ```
 
-2. **Build the project**:
-   ```bash
-   ./gradlew assembleRelease
-   ```
+2.  **Build the application**:
+    To compile a debugging version or run tests:
+    ```bash
+    ./gradlew assembleDebug
+    ```
+    To compile the optimized release binaries split by target CPU architecture (ARMv7, ARM64, x86, x86_64):
+    ```bash
+    ./gradlew assembleRelease
+    ```
 
-3. **Find the APK**:
-    - Generated APK will be in `app/build/outputs/apk/release/`
+3.  **Find the APKs**:
+    *   Universal and CPU-split APKs will be located in `app/build/outputs/apk/release/` or `app/build/outputs/apk/debug/`.
+
 ---
 
 ## 🤝 Contributing
@@ -153,23 +155,6 @@
 
 - Follow Kotlin coding conventions
 - Write meaningful commit messages
-
----
-
-## 📊 Project Stats
-
-![GitHub stats](https://github-readme-stats.vercel.app/api?username=Raival-e&repo=Prism-File-Explorer&show_icons=true&theme=default)
-
----
-
-## ☕ Support the Project
-
-If you find **Prism File Explorer** useful and would like to support its development, consider
-buying me a coffee! Your support helps me maintain and improve this project.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/RaivalR)
-
-*Every contribution, no matter how small, helps keep this project alive and growing! ❤️*
 
 ---
 

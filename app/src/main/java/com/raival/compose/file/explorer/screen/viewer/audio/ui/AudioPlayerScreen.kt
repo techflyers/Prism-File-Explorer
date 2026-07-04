@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.raival.compose.file.explorer.screen.viewer.audio.ui
 
@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -48,13 +49,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -90,6 +94,9 @@ import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.viewer.audio.AudioPlayerInstance
 import com.raival.compose.file.explorer.screen.viewer.audio.model.AudioMetadata
 import com.raival.compose.file.explorer.screen.viewer.audio.model.AudioPlayerColorScheme
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlin.math.abs
 
 @Composable
@@ -110,6 +117,9 @@ fun MusicPlayerScreen(
         surface = MaterialTheme.colorScheme.surface
     )
 
+    var showPlaylist by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     // Initialize player
     LaunchedEffect(audioPlayerInstance.uri) {
         audioPlayerInstance.setDefaultColorScheme(defaultScheme)
@@ -119,6 +129,27 @@ fun MusicPlayerScreen(
     // Dispose player when leaving
     DisposableEffect(Unit) {
         onDispose { audioPlayerInstance.onClose() }
+    }
+
+    // Playlist bottom sheet
+    if (showPlaylist) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlaylist = false },
+            sheetState = sheetState,
+            containerColor = customColorScheme.surface
+        ) {
+            PlaylistSheet(
+                playlist = audioPlayerInstance.playlist,
+                currentIndex = playerState.currentTrackIndex,
+                colorScheme = customColorScheme,
+                onItemClick = { index ->
+                    // Seek to the selected track
+                    audioPlayerInstance.seekToTrack(index)
+                    showPlaylist = false
+                },
+                onDismiss = { showPlaylist = false }
+            )
+        }
     }
 
     Surface(
@@ -152,6 +183,8 @@ fun MusicPlayerScreen(
                     onEqualizerClick = { audioPlayerInstance.toggleEqualizer() },
                     onVolumeClick = { audioPlayerInstance.toggleVolume() },
                     onCloseClick = onClosed,
+                    onPlaylistClick = { showPlaylist = true },
+                    hasPlaylist = audioPlayerInstance.playlist.size > 1,
                     audioPlayerColorScheme = customColorScheme
                 )
 
@@ -165,6 +198,17 @@ fun MusicPlayerScreen(
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
+
+                // Track counter (when playlist has multiple tracks)
+                if (playerState.totalTracks > 1) {
+                    Text(
+                        text = "${playerState.currentTrackIndex + 1} / ${playerState.totalTracks}",
+                        color = customColorScheme.tintColor.copy(alpha = 0.5f),
+                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
 
                 // Song info
                 SongInfo(metadata = metadata, colorScheme = customColorScheme)
@@ -185,6 +229,8 @@ fun MusicPlayerScreen(
                 MainControls(
                     isPlaying = playerState.isPlaying,
                     isLoading = playerState.isLoading,
+                    hasPrevious = playerState.currentTrackIndex > 0 || playerState.totalTracks > 1,
+                    hasNext = playerState.currentTrackIndex < playerState.totalTracks - 1 || playerState.totalTracks > 1,
                     onPlayPause = { audioPlayerInstance.playPause() },
                     onSkipNext = { audioPlayerInstance.skipNext() },
                     onSkipPrevious = { audioPlayerInstance.skipPrevious() },
@@ -237,6 +283,8 @@ fun TopControls(
     onEqualizerClick: () -> Unit,
     onVolumeClick: () -> Unit,
     onCloseClick: () -> Unit,
+    onPlaylistClick: () -> Unit = {},
+    hasPlaylist: Boolean = false,
     audioPlayerColorScheme: AudioPlayerColorScheme,
 ) {
     Row(
@@ -255,6 +303,16 @@ fun TopControls(
         Spacer(Modifier.weight(1f))
 
         Row {
+            if (hasPlaylist) {
+                IconButton(onClick = onPlaylistClick) {
+                    Icon(
+                        Icons.Default.PlaylistPlay,
+                        contentDescription = "Playlist",
+                        tint = audioPlayerColorScheme.tintColor
+                    )
+                }
+            }
+
             IconButton(onClick = onVolumeClick) {
                 Icon(
                     Icons.AutoMirrored.Filled.VolumeUp,
@@ -464,6 +522,8 @@ fun ProgressBar(
 fun MainControls(
     isPlaying: Boolean,
     isLoading: Boolean,
+    hasPrevious: Boolean = true,
+    hasNext: Boolean = true,
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
@@ -481,7 +541,7 @@ fun MainControls(
             Icon(
                 Icons.Default.SkipPrevious,
                 contentDescription = null,
-                tint = colorScheme.tintColor,
+                tint = if (hasPrevious) colorScheme.tintColor else colorScheme.tintColor.copy(alpha = 0.3f),
                 modifier = Modifier.size(32.dp)
             )
         }
@@ -525,7 +585,7 @@ fun MainControls(
             Icon(
                 Icons.Default.SkipNext,
                 contentDescription = null,
-                tint = colorScheme.tintColor,
+                tint = if (hasNext) colorScheme.tintColor else colorScheme.tintColor.copy(alpha = 0.3f),
                 modifier = Modifier.size(32.dp)
             )
         }
@@ -826,5 +886,138 @@ fun extractColorsFromBitmap(
         )
     } catch (_: Exception) {
         defaultScheme // Fallback to default colors
+    }
+}
+
+/**
+ * A bottom-sheet playlist panel that lists all songs in the queue.
+ * The currently playing track is highlighted and scrolled into view.
+ */
+@Composable
+fun PlaylistSheet(
+    playlist: List<android.net.Uri>,
+    currentIndex: Int,
+    colorScheme: AudioPlayerColorScheme,
+    onItemClick: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    // Scroll to the current track when sheet opens
+    LaunchedEffect(currentIndex) {
+        if (playlist.isNotEmpty()) {
+            listState.animateScrollToItem(currentIndex.coerceIn(0, playlist.lastIndex))
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.PlaylistPlay,
+                    contentDescription = null,
+                    tint = colorScheme.tintColor,
+                    modifier = Modifier.size(24.dp)
+                )
+                Space(8.dp)
+                Text(
+                    text = "Queue (${playlist.size})",
+                    color = colorScheme.tintColor,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = colorScheme.tintColor
+                )
+            }
+        }
+
+        HorizontalDivider(color = colorScheme.tintColor.copy(alpha = 0.1f))
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            itemsIndexed(playlist) { index, trackUri ->
+                val isCurrentTrack = index == currentIndex
+                val trackName = trackUri.lastPathSegment
+                    ?.substringAfterLast('/')
+                    ?: "Track ${index + 1}"
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onItemClick(index) }
+                        .background(
+                            if (isCurrentTrack) colorScheme.primary.copy(alpha = 0.15f)
+                            else Color.Transparent
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    // Track number or playing indicator
+                    Box(
+                        modifier = Modifier.size(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isCurrentTrack) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "${index + 1}",
+                                color = colorScheme.tintColor.copy(alpha = 0.5f),
+                                fontSize = 13.sp,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    Space(12.dp)
+
+                    Text(
+                        text = trackName,
+                        color = if (isCurrentTrack) colorScheme.primary else colorScheme.tintColor,
+                        fontSize = 14.sp,
+                        fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Normal,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (index < playlist.lastIndex) {
+                    HorizontalDivider(
+                        color = colorScheme.tintColor.copy(alpha = 0.05f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+        }
     }
 }

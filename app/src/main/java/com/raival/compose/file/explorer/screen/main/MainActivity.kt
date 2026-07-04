@@ -57,6 +57,13 @@ import com.raival.compose.file.explorer.screen.main.ui.StartupTabsSettingsScreen
 import com.raival.compose.file.explorer.screen.main.ui.TabLayout
 import com.raival.compose.file.explorer.screen.main.ui.Toolbar
 import com.raival.compose.file.explorer.theme.FileExplorerTheme
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
+import com.raival.compose.file.explorer.screen.main.ui.NFileDrawerContent
+import com.raival.compose.file.explorer.screen.main.tab.nfile_tools.*
+import com.raival.compose.file.explorer.screen.main.tab.nfile_tools.ui.*
+import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -69,6 +76,8 @@ class MainActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Initialize Shizuku access manager (registers binder listeners)
+        ShizukuManager.initialize()
         checkPermissions()
     }
 
@@ -149,23 +158,40 @@ class MainActivity : BaseActivity() {
                         globalClass.preferencesManager.startupTabs = it.toJson()
                     }
 
-                    Column(Modifier.fillMaxSize()) {
-                        if (!globalClass.preferencesManager.hideToolbar) {
-                            Toolbar(
-                                title = mainActivityState.title,
-                                subtitle = mainActivityState.subtitle,
-                                hasNewUpdate = mainActivityState.hasNewUpdate,
-                                onToggleAppInfoDialog = { mainActivityManager.toggleAppInfoDialog(it) }
+                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                    val drawerScope = rememberCoroutineScope()
+
+                    ModalNavigationDrawer(
+                        drawerState = drawerState,
+                        drawerContent = {
+                            NFileDrawerContent(
+                                drawerState = drawerState,
+                                onNavigate = {
+                                    drawerScope.launch { drawerState.close() }
+                                }
                             )
                         }
-                        TabLayout(
-                            tabLayoutState = mainActivityState.tabLayoutState,
-                            tabs = mainActivityState.tabs,
-                            selectedTabIndex = mainActivityState.selectedTabIndex,
-                            onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-                            onAddNewTab = { mainActivityManager.addTabAndSelect(HomeTab()) },
-                        )
-                        TabsPager(mainActivityState)
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            if (!globalClass.preferencesManager.hideToolbar) {
+                                Toolbar(
+                                    title = mainActivityState.title,
+                                    subtitle = mainActivityState.subtitle,
+                                    hasNewUpdate = mainActivityState.hasNewUpdate,
+                                    onToggleAppInfoDialog = {
+                                        drawerScope.launch { drawerState.open() }
+                                    }
+                                )
+                            }
+                            TabLayout(
+                                tabLayoutState = mainActivityState.tabLayoutState,
+                                tabs = mainActivityState.tabs,
+                                selectedTabIndex = mainActivityState.selectedTabIndex,
+                                onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+                                onAddNewTab = { mainActivityManager.addTabAndSelect(HomeTab()) },
+                            )
+                            TabsPager(mainActivityState)
+                        }
                     }
                 }
             }
@@ -329,6 +355,26 @@ class MainActivity : BaseActivity() {
                                 is AppsTab -> {
                                     AppsTabContentView(currentTab)
                                 }
+
+                                is VaultTab -> {
+                                    VaultTabContentView(currentTab)
+                                }
+
+                                is FtpServerTab -> {
+                                    FtpServerTabContentView(currentTab)
+                                }
+
+                                is WebSharingTab -> {
+                                    WebSharingTabContentView(currentTab)
+                                }
+
+                                is NetworkConnectionWizardTab -> {
+                                    NetworkConnectionWizardScreen(currentTab)
+                                }
+
+                                is RemoteExplorerTab -> {
+                                    RemoteExplorerScreen(currentTab)
+                                }
                             }
                         }
                     }
@@ -339,6 +385,7 @@ class MainActivity : BaseActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        ShizukuManager.cleanup()
         globalClass.cleanOnExitDir()
     }
 

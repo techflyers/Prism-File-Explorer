@@ -51,7 +51,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +77,7 @@ import com.raival.compose.file.explorer.common.toFormattedSize
 import com.raival.compose.file.explorer.common.ui.BottomSheetDialog
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
+import kotlinx.coroutines.launch
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ApkInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,7 +89,7 @@ fun ApkPreviewDialog(
 ) {
     if (show) {
         val context = LocalContext.current
-        val apkFile = tab.targetFile!!
+        val apkFile = tab.targetFile!! as LocalFileHolder
         val packageManager = globalClass.packageManager
 
         var apkInfo by remember { mutableStateOf<ApkInfo?>(null) }
@@ -96,14 +99,57 @@ fun ApkPreviewDialog(
 
         LaunchedEffect(Unit) {
             try {
+                var parsePath = apkFile.uniquePath
+                var tempApkFile: java.io.File? = null
+
+                if (apkFile.isApkBundle()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        java.util.zip.ZipInputStream(java.io.FileInputStream(apkFile.file)).use { zis ->
+                            var entry = zis.nextEntry
+                            var baseEntryName = ""
+                            var maxApkSize = 0L
+
+                            while (entry != null) {
+                                if (entry.name.endsWith(".apk", ignoreCase = true)) {
+                                    if (entry.name == "base.apk" || entry.size > maxApkSize) {
+                                        maxApkSize = entry.size
+                                        baseEntryName = entry.name
+                                    }
+                                }
+                                zis.closeEntry()
+                                entry = zis.nextEntry
+                            }
+
+                            if (baseEntryName.isNotEmpty()) {
+                                java.util.zip.ZipInputStream(java.io.FileInputStream(apkFile.file)).use { zis2 ->
+                                    var entry2 = zis2.nextEntry
+                                    while (entry2 != null) {
+                                        if (entry2.name == baseEntryName) {
+                                            val temp = java.io.File(context.cacheDir, "temp_base_${System.currentTimeMillis()}.apk")
+                                            temp.outputStream().use { fos ->
+                                                zis2.copyTo(fos)
+                                            }
+                                            tempApkFile = temp
+                                            parsePath = temp.absolutePath
+                                            break
+                                        }
+                                        zis2.closeEntry()
+                                        entry2 = zis2.nextEntry
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 val archiveInfo = packageManager.getPackageArchiveInfo(
-                    apkFile.uniquePath,
+                    parsePath,
                     PackageManager.GET_PERMISSIONS
                 )
 
                 if (archiveInfo != null) {
-                    archiveInfo.applicationInfo?.sourceDir = apkFile.uniquePath
-                    archiveInfo.applicationInfo?.publicSourceDir = apkFile.uniquePath
+                    archiveInfo.applicationInfo?.sourceDir = parsePath
+                    archiveInfo.applicationInfo?.publicSourceDir = parsePath
 
                     val icon = archiveInfo.applicationInfo?.loadIcon(packageManager)
                     val appName = archiveInfo.applicationInfo?.loadLabel(packageManager).toString()
@@ -148,6 +194,9 @@ fun ApkPreviewDialog(
                         lastUpdateTime = lastUpdateTime
                     )
                 }
+
+                tempApkFile?.delete()
+
             } catch (e: Exception) {
                 logger.logError(e)
             } finally {
@@ -192,12 +241,7 @@ fun ApkPreviewDialog(
                         Space(12.dp)
                         OutlinedButton(
                             onClick = {
-                                apkFile.open(
-                                    context = context,
-                                    anonymous = false,
-                                    skipSupportedExtensions = false,
-                                    customMimeType = "application/zip"
-                                )
+                                globalClass.zipManager.openArchive(apkFile)
                                 onDismissRequest()
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -302,12 +346,7 @@ fun ApkPreviewDialog(
                         ) {
                             OutlinedButton(
                                 onClick = {
-                                    apkFile.open(
-                                        context = context,
-                                        anonymous = false,
-                                        skipSupportedExtensions = false,
-                                        customMimeType = "application/zip"
-                                    )
+                                    globalClass.zipManager.openArchive(apkFile)
                                     onDismissRequest()
                                 },
                                 modifier = Modifier.weight(1f)
@@ -321,16 +360,24 @@ fun ApkPreviewDialog(
                                 Text(stringResource(R.string.explore))
                             }
 
+                            val scope = rememberCoroutineScope()
                             Button(
                                 onClick = {
-                                    apkFile.open(
-                                        context,
-                                        anonymous = false,
-                                        skipSupportedExtensions = true,
-                                        customMimeType = "application/vnd.android.package-archive"
-                                    )
-                                    onDismissRequest()
+                                    if (apkFile.isApkBundle()) {
+                                        scope.launch {
+                                            com.raival.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.install(context, apkFile.file.absolutePath)
+                                        }
+                                    } else {
+                                        apkFile.open(
+                                            context,
+                                            anonymous = false,
+                                            skipSupportedExtensions = true,
+                                            customMimeType = "application/vnd.android.package-archive"
+                                        )
+                                        onDismissRequest()
+                                    }
                                 },
+                                enabled = !com.raival.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.isInstalling,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
@@ -344,6 +391,32 @@ fun ApkPreviewDialog(
                                         R.string.install
                                     )
                                 )
+                            }
+                        }
+
+                        if (com.raival.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.isInstalling) {
+                            Space(size = 16.dp)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = com.raival.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.installStatus,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Space(8.dp)
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        progress = { com.raival.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.installProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
 

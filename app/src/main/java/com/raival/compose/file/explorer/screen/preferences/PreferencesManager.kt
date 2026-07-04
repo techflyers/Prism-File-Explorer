@@ -15,6 +15,8 @@ import com.raival.compose.file.explorer.common.toJson
 import com.raival.compose.file.explorer.screen.main.startup.StartupTabs
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.DefaultOpeningMethods
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithApps
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithEntry
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
@@ -56,6 +58,12 @@ class PreferencesManager {
 
     var hideToolbar by prefMutableState(
         keyName = "hideToolbar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var use12HourFormat by prefMutableState(
+        keyName = "use12HourFormat",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -178,6 +186,42 @@ class PreferencesManager {
         getPreferencesKey = { stringPreferencesKey(it) }
     )
 
+    var recentOpenWithApps by prefMutableState(
+        keyName = "recentOpenWithApps",
+        defaultValue = RecentOpenWithApps().toJson(),
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    /**
+     * Records [packageName]/[className] as the most-recently-used app for [extension].
+     * Keeps at most 20 entries per extension (oldest are dropped); duplicates are removed
+     * before the new entry is prepended so the new timestamp always wins.
+     */
+    fun recordOpenWith(extension: String, packageName: String, className: String) {
+        val current: RecentOpenWithApps =
+            fromJson(recentOpenWithApps) ?: RecentOpenWithApps()
+        val newEntry = RecentOpenWithEntry(
+            extension = extension.lowercase(),
+            packageName = packageName,
+            className = className,
+            timestamp = System.currentTimeMillis()
+        )
+        // Remove any existing entry for the same extension + app, then prepend the fresh one
+        val filtered = current.history.filter { entry ->
+            !(entry.extension == newEntry.extension &&
+                    entry.packageName == newEntry.packageName &&
+                    entry.className == newEntry.className)
+        }
+        // Keep at most 20 entries per extension
+        val perExtension = filtered
+            .filter { it.extension == newEntry.extension }
+            .take(19) // leave room for the new entry
+        val others = filtered.filter { it.extension != newEntry.extension }
+        recentOpenWithApps = RecentOpenWithApps(
+            history = listOf(newEntry) + perExtension + others
+        ).toJson()
+    }
+
     //---------- Text Editor -------------//
     var pinLineNumber by prefMutableState(
         keyName = "pinLineNumber",
@@ -239,6 +283,24 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    //---------- Convertio & AI -------------//
+    var convertioApiKey by prefMutableState(
+        keyName = "convertioApiKey",
+        defaultValue = emptyString,
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var aiModelVariant by prefMutableState(
+        keyName = "aiModelVariant",
+        defaultValue = "none", // "none", "quantized", "full"
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var aiModelDownloaded by prefMutableState(
+        keyName = "aiModelDownloaded",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
 
     // //---------- File Sorting -------------//
     var defaultSortMethod by prefMutableState(

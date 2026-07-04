@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
@@ -8,6 +10,7 @@ plugins {
 android {
     namespace = "com.raival.compose.file.explorer"
     compileSdk = 36
+    compileSdkExtension = 19
 
     defaultConfig {
         applicationId = "com.raival.compose.file.explorer"
@@ -22,15 +25,44 @@ android {
         includeInBundle = false
     }
 
+    buildFeatures {
+        viewBinding = true
+    }
+
+    signingConfigs {
+        create("release") {
+            val localProperties = Properties()
+            val localPropertiesFile = rootProject.file("local.properties")
+            if (localPropertiesFile.exists()) {
+                localPropertiesFile.inputStream().use { localProperties.load(it) }
+            }
+            val storeFilePath = localProperties.getProperty("signing.storeFilePath")
+            if (!storeFilePath.isNullOrEmpty()) {
+                storeFile = file(storeFilePath)
+                storePassword = localProperties.getProperty("signing.storePassword")
+                keyAlias = localProperties.getProperty("signing.keyAlias")
+                keyPassword = localProperties.getProperty("signing.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
     }
+
+    packaging {
+        resources {
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
 
@@ -45,6 +77,19 @@ android {
 
     baselineProfile {
         dexLayoutOptimization = true
+    }
+
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
     }
 }
 
@@ -106,4 +151,46 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.storage)
     implementation(libs.zip4j)
+
+    // Markdown Rendering
+    implementation(libs.markwon.core)
+    implementation(libs.markwon.tables)
+    implementation(libs.markwon.latex)
+    implementation(libs.markwon.strikethrough)
+    implementation(libs.markwon.tasklist)
+
+    // Networking (Convertio API)
+    implementation(libs.okhttp)
+
+    // ONNX Runtime (FileAI Semantic Search)
+    implementation(libs.onnxruntime.android)
+
+    // PDF Text Extraction & Decryption (kept for password handling + reflow)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // Jetpack PDF viewer — native text selection + native Find-in-document
+    implementation("androidx.pdf:pdf-viewer-fragment:1.0.0-alpha19")
+    implementation("androidx.fragment:fragment-compose:1.8.5")
+
+    // Dependencies for the integrated docreader engine
+    implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
+    implementation("com.intuit.sdp:sdp-android:1.0.6")
+    implementation("org.apache.commons:commons-compress:1.20")
+    implementation("androidx.preference:preference:1.2.1")
+    implementation(libs.sshj)
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
+
+    // QR Code Generation (offline)
+    implementation("com.google.zxing:core:3.5.3")
+
+    // Shizuku (privileged file access)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+}
+
+configurations.all {
+    exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
+    exclude(group = "org.bouncycastle", module = "bcpkix-jdk15to18")
+    exclude(group = "org.bouncycastle", module = "bcutil-jdk15to18")
 }

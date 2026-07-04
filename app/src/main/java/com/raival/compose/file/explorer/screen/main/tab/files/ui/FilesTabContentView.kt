@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.ArchivePasswordDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.ApkPreviewDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.BookmarksDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.CreateNewFileDialog
@@ -128,6 +129,12 @@ fun Dialogs(tab: FilesTab) {
         show = dialogsState.value.showImportPrefsDialog,
         tab = tab,
         onDismissRequest = { tab.toggleImportPrefsDialog(null) }
+    )
+
+    ArchivePasswordDialog(
+        show = dialogsState.value.showArchivePasswordDialog,
+        tab = tab,
+        onDismissRequest = { tab.toggleArchivePasswordDialog(null) }
     )
 
     TaskRunningDialog()

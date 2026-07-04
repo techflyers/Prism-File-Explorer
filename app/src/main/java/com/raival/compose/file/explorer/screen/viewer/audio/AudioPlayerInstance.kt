@@ -32,7 +32,8 @@ import kotlinx.coroutines.withContext
 
 class AudioPlayerInstance(
     override val uri: Uri,
-    override val id: String
+    override val id: String,
+    val playlist: List<Uri> = listOf()
 ) : ViewerInstance {
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
@@ -56,12 +57,19 @@ class AudioPlayerInstance(
     suspend fun initializePlayer(context: Context, uri: Uri) {
         withContext(Dispatchers.Main) {
             exoPlayer = ExoPlayer.Builder(context).build().apply {
-                val mediaItem = MediaItem.Builder()
-                    .setUri(uri)
-                    .build()
+                // Add all playlist items (or just the single uri)
+                val uris = playlist.ifEmpty { listOf(uri) }
+                val mediaItems = uris.map { itemUri ->
+                    MediaItem.Builder().setUri(itemUri).build()
+                }
+                setMediaItems(mediaItems)
 
-                setMediaItem(mediaItem)
+                // Start from the item matching the originally-opened URI
+                val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
+                seekTo(startIndex, 0)
+
                 prepare()
+                playWhenReady = true
 
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -85,8 +93,30 @@ class AudioPlayerInstance(
                             }
                         }
                     }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        // Re-extract metadata for the new track
+                        val currentUri = mediaItem?.localConfiguration?.uri ?: return
+                        _playerState.update {
+                            it.copy(
+                                currentTrackIndex = currentMediaItemIndex,
+                                totalTracks = mediaItemCount
+                            )
+                        }
+                        CoroutineScope(Dispatchers.IO).launch {
+                            extractMetadata(context, currentUri)
+                        }
+                    }
                 })
             }
+        }
+
+        // Update track count
+        _playerState.update {
+            it.copy(
+                totalTracks = exoPlayer?.mediaItemCount ?: 1,
+                currentTrackIndex = exoPlayer?.currentMediaItemIndex ?: 0
+            )
         }
 
         extractMetadata(context, uri)
@@ -179,10 +209,22 @@ class AudioPlayerInstance(
 
     fun skipNext() {
         exoPlayer?.seekToNext()
+        exoPlayer?.play()
     }
 
     fun skipPrevious() {
         exoPlayer?.seekToPrevious()
+        exoPlayer?.play()
+    }
+
+    /**
+     * Jump directly to a specific track index in the playlist.
+     */
+    fun seekToTrack(index: Int) {
+        exoPlayer?.let { player ->
+            player.seekTo(index, 0)
+            player.play()
+        }
     }
 
     fun setPlaybackSpeed(speed: Float) {

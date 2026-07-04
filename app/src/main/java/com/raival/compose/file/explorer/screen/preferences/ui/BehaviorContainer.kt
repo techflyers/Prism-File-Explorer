@@ -8,6 +8,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -102,5 +103,29 @@ fun BehaviorContainer() {
             switchState = prefs.useBuiltInViewer,
             onSwitchChange = { prefs.useBuiltInViewer = it }
         )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        val showApiKeyDialogState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+        PreferenceItem(
+            label = "Convertio API Key",
+            supportingText = if (prefs.convertioApiKey.isBlank()) "No key set (used for PDF conversion)" else "Key: " + "•".repeat(prefs.convertioApiKey.length.coerceAtMost(8)),
+            icon = Icons.Rounded.VpnKey,
+            onClick = { showApiKeyDialogState.value = true }
+        )
+
+        if (showApiKeyDialogState.value) {
+            com.raival.compose.file.explorer.common.ConvertioApiKeyDialog(
+                onDismiss = { showApiKeyDialogState.value = false },
+                onConfirm = { key ->
+                    prefs.convertioApiKey = key
+                    showApiKeyDialogState.value = false
+                }
+            )
+        }
     }
 }
