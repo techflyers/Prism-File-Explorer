@@ -11,10 +11,10 @@
 
 [![Platform](https://img.shields.io/badge/Platform-Android-brightgreen.svg?logo=android)](https://www.android.com/)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Release](https://img.shields.io/github/v/release/Raival-e/Prism-File-Explorer?label=Release)](https://github.com/Raival-e/Prism-File-Explorer/releases)
-[![APK Downloads](https://img.shields.io/github/downloads/Raival-e/Prism-File-Explorer/total.svg?label=APK%20Downloads)](https://github.com/Raival-e/Prism-File-Explorer/releases)
-[![Stars](https://img.shields.io/github/stars/Raival-e/Prism-File-Explorer?style=flat&logo=github)](https://github.com/Raival-e/Prism-File-Explorer/stargazers)
-[![Forks](https://img.shields.io/github/forks/Raival-e/Prism-File-Explorer?style=flat&logo=github)](https://github.com/Raival-e/Prism-File-Explorer/network/members)
+[![Release](https://img.shields.io/github/v/release/techflyers/Prism-File-Explorer?label=Release)](https://github.com/techflyers/Prism-File-Explorer/releases)
+[![APK Downloads](https://img.shields.io/github/downloads/techflyers/Prism-File-Explorer/total.svg?label=APK%20Downloads)](https://github.com/techflyers/Prism-File-Explorer/releases)
+[![Stars](https://img.shields.io/github/stars/techflyers/Prism-File-Explorer?style=flat&logo=github)](https://github.com/techflyers/Prism-File-Explorer/stargazers)
+[![Forks](https://img.shields.io/github/forks/techflyers/Prism-File-Explorer?style=flat&logo=github)](https://github.com/techflyers/Prism-File-Explorer/network/members)
 [<img src="https://shields.rbtlog.dev/simple/com.raival.compose.file.explorer" alt="RB shield">](https://shields.rbtlog.dev/com.raival.compose.file.explorer)
 
 **A modern, feature-rich, and lightweight file manager for Android, built entirely with Kotlin and Jetpack Compose.**
@@ -124,7 +124,7 @@
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/Raival-e/Prism-File-Explorer.git
+    git clone https://github.com/techflyers/Prism-File-Explorer.git
     cd Prism-File-Explorer
     ```
 
@@ -184,6 +184,6 @@ See the [LICENSE](LICENSE) file for the full license text.
 | **GitHub Discussions** | Community support, questions  |
 | **Email**              | Private inquiries             |
 
-**⭐ If you find this project useful, please consider giving it a star!**
+**⭐ If you find this project useful, please consider giving it a star !**
 
-[![Star History](https://img.shields.io/github/stars/Raival-e/Prism-File-Explorer?style=social)](https://github.com/Raival-e/Prism-File-Explorer/stargazers)
+[![Star History](https://img.shields.io/github/stars/techflyers/Prism-File-Explorer?style=social)](https://github.com/techflyers/Prism-File-Explorer/stargazers)
