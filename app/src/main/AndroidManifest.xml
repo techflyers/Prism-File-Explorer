@@ -117,6 +117,15 @@
         </activity>
 
         <activity
+            android:name=".screen.viewer.image.ImageEditorActivity"
+            android:exported="true"
+            android:label="Image Editor"
+            android:theme="@style/Theme.FileExplorer"
+            android:windowSoftInputMode="adjustResize"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true" />
+
+        <activity
             android:name=".screen.viewer.audio.AudioPlayerActivity"
             android:exported="true"
             android:label="@string/title_activity_audio_player"
@@ -141,7 +150,9 @@
             android:theme="@style/Theme.FileExplorer"
             android:windowSoftInputMode="adjustResize"
             android:documentLaunchMode="intoExisting"
-            android:autoRemoveFromRecents="true">
+            android:autoRemoveFromRecents="true"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 

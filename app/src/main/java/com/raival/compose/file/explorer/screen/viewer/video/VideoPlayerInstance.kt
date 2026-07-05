@@ -25,7 +25,8 @@ import kotlinx.coroutines.withContext
 
 class VideoPlayerInstance(
     override val uri: Uri,
-    override val id: String
+    override val id: String,
+    val playlist: List<Uri> = listOf()
 ) : ViewerInstance {
     private val _playerState = MutableStateFlow(VideoPlayerState())
     val playerState: StateFlow<VideoPlayerState> = _playerState.asStateFlow()
@@ -36,24 +37,30 @@ class VideoPlayerInstance(
         _playerState.update {
             it.copy(
                 isLoading = true,
-                isReady = false
+                isReady = false,
+                playlist = playlist
             )
         }
 
         withContext(Dispatchers.Main) {
             exoPlayer = ExoPlayer.Builder(context).build().apply {
-                val mediaItem = MediaItem.Builder()
-                    .setUri(uri)
-                    .build()
+                val uris = playlist.ifEmpty { listOf(uri) }
+                val mediaItems = uris.map { itemUri ->
+                    MediaItem.Builder().setUri(itemUri).build()
+                }
+                setMediaItems(mediaItems)
 
-                setMediaItem(mediaItem)
+                val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
+                seekTo(startIndex, 0)
                 prepare()
 
-                volume = 0f
+                volume = 1.0f
 
                 _playerState.update { currentState ->
                     currentState.copy(
-                    title = uri.name ?: globalClass.getString(R.string.unknown)
+                        title = uri.name ?: globalClass.getString(R.string.unknown),
+                        currentPlaylistIndex = startIndex,
+                        isMuted = false
                     )
                 }
 
@@ -65,7 +72,7 @@ class VideoPlayerInstance(
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         _playerState.update { currentState ->
                             currentState.copy(
-                            isLoading = playbackState == Player.STATE_BUFFERING
+                                isLoading = playbackState == Player.STATE_BUFFERING
                             )
                         }
 
@@ -77,6 +84,18 @@ class VideoPlayerInstance(
                                     isReady = true
                                 )
                             }
+                        }
+                    }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        val player = exoPlayer ?: return
+                        val currentIndex = player.currentMediaItemIndex
+                        val currentUri = mediaItem?.localConfiguration?.uri ?: uris.getOrNull(currentIndex) ?: uri
+                        _playerState.update { currentState ->
+                            currentState.copy(
+                                currentPlaylistIndex = currentIndex,
+                                title = currentUri.name ?: globalClass.getString(R.string.unknown)
+                            )
                         }
                     }
                 })
@@ -92,7 +111,7 @@ class VideoPlayerInstance(
                 exoPlayer?.let { player ->
                     _playerState.update { currentState ->
                         currentState.copy(
-                        currentPosition = player.currentPosition,
+                            currentPosition = player.currentPosition,
                             duration = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
                         )
                     }
@@ -130,9 +149,23 @@ class VideoPlayerInstance(
         }
     }
 
+    fun setVolume(volume: Float) {
+        exoPlayer?.let { player ->
+            val clamped = volume.coerceIn(0f, 1f)
+            player.volume = clamped
+            _playerState.update { it.copy(isMuted = clamped == 0f) }
+        }
+    }
+
     fun toggleControls() {
         _playerState.update { currentState ->
             currentState.copy(showControls = !currentState.showControls)
+        }
+    }
+
+    fun setControlsVisible(visible: Boolean) {
+        _playerState.update { currentState ->
+            currentState.copy(showControls = visible)
         }
     }
 
@@ -143,6 +176,37 @@ class VideoPlayerInstance(
         }
         exoPlayer?.repeatMode = newMode
         _playerState.update { it.copy(repeatMode = newMode) }
+    }
+
+    fun playPlaylistItem(index: Int) {
+        exoPlayer?.let { player ->
+            if (index in 0 until player.mediaItemCount) {
+                player.seekTo(index, 0)
+                player.play()
+            }
+        }
+    }
+
+    fun playNext() {
+        exoPlayer?.let { player ->
+            if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+                player.play()
+            }
+        }
+    }
+
+    fun playPrevious() {
+        exoPlayer?.let { player ->
+            if (player.hasPreviousMediaItem()) {
+                player.seekToPreviousMediaItem()
+                player.play()
+            }
+        }
+    }
+
+    fun setPiPMode(isInPiP: Boolean) {
+        _playerState.update { it.copy(isInPictureInPicture = isInPiP) }
     }
 
     fun getPlayer() = exoPlayer

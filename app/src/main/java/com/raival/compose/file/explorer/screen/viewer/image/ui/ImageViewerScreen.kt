@@ -88,6 +88,7 @@ import com.raival.compose.file.explorer.common.read
 import com.raival.compose.file.explorer.common.showMsg
 import com.raival.compose.file.explorer.screen.viewer.ViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.ViewerInstance
+import com.raival.compose.file.explorer.screen.viewer.image.ImageEditorActivity
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo.Companion.extractImageInfo
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
@@ -333,20 +334,12 @@ fun ImageViewerScreen(instance: ViewerInstance) {
                             rotationAngle = (rotationAngle + 90f) % 360f
                         },
                         onEdit = {
-                            val editIntent = Intent(Intent.ACTION_EDIT)
-                            val mimeType =
-                                context.contentResolver.getType(instance.uri) ?: "image/*"
-                            editIntent.setDataAndType(instance.uri, mimeType)
-                            editIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                            val chooser = Intent.createChooser(
-                                editIntent,
-                                globalClass.getString(R.string.edit_with)
-                            )
-                            if (editIntent.resolveActivity(context.packageManager) != null) {
-                                context.startActivity(chooser)
-                            } else {
-                                showMsg(context.getString(R.string.no_app_found_to_edit_this_image))
+                            val editIntent = Intent(context, ImageEditorActivity::class.java).apply {
+                                data = instance.uri
+                                putExtra("extra_file_path", imageInfo?.path)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             }
+                            context.startActivity(editIntent)
                         },
                         onContentScale = {
                             contentScale = it
