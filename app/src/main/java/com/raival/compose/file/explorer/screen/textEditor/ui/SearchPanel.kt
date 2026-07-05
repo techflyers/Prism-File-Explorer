@@ -13,7 +13,11 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.R
@@ -32,6 +36,19 @@ fun SearchPanel(
     fun hasQuery() =
         searcher.query.isNotEmpty() && codeEditorSearcher().matchedPositionCount > 0
 
+    /** Safely run a search, silently ignoring invalid regex patterns. */
+    fun safeSearch(query: String, options: EditorSearcher.SearchOptions) {
+        try {
+            codeEditor.searcher.search(query, options)
+        } catch (_: Exception) {
+            // Ignore PatternSyntaxException (and any other error) caused by
+            // an incomplete / invalid regex so the app doesn't crash.
+        }
+    }
+
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -39,16 +56,22 @@ fun SearchPanel(
             .padding(8.dp)
     ) {
         LaunchedEffect(Unit) {
+            // Restore a previous search on re-open.
             if (searcher.query.isNotEmpty()) {
-                codeEditor.searcher.search(
+                safeSearch(
                     searcher.query,
                     EditorSearcher.SearchOptions(!searcher.caseSensitive, searcher.useRegex)
                 )
             }
+            // Pull up the keyboard automatically.
+            focusRequester.requestFocus()
+            keyboardController?.show()
         }
 
         TextField(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
             value = searcher.query,
             onValueChange = {
                 searcher.query = it
@@ -56,7 +79,7 @@ fun SearchPanel(
                     codeEditor.searcher.stopSearch()
                     codeEditor.invalidate()
                 } else {
-                    codeEditor.searcher.search(
+                    safeSearch(
                         it,
                         EditorSearcher.SearchOptions(!searcher.caseSensitive, searcher.useRegex)
                     )
@@ -91,7 +114,7 @@ fun SearchPanel(
                         codeEditor.searcher.stopSearch()
                         codeEditor.invalidate()
                     } else {
-                        codeEditor.searcher.search(
+                        safeSearch(
                             searcher.query,
                             EditorSearcher.SearchOptions(
                                 !searcher.caseSensitive,
@@ -115,7 +138,7 @@ fun SearchPanel(
                         codeEditor.searcher.stopSearch()
                         codeEditor.invalidate()
                     } else {
-                        codeEditor.searcher.search(
+                        safeSearch(
                             searcher.query,
                             EditorSearcher.SearchOptions(
                                 !searcher.caseSensitive,

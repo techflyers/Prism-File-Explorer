@@ -64,6 +64,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -220,6 +223,14 @@ private fun SearchHeader(
     onAdvancedToggle: () -> Unit,
     onAiToggle: () -> Unit
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
     Column {
         Row(
             modifier = Modifier
@@ -234,7 +245,8 @@ private fun SearchHeader(
         ) {
             TextField(
                 modifier = Modifier
-                    .weight(1f),
+                    .weight(1f)
+                    .focusRequester(focusRequester),
                 value = searchManager.searchQuery,
                 onValueChange = { searchManager.searchQuery = it },
                 colors = TextFieldDefaults.colors(
