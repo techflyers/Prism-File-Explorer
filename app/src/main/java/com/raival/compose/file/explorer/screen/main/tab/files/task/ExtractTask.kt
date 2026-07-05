@@ -8,7 +8,6 @@ import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
-import net.lingala.zip4j.ZipFile
 import java.io.File
 
 class ExtractTask(
@@ -92,37 +91,29 @@ class ExtractTask(
                     val destDir = File(archiveFile.parentFile, destDirName)
                     destDir.mkdirs()
 
+                    // All formats are routed through lib7za native binary.
+                    // Under Scoped Storage we copy the source first to the sandbox cache so
+                    // lib7za can read it via a plain filesystem path.
                     val ext = archiveFile.extension.lowercase()
-                    if (ArchiveManager.isNativeArchive(ext)) {
-                        // Native extraction via 7za. Under Scoped Storage, we copy the source first to the sandbox cache.
-                        val tempArchive = File(globalClass.cacheDir, "temp_extract_${System.currentTimeMillis()}.$ext")
-                        try {
-                            archiveFile.inputStream().use { input ->
-                                tempArchive.outputStream().use { output ->
-                                    input.copyTo(output)
-                                }
+                    val tempArchive = File(
+                        globalClass.cacheDir,
+                        "temp_extract_${System.currentTimeMillis()}.$ext"
+                    )
+                    try {
+                        archiveFile.inputStream().use { input ->
+                            tempArchive.outputStream().use { output ->
+                                input.copyTo(output)
                             }
-                            val pwd = parameters?.password
-                            android.util.Log.d("ExtractTask", "Native extract: ${archiveFile.name}, password=${if (pwd != null) "***" else "none"}")
-                            ArchiveManager.extractAll(tempArchive.absolutePath, destDir.absolutePath, pwd)
-                        } finally {
-                            tempArchive.delete()
                         }
-                    } else {
-                        // Zip extraction via zip4j (ZipCrypto / AES)
-                        android.util.Log.d("ExtractTask", "Zip4j extract: ${archiveFile.name}")
-                        ZipFile(archiveFile).use { zip ->
-                            if (zip.isEncrypted) {
-                                val password = parameters?.password
-                                android.util.Log.d("ExtractTask", "Archive is encrypted, password provided: ${!password.isNullOrEmpty()}")
-                                if (!password.isNullOrEmpty()) {
-                                    zip.setPassword(password.toCharArray())
-                                } else {
-                                    android.util.Log.w("ExtractTask", "Archive is encrypted but no password was provided!")
-                                }
-                            }
-                            zip.extractAll(destDir.absolutePath)
-                        }
+                        val pwd = parameters?.password
+                        android.util.Log.d(
+                            "ExtractTask",
+                            "Native extract (lib7za): ${archiveFile.name}, " +
+                                "password=${if (pwd != null) "***" else "none"}"
+                        )
+                        ArchiveManager.extractAll(tempArchive.absolutePath, destDir.absolutePath, pwd)
+                    } finally {
+                        tempArchive.delete()
                     }
                 }
             }
@@ -145,6 +136,7 @@ class ExtractTask(
     override fun setParameters(params: TaskParameters) {
         parameters = params as ExtractTaskParameters
     }
+
     override suspend fun continueTask() {
         if (parameters == null) {
             parameters = ExtractTaskParameters()

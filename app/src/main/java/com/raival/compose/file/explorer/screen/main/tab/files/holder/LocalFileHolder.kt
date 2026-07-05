@@ -361,7 +361,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
         }
 
-        if (FileMimeType.supportedArchiveFileType.contains(extension)) {
+        if (FileMimeType.supportedArchiveFileType.contains(extension) || isTarCompressed()) {
             if (isApk() && skipSupportedExtensions) return false
             if (isApkBundle()) {
                 // Skip opening as zip
@@ -483,8 +483,13 @@ class LocalFileHolder(file: File) : ContentHolder() {
                         openFileWithPackage(context, context.packageName, PdfViewerActivity::class.java.name)
                         return true
                     }
+                    // Route any detected archive MIME type to the archive browser
                     detected.mimeType.contains("zip") || detected.mimeType.contains("archive") ||
-                    detected.mimeType.contains("7z") || detected.mimeType.contains("rar") -> {
+                    detected.mimeType.contains("7z") || detected.mimeType.contains("rar") ||
+                    detected.mimeType.contains("tar") || detected.mimeType.contains("gzip") ||
+                    detected.mimeType.contains("bzip") || detected.mimeType.contains("xz") ||
+                    detected.mimeType.contains("wim") || detected.mimeType.contains("iso") ||
+                    detected.mimeType.contains("compressed") -> {
                         globalClass.zipManager.openArchive(this)
                         return true
                     }
@@ -493,6 +498,16 @@ class LocalFileHolder(file: File) : ContentHolder() {
         }
 
         return false
+    }
+
+    /**
+     * Returns true if this file is a TAR wrapped in a compression format (.tar.gz, .tar.bz2, .tar.xz).
+     * These are detected by checking the second-to-last extension.
+     */
+    fun isTarCompressed(): Boolean {
+        val name = file.name
+        return name.endsWith(".tar.gz") || name.endsWith(".tar.bz2") ||
+               name.endsWith(".tar.xz") || name.endsWith(".tar.zst")
     }
 
     /**
@@ -511,7 +526,8 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 FileMimeType.officeFileType.contains(extension) ||
                 FileMimeType.htmlFileType.contains(extension) ||
                 extension == "pdf" || extension == "apk" ||
-                extension == "md" || extension == "markdown"
+                extension == "md" || extension == "markdown" ||
+                isTarCompressed()
     }
 
     private fun createUri() = FileProvider.getUriForFile(

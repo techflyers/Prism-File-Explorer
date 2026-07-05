@@ -1,10 +1,12 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +53,49 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHo
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTaskParameters
 import java.io.File
 
+/**
+ * Describes an output compression format shown in the format picker.
+ *
+ * @param label         Human-readable chip label shown in the UI.
+ * @param extension     The file extension appended to the archive name (e.g. "7z", "tar.gz").
+ * @param supportsPassword  Whether the format supports password protection.
+ * @param supportsLevel     Whether a compression-level slider is meaningful.
+ */
+private data class CompressFormat(
+    val label: String,
+    val extension: String,
+    val supportsPassword: Boolean = false,
+    val supportsLevel: Boolean = true
+)
+
+private val COMPRESS_FORMATS = listOf(
+    CompressFormat("ZIP",    "zip",    supportsPassword = true),
+    CompressFormat("7Z",     "7z",     supportsPassword = true),
+    CompressFormat("TAR",    "tar",    supportsLevel = false),
+    CompressFormat("TAR.GZ", "tar.gz", supportsLevel = true),
+    CompressFormat("TAR.BZ2","tar.bz2",supportsLevel = true),
+    CompressFormat("TAR.XZ", "tar.xz", supportsLevel = true),
+    CompressFormat("WIM",    "wim",    supportsLevel = false)
+)
+
+/** Strip any known compression extension suffix from [baseName] and append [newExtension]. */
+private fun rebuildFileName(baseName: String, newExtension: String): String {
+    // Remove known multi-part extensions first (tar.gz etc.)
+    val multiPart = listOf("tar.gz", "tar.bz2", "tar.xz", "tar.zst")
+    var stripped = baseName
+    for (mp in multiPart) {
+        if (baseName.endsWith(".$mp", ignoreCase = true)) {
+            stripped = baseName.dropLast(mp.length + 1)
+            break
+        }
+    }
+    // If no multi-part match, strip the last single extension
+    if (stripped == baseName && baseName.contains('.')) {
+        stripped = baseName.substringBeforeLast('.')
+    }
+    return "$stripped.$newExtension"
+}
+
 @Composable
 fun FileCompressionDialog(
     show: Boolean,
@@ -61,15 +107,32 @@ fun FileCompressionDialog(
             mutableStateOf(tab.activeFolderContent.map { it.displayName }.toTypedArray())
         }
 
-        var newNameInput by remember { mutableStateOf("${tab.activeFolder.displayName}.zip") }
+        var selectedFormatIndex by remember { mutableStateOf(0) }
+        val selectedFormat = COMPRESS_FORMATS[selectedFormatIndex]
+
+        // Derive the initial base name from the active folder
+        val baseFolderName = tab.activeFolder.displayName
+
+        // File name — automatically updated when the format changes
+        var newNameInput by remember {
+            mutableStateOf("$baseFolderName.${COMPRESS_FORMATS[0].extension}")
+        }
+
         var passwordInput by remember { mutableStateOf("") }
         var passwordVisible by remember { mutableStateOf(false) }
-        var compressionLevel by remember { mutableFloatStateOf(5f) } // 0, 1, 3, 5, 7, 9 - map to nearest slider index
+        var compressionLevel by remember { mutableFloatStateOf(5f) }
         var error by remember { mutableStateOf("") }
 
         val levelSteps = listOf(0f, 1f, 3f, 5f, 7f, 9f)
         val levelNames = listOf("Store", "Fastest", "Fast", "Normal", "Maximum", "Ultra")
 
+        // When format changes → rebuild the file name and reset password if not supported
+        LaunchedEffect(selectedFormatIndex) {
+            newNameInput = rebuildFileName(newNameInput, selectedFormat.extension)
+            if (!selectedFormat.supportsPassword) passwordInput = ""
+        }
+
+        // Validate file name on each keystroke
         LaunchedEffect(newNameInput) {
             error = if (newNameInput.isBlank()) {
                 emptyString
@@ -82,9 +145,7 @@ fun FileCompressionDialog(
             }
         }
 
-        Dialog(
-            onDismissRequest = onDismissRequest,
-        ) {
+        Dialog(onDismissRequest = onDismissRequest) {
             Card(
                 shape = RoundedCornerShape(6.dp),
                 colors = CardDefaults.cardColors(
@@ -93,10 +154,10 @@ fun FileCompressionDialog(
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Column(
-                    modifier = Modifier
-                        .padding(24.dp),
+                    modifier = Modifier.padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // ── Title ──────────────────────────────────────────────────
                     Column {
                         Text(
                             modifier = Modifier.fillMaxWidth(),
@@ -113,12 +174,40 @@ fun FileCompressionDialog(
                         )
                     }
 
+                    // ── Format picker ─────────────────────────────────────────
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Format",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Space(6.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            COMPRESS_FORMATS.forEachIndexed { index, fmt ->
+                                FilterChip(
+                                    selected = selectedFormatIndex == index,
+                                    onClick = { selectedFormatIndex = index },
+                                    label = {
+                                        Text(
+                                            text = fmt.label,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // ── Archive name ──────────────────────────────────────────
                     TextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = newNameInput,
-                        onValueChange = {
-                            newNameInput = it
-                        },
+                        onValueChange = { newNameInput = it },
                         label = { Text(text = stringResource(R.string.name)) },
                         singleLine = true,
                         shape = RoundedCornerShape(6.dp),
@@ -134,62 +223,69 @@ fun FileCompressionDialog(
                         } else null
                     )
 
-                    // Password Input field (Optional)
-                    TextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = passwordInput,
-                        onValueChange = { passwordInput = it },
-                        label = { Text("Password (Optional)") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent
-                        ),
-                        trailingIcon = {
-                            val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(imageVector = image, contentDescription = "Toggle password visibility")
-                            }
-                        }
-                    )
-
-                    // Compression Level Slider
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        val selectedIndex = remember(compressionLevel) {
-                            levelSteps.indexOf(compressionLevel).coerceAtLeast(0)
-                        }
-                        Row(
+                    // ── Password (only for ZIP and 7Z) ────────────────────────
+                    if (selectedFormat.supportsPassword) {
+                        TextField(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Compression Level",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = levelNames[selectedIndex],
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Slider(
-                            value = selectedIndex.toFloat(),
-                            onValueChange = {
-                                val idx = it.toInt().coerceIn(0, levelSteps.lastIndex)
-                                compressionLevel = levelSteps[idx]
-                            },
-                            valueRange = 0f..(levelSteps.size - 1).toFloat(),
-                            steps = levelSteps.size - 2
+                            value = passwordInput,
+                            onValueChange = { passwordInput = it },
+                            label = { Text("Password (Optional)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(6.dp),
+                            visualTransformation = if (passwordVisible) VisualTransformation.None
+                                                   else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            colors = TextFieldDefaults.colors(
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent
+                            ),
+                            trailingIcon = {
+                                val image = if (passwordVisible) Icons.Filled.Visibility
+                                            else Icons.Filled.VisibilityOff
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(imageVector = image, contentDescription = "Toggle password visibility")
+                                }
+                            }
                         )
                     }
 
+                    // ── Compression level (hidden for formats that don't support it) ──
+                    if (selectedFormat.supportsLevel) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            val selectedIndex = remember(compressionLevel) {
+                                levelSteps.indexOf(compressionLevel).coerceAtLeast(0)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Compression Level",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = levelNames[selectedIndex],
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = selectedIndex.toFloat(),
+                                onValueChange = {
+                                    val idx = it.toInt().coerceIn(0, levelSteps.lastIndex)
+                                    compressionLevel = levelSteps[idx]
+                                },
+                                valueRange = 0f..(levelSteps.size - 1).toFloat(),
+                                steps = levelSteps.size - 2
+                            )
+                        }
+                    }
+
+                    // ── Action buttons ────────────────────────────────────────
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -197,10 +293,7 @@ fun FileCompressionDialog(
                         Button(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
-                                if (newNameInput.isValidAsFileName() && !listContent.contains(
-                                        newNameInput
-                                    )
-                                ) {
+                                if (newNameInput.isValidAsFileName() && !listContent.contains(newNameInput)) {
                                     onDismissRequest()
                                     globalClass.taskManager.runTask(
                                         tab.compressTaskHolder!!.id,
@@ -210,7 +303,8 @@ fun FileCompressionDialog(
                                                 newNameInput
                                             ).absolutePath,
                                             password = passwordInput.ifEmpty { null },
-                                            compressionLevel = compressionLevel.toInt()
+                                            compressionLevel = if (selectedFormat.supportsLevel)
+                                                compressionLevel.toInt() else 0
                                         )
                                     )
                                 } else {
@@ -228,9 +322,7 @@ fun FileCompressionDialog(
 
                         OutlinedButton(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                onDismissRequest()
-                            },
+                            onClick = { onDismissRequest() },
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
@@ -238,7 +330,6 @@ fun FileCompressionDialog(
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
-
                     }
                 }
             }

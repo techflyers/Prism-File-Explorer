@@ -33,13 +33,56 @@ object MimeTypeDetector {
         // Documents
         MagicSignature(byteArrayOf(0x25, 0x50, 0x44, 0x46), "application/pdf"),
 
-        // Archives
+        // Archives — ZIP, RAR, 7Z, GZ, BZ2, XZ already present above
         MagicSignature(byteArrayOf(0x50, 0x4B, 0x03, 0x04), "application/zip"),
         MagicSignature(byteArrayOf(0x52, 0x61, 0x72, 0x21), "application/x-rar-compressed"),
         MagicSignature(byteArrayOf(0x37, 0x7A, 0xBC.toByte(), 0xAF.toByte(), 0x27, 0x1C), "application/x-7z-compressed"),
         MagicSignature(byteArrayOf(0x1F, 0x8B.toByte()), "application/gzip"),
         MagicSignature(byteArrayOf(0x42, 0x5A, 0x68), "application/x-bzip2"),
         MagicSignature(byteArrayOf(0xFD.toByte(), 0x37, 0x7A, 0x58, 0x5A, 0x00), "application/x-xz"),
+
+        // TAR — detected by the "ustar" magic at offset 257
+        MagicSignature(byteArrayOf(0x75, 0x73, 0x74, 0x61, 0x72), "application/x-tar", offset = 257),
+
+        // WIM — Windows Imaging Format
+        MagicSignature(byteArrayOf(0x4D, 0x53, 0x57, 0x49, 0x4D, 0x00), "application/x-ms-wim"),
+
+        // CAB — Microsoft Cabinet
+        MagicSignature(byteArrayOf(0x4D, 0x53, 0x43, 0x46), "application/vnd.ms-cab-compressed"),
+
+        // ISO 9660 — disc image (primary volume descriptor at sector 16 = offset 32768)
+        MagicSignature(byteArrayOf(0x01, 0x43, 0x44, 0x30, 0x30, 0x31), "application/x-iso9660-image", offset = 32769),
+
+        // CPIO — old binary format
+        MagicSignature(byteArrayOf(0xC7.toByte(), 0x71), "application/x-cpio"),
+
+        // RPM — Red Hat Package Manager
+        MagicSignature(byteArrayOf(0xED.toByte(), 0xAB.toByte(), 0xEE.toByte(), 0xDB.toByte()), "application/x-rpm"),
+
+        // LZH/LHA — archive
+        MagicSignature(byteArrayOf(0x2D, 0x6C, 0x68), "application/x-lzh-compressed", offset = 2),
+
+        // Unix compress (.Z)
+        MagicSignature(byteArrayOf(0x1F, 0x9D.toByte()), "application/x-compress"),
+
+        // LZMA alone (7z uses its own magic; raw lzma files start with 0x5D followed by properties)
+        MagicSignature(byteArrayOf(0x5D, 0x00, 0x00), "application/x-lzma"),
+
+        // QCOW2 — QEMU disk image
+        MagicSignature(byteArrayOf(0x51, 0x46, 0x49, 0xFB.toByte()), "application/x-qcow2"),
+
+        // VDI — VirtualBox disk image
+        MagicSignature(byteArrayOf(0x3C, 0x3C, 0x3C, 0x20), "application/x-virtualbox-vdi"),
+
+        // VMDK — VMware disk image
+        MagicSignature(byteArrayOf(0x4B, 0x44, 0x4D, 0x56), "application/x-vmdk"),
+
+        // DMG — Apple disk image (starts with 0x78 0x01 zlib or has "koly" at end; check first 4 bytes)
+        MagicSignature(byteArrayOf(0x78, 0x01, 0x73, 0x0D), "application/x-apple-diskimage"),
+
+        // AR — Unix archive
+        MagicSignature(byteArrayOf(0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E), "application/x-archive"),
+
 
         // Audio
         MagicSignature(byteArrayOf(0x49, 0x44, 0x33), "audio/mpeg"), // ID3 tag

@@ -19,17 +19,39 @@ data class ArchiveEntry(
 )
 
 /**
- * Manages listing and extraction of native archive formats (.7z, .rar, .iso, .cab, etc.)
- * using the bundled lib7za.so binary.
+ * Manages listing, extraction, and compression of archives using the bundled lib7za.so binary.
+ *
+ * Supported pack + unpack: 7z, XZ, BZIP2, GZIP, TAR, ZIP, WIM
+ * Supported unpack only:   APFS, AR, ARJ, CAB, CHM, CPIO, CramFS, DMG, EXT, FAT, GPT, HFS,
+ *                          IHEX, ISO, LZH, LZMA, MBR, MSI, NSIS, NTFS, QCOW2, RAR, RPM,
+ *                          SquashFS, UDF, UEFI, VDI, VHD, VHDX, VMDK, XAR, Z
  */
 object ArchiveManager {
 
+    /**
+     * All archive extensions that lib7za can open (list + extract).
+     * Includes both pack+unpack and unpack-only formats.
+     */
     private val NATIVE_ARCHIVE_EXTENSIONS = setOf(
-        "7z", "rar", "iso", "cab", "xz", "jar", "war", "ear"
+        // Pack + Unpack
+        "7z", "xz", "bz2", "bzip2", "gz", "gzip", "tar", "zip", "wim",
+        // Unpack Only
+        "apfs", "ar", "arj", "cab", "chm", "cpio", "cramfs", "dmg",
+        "ext", "fat", "gpt", "hfs", "ihex", "iso", "lzh", "lzma",
+        "mbr", "msi", "nsis", "ntfs", "qcow2", "rar", "rpm", "squashfs",
+        "udf", "uefi", "vdi", "vhd", "vhdx", "vmdk", "xar", "z",
+        // Common aliases / wrappers
+        "jar", "war", "ear", "tgz", "tbz2", "txz", "lz", "apk", "apks", "obb"
     )
 
     /**
-     * Check if a file extension is a native archive that requires the 7z binary.
+     * Extensions that lib7za can CREATE (pack/compress).
+     * When the user picks a compression format, only these are offered.
+     */
+    val NATIVE_COMPRESS_EXTENSIONS = setOf("7z", "zip", "tar", "gz", "bz2", "xz", "wim")
+
+    /**
+     * Check if a file extension is handled by the lib7za native binary (list + extract).
      */
     fun isNativeArchive(extension: String): Boolean {
         return extension.lowercase() in NATIVE_ARCHIVE_EXTENSIONS
@@ -41,6 +63,13 @@ object ArchiveManager {
     fun isNativeArchivePath(path: String): Boolean {
         val ext = path.substringAfterLast('.', "").lowercase()
         return ext in NATIVE_ARCHIVE_EXTENSIONS
+    }
+
+    /**
+     * Check if an extension can be used as a compression output format (i.e. lib7za can create it).
+     */
+    fun isNativeCompressFormat(extension: String): Boolean {
+        return extension.lowercase() in NATIVE_COMPRESS_EXTENSIONS
     }
 
     /**
@@ -137,6 +166,67 @@ object ArchiveManager {
             android.util.Log.e("PrismArchive", "ArchiveManager: extractSingleFile failed. Output: ${result.output}")
             throw Exception("7za extract failed (exit ${result.exitCode}):\n${result.output}")
         }
+    }
+
+    /**
+     * Compress files/directories into a native archive format using lib7za.
+     *
+     * Supported output formats: 7z, zip, tar, gz, bz2, xz, wim (determined by [archivePath] extension).
+     *
+     * @param sourcePaths   List of absolute paths to files or folders to add.
+     * @param archivePath   Destination archive path. The extension determines the format.
+     * @param password      Optional password (supported for 7z and zip formats only).
+     * @param compressionLevel Compression level 0–9 (0=store, 9=ultra). Mapped to 7za -mx= flag.
+     */
+    suspend fun compress(
+        sourcePaths: List<String>,
+        archivePath: String,
+        password: String? = null,
+        compressionLevel: Int = 5
+    ) = withContext(Dispatchers.IO) {
+        val ext = archivePath.substringAfterLast('.', "").lowercase()
+
+        // Determine the 7za format type flag from the output extension
+        val formatFlag = when (ext) {
+            "7z"               -> "-t7z"
+            "zip"              -> "-tzip"
+            "tar"              -> "-ttar"
+            "gz", "gzip"       -> "-tgzip"
+            "bz2", "bzip2"     -> "-tbzip2"
+            "xz"               -> "-txz"
+            "wim"              -> "-twim"
+            else               -> "-t7z" // default fallback
+        }
+
+        val args = mutableListOf("a", formatFlag, archivePath)
+        args.add("-mx=$compressionLevel")
+
+        // Password only for 7z / zip
+        if (!password.isNullOrEmpty() && (ext == "7z" || ext == "zip")) {
+            args.add("-p$password")
+            if (ext == "7z") {
+                // Encrypt headers too for 7z
+                args.add("-mhe=on")
+            }
+        }
+
+        // Append all source paths
+        args.addAll(sourcePaths)
+
+        android.util.Log.d("PrismArchive", "ArchiveManager: compress command=7z ${args.joinToString(" ")}")
+        val result = NativeBinaryExecutor.run(
+            context = globalClass,
+            binaryName = "lib7za.so",
+            arguments = args
+        )
+
+        android.util.Log.d("PrismArchive", "ArchiveManager: compress exitCode=${result.exitCode}, success=${result.success}")
+
+        if (!result.success) {
+            android.util.Log.e("PrismArchive", "ArchiveManager: compress failed. Output: ${result.output}")
+            throw Exception("7za compression failed (exit ${result.exitCode}):\n${result.output}")
+        }
+        android.util.Log.d("PrismArchive", "ArchiveManager: Compression successful -> $archivePath")
     }
 
     /**

@@ -43,11 +43,9 @@ class ZipManager {
     /**
      * Opens an archive, navigating into it as a virtual folder.
      *
-     * For zip-based (zip4j) archives: checks `isEncrypted` before opening and shows
-     * the password dialog if needed.
-     *
-     * For native (7z/rar) archives: attempts to open; if the tree build fails with
-     * [ZipTree.ArchivePasswordRequiredException], shows the password dialog.
+     * All formats are handled by lib7za via [ZipTree]. If the archive is encrypted,
+     * [ZipTree.build] throws [ZipTree.ArchivePasswordRequiredException] and the caller
+     * (ZipFileHolder) shows the password dialog automatically.
      *
      * @param archive The archive file to open.
      * @param password Optional password for encrypted archives.
@@ -55,23 +53,9 @@ class ZipManager {
     fun openArchive(archive: LocalFileHolder, password: String? = null) {
         android.util.Log.d("PrismArchive", "ZipManager: openArchive() archive=${archive.displayName}, path=${archive.uniquePath}, passwordProvided=${!password.isNullOrEmpty()}")
 
-        val isNative = ArchiveManager.isNativeArchive(archive.extension)
-        android.util.Log.d("PrismArchive", "ZipManager: isNativeArchive=$isNative")
-
-        // For zip4j archives, check encryption before building the tree
-        if (!isNative && password == null) {
-            try {
-                val zipFile = net.lingala.zip4j.ZipFile(archive.file)
-                if (zipFile.isEncrypted) {
-                    android.util.Log.d("PrismArchive", "ZipManager: zip4j archive is encrypted. Showing password dialog...")
-                    val tab = globalClass.mainActivityManager.getActiveTab() as? FilesTab
-                    tab?.toggleArchivePasswordDialog(archive)
-                    return
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("PrismArchive", "ZipManager: failed to check zip4j encryption: ${e.message}")
-            }
-        }
+        // All archive formats are handled by lib7za via ZipTree.
+        // ZipTree.build() will throw ArchivePasswordRequiredException for all encrypted formats,
+        // which causes the password dialog to be shown automatically.
 
         val existingTreeKey = archiveList.keys.find { archive.uniquePath == it.uniquePath }
 

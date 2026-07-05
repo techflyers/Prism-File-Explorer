@@ -6,6 +6,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
 import java.io.File
@@ -108,50 +109,72 @@ class CompressTask(
             progress = 0.1f
         }
 
+        // Determine the output extension to decide which engine to use
+        val destPath = parameters!!.destPath
+        val destExt = destPath.substringAfterLast('.', "").lowercase()
+
+        // lib7za handles all formats except zip (which keeps zip4j for AES-256 password support)
+        val useNativeCompression = ArchiveManager.isNativeCompressFormat(destExt) && destExt != "zip"
+
         try {
-            // Check abortion before starting compression
             if (aborted) {
                 markAsAborted()
                 return
             }
 
-            val pwd = parameters?.password
-            ZipFile(parameters?.destPath).use { zipOut ->
-                if (!pwd.isNullOrEmpty()) {
-                    zipOut.setPassword(pwd.toCharArray())
+            if (useNativeCompression) {
+                // Native compression via lib7za
+                val sourcePaths = pendingContent.map { it.content.uniquePath }
+                progressMonitor.apply {
+                    processName = globalClass.getString(R.string.compressing)
+                    progress = 0.2f
                 }
-                pendingContent.forEachIndexed { index, itemToCompress ->
-                    if (aborted) {
-                        markAsAborted()
-                        return
+                ArchiveManager.compress(
+                    sourcePaths = sourcePaths,
+                    archivePath = destPath,
+                    password = parameters?.password,
+                    compressionLevel = parameters?.compressionLevel ?: 5
+                )
+            } else {
+                // ZIP creation via zip4j (supports AES-256 password encryption)
+                val pwd = parameters?.password
+                ZipFile(destPath).use { zipOut ->
+                    if (!pwd.isNullOrEmpty()) {
+                        zipOut.setPassword(pwd.toCharArray())
                     }
-
-                    if (itemToCompress.status == TaskContentStatus.PENDING) {
-                        val progressPercent =
-                            0.1f + (0.9f * (index.toFloat() / pendingContent.size))
-
-                        progressMonitor.apply {
-                            contentName = itemToCompress.content.displayName
-                            remainingContent = pendingContent.size - (index + 1)
-                            progress = progressPercent
+                    pendingContent.forEachIndexed { index, itemToCompress ->
+                        if (aborted) {
+                            markAsAborted()
+                            return
                         }
 
-                        try {
-                            if (itemToCompress.content.isFolder) {
-                                addFolderToZip(zipOut, itemToCompress.content)
-                            } else {
-                                addFileToZip(zipOut, itemToCompress.content)
+                        if (itemToCompress.status == TaskContentStatus.PENDING) {
+                            val progressPercent =
+                                0.1f + (0.9f * (index.toFloat() / pendingContent.size))
+
+                            progressMonitor.apply {
+                                contentName = itemToCompress.content.displayName
+                                remainingContent = pendingContent.size - (index + 1)
+                                progress = progressPercent
                             }
-                            itemToCompress.status = TaskContentStatus.SUCCESS
-                        } catch (e: Exception) {
-                            logger.logError(e)
-                            markAsFailed(
-                                globalClass.resources.getString(
-                                    R.string.task_summary_failed,
-                                    e.message ?: emptyString
+
+                            try {
+                                if (itemToCompress.content.isFolder) {
+                                    addFolderToZip(zipOut, itemToCompress.content)
+                                } else {
+                                    addFileToZip(zipOut, itemToCompress.content)
+                                }
+                                itemToCompress.status = TaskContentStatus.SUCCESS
+                            } catch (e: Exception) {
+                                logger.logError(e)
+                                markAsFailed(
+                                    globalClass.resources.getString(
+                                        R.string.task_summary_failed,
+                                        e.message ?: emptyString
+                                    )
                                 )
-                            )
-                            return
+                                return
+                            }
                         }
                     }
                 }

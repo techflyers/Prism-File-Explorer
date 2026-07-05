@@ -41,17 +41,48 @@ object FileMimeType {
         "wmf", "emf", "cdr", "odg", "swf"
     )
 
+    /**
+     * All archive-like extensions — used for icon recognition and hasKnownExtension().
+     * Covers lib7za pack+unpack formats, unpack-only formats, and common aliases.
+     */
     @JvmField
     val archiveFileType = arrayOf(
-        "zip", "7z", "tar", "jar", "gz", "xz", "obb", "rar",
-        "iso", "bz2", "tgz", "tbz2", "lz", "lzma"
+        // lib7za Pack + Unpack
+        "7z", "xz", "bz2", "bzip2", "gz", "gzip", "tar", "zip", "wim",
+        // lib7za Unpack Only
+        "apfs", "ar", "arj", "cab", "chm", "cpio", "cramfs", "dmg",
+        "ext", "fat", "gpt", "hfs", "ihex", "iso", "lzh", "lzma",
+        "mbr", "msi", "nsis", "ntfs", "qcow2", "rar", "rpm", "squashfs",
+        "udf", "uefi", "vdi", "vhd", "vhdx", "vmdk", "xar", "z",
+        // Common aliases / wrappers
+        "jar", "war", "ear", "tgz", "tbz2", "txz", "lz", "obb"
     )
 
+    /**
+     * Archive extensions that the app can browse (open in the archive viewer).
+     * All are routed through lib7za native binary.
+     */
     @JvmField
     val supportedArchiveFileType = arrayOf(
-        "zip", "jar", "apk", "apks",
-        "7z", "rar", "iso", "cab", "xz", "war", "ear"
+        // lib7za Pack + Unpack
+        "7z", "xz", "bz2", "bzip2", "gz", "gzip", "tar", "zip", "wim",
+        // lib7za Unpack Only
+        "apfs", "ar", "arj", "cab", "chm", "cpio", "cramfs", "dmg",
+        "ext", "fat", "gpt", "hfs", "ihex", "iso", "lzh", "lzma",
+        "mbr", "msi", "nsis", "ntfs", "qcow2", "rar", "rpm", "squashfs",
+        "udf", "uefi", "vdi", "vhd", "vhdx", "vmdk", "xar", "z",
+        // Common aliases / wrappers
+        "jar", "war", "ear", "tgz", "tbz2", "txz", "lz",
+        // APK/APKS handled separately via ApkDialog but also zip-browsable
+        "apk", "apks"
     )
+
+    /**
+     * Formats that lib7za can CREATE (pack), shown in the compression dialog.
+     * The string is the output file extension.
+     */
+    @JvmField
+    val nativeCompressFormats = setOf("7z", "zip", "tar", "gz", "bz2", "xz", "wim")
 
     @JvmField
     val videoFileType = arrayOf(
