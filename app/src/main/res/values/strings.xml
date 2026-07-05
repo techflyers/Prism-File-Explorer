@@ -469,4 +469,8 @@
     <string name="share_failed_to_save">Failed to save files</string>
     <string name="share_no_files_found">No shareable files found</string>
     <string name="share_to_prism">Prism File Explorer</string>
+
+    <string name="hide_root_storage">Hide root storage</string>
+    <string name="hide_root_storage_desc">Hide the root storage directory from the storage devices list</string>
+    <string name="reorder_pinned_files">Reorder Pinned Files</string>
 </resources>

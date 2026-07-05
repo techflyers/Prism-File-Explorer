@@ -85,6 +85,30 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.rounded.Reorder
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ColumnScope.HomeTabContentView(tab: HomeTab) {
@@ -207,17 +231,54 @@ fun PinnedFilesSection(
         }
     }
 
+    LaunchedEffect(tab.pinnedFiles.size) {
+        pinnedFiles.clear()
+        pinnedFiles.addAll(tab.pinnedFiles)
+    }
+
     if (pinnedFiles.isNotEmpty()) {
-        // Pinned files
-        Text(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp)
                 .padding(top = 12.dp, bottom = 8.dp),
-            text = stringResource(R.string.pinned_files),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = stringResource(R.string.pinned_files),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+
+            var showReorderDialog by remember { mutableStateOf(false) }
+
+            IconButton(
+                onClick = { showReorderDialog = true },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Reorder,
+                    contentDescription = stringResource(R.string.reorder_pinned_files),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            if (showReorderDialog) {
+                ReorderPinnedFilesDialog(
+                    pinnedFilesList = pinnedFiles,
+                    onDismiss = { showReorderDialog = false },
+                    onSave = { newOrder ->
+                        pinnedFiles.clear()
+                        pinnedFiles.addAll(newOrder)
+                        tab.pinnedFiles.clear()
+                        tab.pinnedFiles.addAll(newOrder)
+                        globalClass.preferencesManager.pinnedFiles = newOrder.map { it.uniquePath }
+                        showReorderDialog = false
+                    }
+                )
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -321,7 +382,7 @@ fun PinnedFilesSection(
                         }
                     }
                 }
-                if (index != tab.pinnedFiles.lastIndex) HorizontalDivider(thickness = 0.5.dp)
+                if (index != pinnedFiles.lastIndex) HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
@@ -637,6 +698,141 @@ private fun JumpToPathSection(
             imageVector = Icons.Rounded.ArrowOutward
         ) {
             mainActivityManager.toggleJumpToPathDialog(true)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReorderPinnedFilesDialog(
+    pinnedFilesList: List<LocalFileHolder>,
+    onDismiss: () -> Unit,
+    onSave: (List<LocalFileHolder>) -> Unit
+) {
+    val items = remember { mutableStateListOf<LocalFileHolder>().apply { addAll(pinnedFilesList) } }
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(
+        lazyListState = lazyListState,
+        onMove = { from, to ->
+            items.add(to.index, items.removeAt(from.index))
+        }
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnClickOutside = false,
+            decorFitsSystemWindows = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        val color = MaterialTheme.colorScheme.surfaceContainerHigh
+        val useDarkIcons = !isSystemInDarkTheme()
+        val systemUiController = rememberSystemUiController()
+        DisposableEffect(systemUiController, useDarkIcons) {
+            systemUiController.setStatusBarColor(color = color, darkIcons = useDarkIcons)
+            onDispose {}
+        }
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = stringResource(R.string.reorder_pinned_files),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = null
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { onSave(items) }) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Save"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(vertical = 16.dp)
+            ) {
+                LazyColumn(
+                    state = lazyListState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(items, key = { it.uniquePath }) { item ->
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = item.uniquePath
+                        ) { isDragging ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDragging)
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    else
+                                        MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (isDragging) 8.dp else 2.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(36.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        FileContentIcon(item)
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = item.displayName,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.DragHandle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .padding(end = 8.dp)
+                                            .draggableHandle()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

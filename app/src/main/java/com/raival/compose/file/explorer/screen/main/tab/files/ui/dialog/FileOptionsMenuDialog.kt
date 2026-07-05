@@ -257,28 +257,29 @@ fun FileOptionsMenuDialog(
                     globalClass.showMsg(R.string.added_to_bookmarks)
                     tab.unselectAllFiles()
                 }
-                val pinnedFiles by remember {
-                    mutableStateOf(
-                        globalClass.preferencesManager.pinnedFiles
-                    )
-                }
-                if (targetFiles.map { it.uniquePath }.toSet() == pinnedFiles) {
+            }
+
+            val isPinable = targetFiles.isNotEmpty() && targetFiles.all { it is LocalFileHolder }
+            if (isPinable) {
+                val pinnedFiles = globalClass.preferencesManager.pinnedFiles
+                val allPinned = targetFiles.all { it.uniquePath in pinnedFiles }
+                if (allPinned) {
                     FileOption(
                         Icons.Rounded.PushPin,
                         stringResource(R.string.unpin_from_home_tab)
                     ) {
                         onDismissRequest()
-                        val oldSet = globalClass.preferencesManager.pinnedFiles
-                        globalClass.preferencesManager.pinnedFiles = oldSet - pinnedFiles
+                        val oldList = globalClass.preferencesManager.pinnedFiles
+                        globalClass.preferencesManager.pinnedFiles = oldList - targetFiles.map { it.uniquePath }.toSet()
                         globalClass.showMsg(R.string.done)
                         tab.unselectAllFiles()
                     }
                 } else {
                     FileOption(Icons.Rounded.PushPin, stringResource(R.string.pin_to_home_tab)) {
                         onDismissRequest()
-                        val oldSet = globalClass.preferencesManager.pinnedFiles
+                        val oldList = globalClass.preferencesManager.pinnedFiles
                         globalClass.preferencesManager.pinnedFiles =
-                            oldSet + targetFiles.map { it.uniquePath }
+                            oldList + targetFiles.map { it.uniquePath }.filter { it !in oldList }
                         globalClass.showMsg(R.string.done)
                         tab.unselectAllFiles()
                     }

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.VpnKey
@@ -102,6 +103,19 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.OpenInBrowser,
             switchState = prefs.useBuiltInViewer,
             onSwitchChange = { prefs.useBuiltInViewer = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.hide_root_storage),
+            supportingText = stringResource(R.string.hide_root_storage_desc),
+            icon = Icons.Rounded.Storage,
+            switchState = prefs.hideRootStorage,
+            onSwitchChange = { prefs.hideRootStorage = it }
         )
 
         HorizontalDivider(

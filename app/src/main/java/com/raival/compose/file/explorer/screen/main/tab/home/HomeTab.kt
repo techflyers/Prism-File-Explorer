@@ -158,6 +158,6 @@ class HomeTab : Tab() {
 
     fun removePinnedFile(file: LocalFileHolder) {
         pinnedFiles.remove(file)
-        globalClass.preferencesManager.pinnedFiles = pinnedFiles.map { it.uniquePath }.toSet()
+        globalClass.preferencesManager.pinnedFiles = pinnedFiles.map { it.uniquePath }
     }
 }

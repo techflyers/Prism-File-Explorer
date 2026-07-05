@@ -149,10 +149,41 @@ class PreferencesManager {
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
 
-    var pinnedFiles by prefMutableState(
-        keyName = "pinnedFiles",
-        defaultValue = emptySet(),
-        getPreferencesKey = { stringSetPreferencesKey(it) }
+    private var pinnedFilesJson by prefMutableState(
+        keyName = "pinnedFilesJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var pinnedFiles: List<String>
+        get() {
+            if (pinnedFilesJson.isEmpty()) {
+                val oldSetKey = stringSetPreferencesKey("pinnedFiles")
+                val oldSet = runBlocking {
+                    globalClass.prefDataStore.data.first()[oldSetKey]
+                }
+                if (oldSet != null) {
+                    val list = oldSet.toList()
+                    pinnedFilesJson = list.toJson()
+                    runBlocking {
+                        globalClass.prefDataStore.edit {
+                            it.remove(oldSetKey)
+                        }
+                    }
+                    return list
+                }
+                return emptyList()
+            }
+            return fromJson<List<String>>(pinnedFilesJson) ?: emptyList()
+        }
+        set(value) {
+            pinnedFilesJson = value.toJson()
+        }
+
+    var hideRootStorage by prefMutableState(
+        keyName = "hideRootStorage",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
     var excludedPathsFromRecentFiles by prefMutableState(

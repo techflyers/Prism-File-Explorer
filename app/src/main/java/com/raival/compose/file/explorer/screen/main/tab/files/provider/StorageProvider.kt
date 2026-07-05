@@ -56,7 +56,9 @@ object StorageProvider {
             )
         }
 
-        storageDevices.add(getRoot(context))
+        if (!globalClass.preferencesManager.hideRootStorage) {
+            storageDevices.add(getRoot(context))
+        }
 
         return storageDevices
     }
