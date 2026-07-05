@@ -456,4 +456,17 @@
     <string name="close_tab_on_back_nav">Back navigation to close tabs</string>
     <string name="remember_last_session">Remember last session</string>
     <string name="confirm_before_exit">Confirm before exiting the app</string>
+
+    <!-- Share Menu Receiver Strings -->
+    <string name="share_title_save_to">Save to Prism</string>
+    <string name="share_button_save_here">Save Here</string>
+    <string name="share_new_folder">New Folder</string>
+    <string name="share_create_folder">Create Folder</string>
+    <string name="share_folder_name">Folder Name</string>
+    <string name="share_saving_files">Saving %1$d files…</string>
+    <string name="share_saving_file">Saving %1$s…</string>
+    <string name="share_files_saved">Files saved successfully</string>
+    <string name="share_failed_to_save">Failed to save files</string>
+    <string name="share_no_files_found">No shareable files found</string>
+    <string name="share_to_prism">Prism File Explorer</string>
 </resources>
