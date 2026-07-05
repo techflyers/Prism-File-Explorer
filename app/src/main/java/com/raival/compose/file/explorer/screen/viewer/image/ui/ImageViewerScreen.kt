@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InvertColors
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.WidthFull
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -284,6 +285,24 @@ fun ImageViewerScreen(instance: ViewerInstance) {
                             }
                         },
                         actions = {
+                            IconButton(onClick = {
+                                val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = instance.uri
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        openIntent,
+                                        context.getString(com.raival.compose.file.explorer.R.string.open_with)
+                                    )
+                                )
+                            }) {
+                                Icon(
+                                    Icons.Default.OpenInNew,
+                                    contentDescription = "Open with",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                             IconButton(onClick = { showInfo = true }) {
                                 Icon(
                                     Icons.Default.Info,

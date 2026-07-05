@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.OpenInNew
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.common.ConvertioApiKeyDialog
 import com.raival.compose.file.explorer.common.ConvertioProgressDialog
@@ -188,6 +189,20 @@ private fun HtmlViewerScreen(
                             if (showSource) Icons.Rounded.Preview else Icons.Rounded.Code,
                             contentDescription = if (showSource) "Preview" else "View Source"
                         )
+                    }
+                    IconButton(onClick = {
+                        val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            data = instance.uri
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        globalClass.startActivity(
+                            android.content.Intent.createChooser(
+                                openIntent,
+                                globalClass.getString(com.raival.compose.file.explorer.R.string.open_with)
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }) {
+                        Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
                     }
                     IconButton(onClick = {
                         ConvertioService.convertToPdf(globalClass, filePath)

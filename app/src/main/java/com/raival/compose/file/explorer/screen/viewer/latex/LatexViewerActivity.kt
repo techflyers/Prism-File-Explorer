@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -322,6 +323,21 @@ private fun LatexViewerScreen(
                     }
                     IconButton(onClick = { compile() }) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Recompile")
+                    }
+                    // Open With
+                    IconButton(onClick = {
+                        val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            data = instance.uri
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            android.content.Intent.createChooser(
+                                openIntent,
+                                context.getString(com.raival.compose.file.explorer.R.string.open_with)
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }) {
+                        Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
                     }
                     IconButton(onClick = {
                         ConvertioService.convertToPdf(context, filePath)

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.OpenInNew
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.common.ConvertioService
 import com.raival.compose.file.explorer.common.ConvertioApiKeyDialog
@@ -334,6 +335,20 @@ private fun MarkdownViewerScreen(
                             Icons.Rounded.Code,
                             contentDescription = "View in Text Editor"
                         )
+                    }
+                    IconButton(onClick = {
+                        val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            data = instance.uri
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            android.content.Intent.createChooser(
+                                openIntent,
+                                context.getString(com.raival.compose.file.explorer.R.string.open_with)
+                            )
+                        )
+                    }) {
+                        Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
                     }
                     IconButton(onClick = {
                         ConvertioService.convertToPdf(context, filePath)

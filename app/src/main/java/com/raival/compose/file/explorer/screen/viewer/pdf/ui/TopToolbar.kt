@@ -18,9 +18,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.FormatAlignLeft
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,8 +40,8 @@ fun TopToolbar(
     onBackClick: () -> Unit,
     onInfoClick: () -> Unit,
     onSearchClick: (() -> Unit)? = null,
-    onReflowClick: (() -> Unit)? = null,
-    isReflowActive: Boolean = false
+    onShareClick: (() -> Unit)? = null,
+    onOpenWithClick: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -103,13 +104,24 @@ fun TopToolbar(
                     }
                 }
 
-                // Reflow button — extracts all text and shows as readable text
-                onReflowClick?.let { onClick ->
+                // Share button
+                onShareClick?.let { onClick ->
                     IconButton(onClick = onClick) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.FormatAlignLeft,
-                            contentDescription = "Reflow text",
-                            tint = if (isReflowActive) colorScheme.primary else colorScheme.onSurface
+                            imageVector = Icons.Rounded.Share,
+                            contentDescription = "Share",
+                            tint = colorScheme.onSurface
+                        )
+                    }
+                }
+
+                // Open With button
+                onOpenWithClick?.let { onClick ->
+                    IconButton(onClick = onClick) {
+                        Icon(
+                            imageVector = Icons.Rounded.OpenInNew,
+                            contentDescription = "Open with",
+                            tint = colorScheme.onSurface
                         )
                     }
                 }

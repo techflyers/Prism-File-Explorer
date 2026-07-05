@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.content.Intent
 import androidx.media3.ui.PlayerView
 import com.raival.compose.file.explorer.common.toFormattedTime
 import com.raival.compose.file.explorer.screen.viewer.video.VideoPlayerInstance
@@ -134,6 +136,15 @@ fun VideoPlayerScreen(
                     onBackPressed = onBackPressed,
                     onToggleMute = { videoPlayerInstance.toggleMute() },
                     onSpeedChange = { speed -> videoPlayerInstance.setPlaybackSpeed(speed) },
+                    onOpenWith = {
+                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = videoUri
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(openIntent, context.getString(com.raival.compose.file.explorer.R.string.open_with))
+                        )
+                    }
                 )
             }
 
@@ -162,7 +173,8 @@ fun VideoControls(
     onSeekBackward: () -> Unit,
     onSeek: (Long) -> Unit,
     onBackPressed: () -> Unit,
-    onSpeedChange: (Float) -> Unit
+    onSpeedChange: (Float) -> Unit,
+    onOpenWith: (() -> Unit)? = null,
 ) {
     val defaultColor = colorScheme.surface
 
@@ -187,6 +199,7 @@ fun VideoControls(
             onBackPressed = onBackPressed,
             onToggleMute = onToggleMute,
             onSpeedChange = onSpeedChange,
+            onOpenWith = onOpenWith,
             modifier = Modifier.align(Alignment.TopStart)
         )
 
@@ -215,6 +228,7 @@ fun TopBar(
     onBackPressed: () -> Unit,
     onToggleMute: () -> Unit,
     onSpeedChange: (Float) -> Unit,
+    onOpenWith: (() -> Unit)? = null,
     modifier: Modifier,
 ) {
     Row(
@@ -276,6 +290,17 @@ fun TopBar(
                 contentDescription = null,
                 tint = colorScheme.onSurface
             )
+        }
+
+        // Open With button
+        onOpenWith?.let { onClick ->
+            IconButton(onClick = onClick) {
+                Icon(
+                    imageVector = Icons.Default.OpenInNew,
+                    contentDescription = "Open with",
+                    tint = colorScheme.onSurface
+                )
+            }
         }
     }
 }

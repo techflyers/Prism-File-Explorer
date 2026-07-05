@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -377,6 +378,21 @@ private fun DocumentViewerScreen(
                                 tint = if (filterColumnIndex != null || sortType != "none") MaterialTheme.colorScheme.primary else LocalContentColor.current
                             )
                         }
+                    }
+                    // Open With
+                    IconButton(onClick = {
+                        val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            data = instance.uri
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        activity.startActivity(
+                            android.content.Intent.createChooser(
+                                openIntent,
+                                activity.getString(com.raival.compose.file.explorer.R.string.open_with)
+                            )
+                        )
+                    }) {
+                        Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
                     }
                     if (filePath != null) {
                         IconButton(onClick = {

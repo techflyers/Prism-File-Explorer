@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import android.content.Intent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -185,7 +187,19 @@ fun MusicPlayerScreen(
                     onCloseClick = onClosed,
                     onPlaylistClick = { showPlaylist = true },
                     hasPlaylist = audioPlayerInstance.playlist.size > 1,
-                    audioPlayerColorScheme = customColorScheme
+                    audioPlayerColorScheme = customColorScheme,
+                    onOpenWithClick = {
+                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = audioPlayerInstance.uri
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(
+                                openIntent,
+                                context.getString(com.raival.compose.file.explorer.R.string.open_with)
+                            )
+                        )
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
@@ -286,6 +300,7 @@ fun TopControls(
     onPlaylistClick: () -> Unit = {},
     hasPlaylist: Boolean = false,
     audioPlayerColorScheme: AudioPlayerColorScheme,
+    onOpenWithClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -327,6 +342,16 @@ fun TopControls(
                     contentDescription = null,
                     tint = audioPlayerColorScheme.tintColor
                 )
+            }
+
+            onOpenWithClick?.let { onClick ->
+                IconButton(onClick = onClick) {
+                    Icon(
+                        Icons.Default.OpenInNew,
+                        contentDescription = "Open with",
+                        tint = audioPlayerColorScheme.tintColor
+                    )
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.raival.compose.file.explorer.screen.viewer.pdf.ui
 
+import android.content.Intent
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -30,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.fragment.compose.AndroidFragment
@@ -39,19 +41,16 @@ import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.screen.viewer.pdf.CustomPdfViewerFragment
 import com.raival.compose.file.explorer.screen.viewer.pdf.PdfViewerInstance
-import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalPdfApi::class)
 @Composable
 fun PdfViewerContent(instance: PdfViewerInstance, onBackPress: () -> Unit) {
+    val context = LocalContext.current
     var showToolbars by remember { mutableStateOf(true) }
     var showInfoDialog by remember { mutableStateOf(false) }
     var showGoToPageDialog by remember { mutableStateOf(false) }
-    var isReflowMode by remember { mutableStateOf(false) }
-    var extractedText by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
 
     // Page tracking
@@ -115,111 +114,108 @@ fun PdfViewerContent(instance: PdfViewerInstance, onBackPress: () -> Unit) {
             title = instance.metadata.name,
             onBackClick = onBackPress,
             onInfoClick = { showInfoDialog = true },
-            onSearchClick = if (!isReflowMode) {
-                {
-                    isSearchActive = !isSearchActive
-                    interactionCount++
-                }
-            } else null,
-            onReflowClick = {
-                isReflowMode = !isReflowMode
+            onSearchClick = {
+                isSearchActive = !isSearchActive
                 interactionCount++
             },
-            isReflowActive = isReflowMode
+            onShareClick = {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, instance.uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(
+                    Intent.createChooser(shareIntent, globalClass.getString(R.string.share))
+                )
+            },
+            onOpenWithClick = {
+                val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(instance.uri, "application/pdf")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(
+                    Intent.createChooser(openIntent, globalClass.getString(R.string.open_with))
+                )
+            }
         )
 
-        if (isReflowMode) {
-            LaunchedEffect(isReflowMode) {
-                if (extractedText.isEmpty()) {
-                    extractedText = withContext(IO) { instance.extractAllText() }
+        // Container for the PDF view fragment & custom indicators
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxSize()
+        ) {
+            AndroidFragment<CustomPdfViewerFragment>(
+                modifier = Modifier.fillMaxSize(),
+                onUpdate = { fragment ->
+                    pdfFragment = fragment
+
+                    // Async load document once
+                    if (!documentLoaded) {
+                        val uriLoadStart = System.currentTimeMillis()
+                        Log.d("CustomPdfViewer", "onUpdate: setDocumentUri start to ${instance.uri} (time=$uriLoadStart)")
+                        fragment.documentUri = instance.uri
+                        documentLoaded = true
+                        Log.d("CustomPdfViewer", "onUpdate: setDocumentUri finished in ${System.currentTimeMillis() - uriLoadStart}ms")
+                    }
+
+                    // Listeners
+                    fragment.onPageChanged = { page, total ->
+                        currentPage = page
+                        totalPages = total
+                        // Show toolbars briefly on page scroll & reset timer
+                        showToolbars = true
+                        interactionCount++
+                    }
+
+                    fragment.onScrollDirection = { _ ->
+                        // Any scroll/viewport change brings back toolbars & resets timer
+                        showToolbars = true
+                        interactionCount++
+                    }
+
+                    fragment.onGestureStateChanged = { state ->
+                        gestureState = state
+                        if (state == PdfView.GESTURE_STATE_INTERACTING) {
+                            showToolbars = true
+                            interactionCount++
+                        }
+                    }
+
+                    fragment.onSingleTap = {
+                        // Tap toggles controls & resets timer
+                        showToolbars = !showToolbars
+                        interactionCount++
+                    }
                 }
-            }
-            PdfReflowView(
-                extractedText = extractedText,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
             )
-        } else {
-            // Container for the PDF view fragment & custom indicators
-            Box(
+
+            // ── Gorgeous Page Navigator Overlay ─────────────────────
+            // zIndex(1f) is critical so it draws on top of native AndroidFragment.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showToolbars && totalPages > 0,
+                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 24.dp)
+                    .zIndex(1f)
             ) {
-                AndroidFragment<CustomPdfViewerFragment>(
-                    modifier = Modifier.fillMaxSize(),
-                    onUpdate = { fragment ->
-                        pdfFragment = fragment
-
-                        // Async load document once
-                        if (!documentLoaded) {
-                            val uriLoadStart = System.currentTimeMillis()
-                            Log.d("CustomPdfViewer", "onUpdate: setDocumentUri start to ${instance.uri} (time=$uriLoadStart)")
-                            fragment.documentUri = instance.uri
-                            documentLoaded = true
-                            Log.d("CustomPdfViewer", "onUpdate: setDocumentUri finished in ${System.currentTimeMillis() - uriLoadStart}ms")
-                        }
-
-                        // Listeners
-                        fragment.onPageChanged = { page, total ->
-                            currentPage = page
-                            totalPages = total
-                            // Show toolbars briefly on page scroll & reset timer
-                            showToolbars = true
-                            interactionCount++
-                        }
-
-                        fragment.onScrollDirection = { _ ->
-                            // Any scroll/viewport change brings back toolbars & resets timer
-                            showToolbars = true
-                            interactionCount++
-                        }
-
-                        fragment.onGestureStateChanged = { state ->
-                            gestureState = state
-                            if (state == PdfView.GESTURE_STATE_INTERACTING) {
-                                showToolbars = true
-                                interactionCount++
-                            }
-                        }
-
-                        fragment.onSingleTap = {
-                            // Tap toggles controls & resets timer
-                            showToolbars = !showToolbars
-                            interactionCount++
-                        }
-                    }
-                )
-
-                // ── Gorgeous Page Navigator Overlay ─────────────────────
-                // zIndex(1f) is critical so it draws on top of native AndroidFragment.
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showToolbars && totalPages > 0,
-                    enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                Surface(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(bottom = 24.dp)
-                        .zIndex(1f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { showGoToPageDialog = true },
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shadowElevation = 8.dp,
+                    tonalElevation = 6.dp
                 ) {
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(24.dp))
-                            .clickable { showGoToPageDialog = true },
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shadowElevation = 8.dp,
-                        tonalElevation = 6.dp
-                    ) {
-                        Text(
-                            text = "${currentPage + 1} / $totalPages",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                        )
-                    }
+                    Text(
+                        text = "${currentPage + 1} / $totalPages",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
                 }
             }
         }
