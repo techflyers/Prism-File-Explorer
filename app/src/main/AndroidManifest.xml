@@ -251,23 +251,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Copied Docreader layout rendering engine activities -->
-        <activity
-            android:name="com.ahmadullahpk.alldocumentreader.activity.PDF_Reader_Activity"
-            android:exported="false" />
-        <activity
-            android:name="com.ahmadullahpk.alldocumentreader.activity.PrintPdfActivity"
-            android:exported="false"
-            android:theme="@style/NewAppTheme" />
-        <activity
-            android:name="com.ahmadullahpk.alldocumentreader.activity.ViewFiles_Activity"
-            android:theme="@style/NewAppTheme" />
-        <activity
-            android:name="com.ahmadullahpk.alldocumentreader.activity.CSVViewer_Activity"
-            android:theme="@style/NewAppTheme" />
-        <activity
-            android:name="com.ahmadullahpk.alldocumentreader.activity.ViewRtf_Activity"
-            android:theme="@style/NewAppTheme" />
 
         <activity
             android:name=".screen.main.MainActivity"

@@ -172,11 +172,6 @@ dependencies {
     implementation("androidx.pdf:pdf-viewer-fragment:1.0.0-alpha19")
     implementation("androidx.fragment:fragment-compose:1.8.5")
 
-    // Dependencies for the integrated docreader engine
-    implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
-    implementation("com.intuit.sdp:sdp-android:1.0.6")
-    implementation("org.apache.commons:commons-compress:1.20")
-    implementation("androidx.preference:preference:1.2.1")
     implementation(libs.sshj)
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
