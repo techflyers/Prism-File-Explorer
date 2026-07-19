@@ -1,20 +1,36 @@
 package com.raival.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.FlipToBack
+import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
@@ -43,6 +59,89 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.Refresh,
             switchState = prefs.disablePullDownToRefresh,
             onSwitchChange = { prefs.disablePullDownToRefresh = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Disable Navigation Gestures",
+            supportingText = "Turn off swipe-up shortcuts in the file list",
+            icon = Icons.Rounded.Gesture,
+            switchState = prefs.disableNavigationGestures,
+            onSwitchChange = { prefs.disableNavigationGestures = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        // Animation Duration slider
+        var animMultiplier by remember { mutableFloatStateOf(prefs.animationDurationMultiplier) }
+        Column(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Row(
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Rounded.Animation,
+                    contentDescription = null,
+                    modifier = androidx.compose.ui.Modifier.padding(end = 16.dp)
+                )
+                Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
+                    Text(text = "Animation Speed", fontSize = 14.sp)
+                    Text(
+                        text = when {
+                            animMultiplier < 0.05f -> "Disabled"
+                            animMultiplier < 0.75f -> "Fast (${"%.1f".format(animMultiplier)}x)"
+                            animMultiplier < 1.25f -> "Normal"
+                            else -> "Slow (${"%.1f".format(animMultiplier)}x)"
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            Slider(
+                value = animMultiplier,
+                onValueChange = { animMultiplier = it },
+                onValueChangeFinished = { prefs.animationDurationMultiplier = animMultiplier },
+                valueRange = 0f..2f,
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+            )
+        }
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Disable Spring / Bounce Effect",
+            supportingText = "Remove elastic bounce from pull-to-refresh",
+            icon = Icons.Rounded.Refresh,
+            switchState = prefs.disableSpringEffect,
+            onSwitchChange = { prefs.disableSpringEffect = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Show \"..\" Parent Folder Entry",
+            supportingText = "Show a \'..\' row at the top of file lists to navigate up",
+            icon = Icons.Rounded.SubdirectoryArrowLeft,
+            switchState = prefs.showParentDirectoryEntry,
+            onSwitchChange = { prefs.showParentDirectoryEntry = it }
         )
 
         HorizontalDivider(

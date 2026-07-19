@@ -2,7 +2,11 @@ package com.raival.compose.file.explorer.screen.main.tab.files.ui
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.OverscrollConfiguration
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,12 +23,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -32,6 +38,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -39,6 +47,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +77,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.ui.Isolate
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
@@ -82,6 +92,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -91,13 +102,55 @@ fun ColumnScope.FilesList(tab: FilesTab) {
     val coroutineScope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
 
+    // Resolve parent folder once for the `..` entry
+    var parentFolder by remember(tab.activeFolder.uniquePath) {
+        mutableStateOf<ContentHolder?>(null)
+    }
+    LaunchedEffect(tab.activeFolder.uniquePath) {
+        parentFolder = withContext(IO) {
+            if (preferencesManager.showParentDirectoryEntry
+                && tab.activeFolder !is VirtualFileHolder
+            ) {
+                val p = tab.activeFolder.getParent()
+                if (p != null && p.isValid() && p.canRead) p else null
+            } else null
+        }
+    }
+
     Box(Modifier.weight(1f)) {
         if (tab.activeFolderContent.isEmpty() && !tab.isLoading) {
             EmptyFolderContent(tab)
         }
 
+        // Disable elastic overscroll bounce when spring effect disabled
+        val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
+        CompositionLocalProvider(LocalOverscrollConfiguration provides overscrollConfig) {
         if (preferencesManager.disablePullDownToRefresh) {
-            FilesListContent(tab)
+            FilesListContent(tab, parentFolder)
+        } else if (preferencesManager.disableSpringEffect) {
+            val noSpringState = rememberPullToRefreshState()
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    tab.openFolder(tab.activeFolder, true, true)
+                    coroutineScope.launch {
+                        delay(100)
+                        isRefreshing = false
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                state = noSpringState,
+                indicator = {
+                    PullToRefreshDefaults.Indicator(
+                        state = noSpringState,
+                        isRefreshing = isRefreshing,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+            ) {
+                FilesListContent(tab, parentFolder)
+            }
         } else {
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
@@ -111,9 +164,10 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                FilesListContent(tab)
+                FilesListContent(tab, parentFolder)
             }
         }
+        } // end CompositionLocalProvider
 
         LoadingOverlay(tab)
 
@@ -219,25 +273,34 @@ private fun LoadingOverlay(tab: FilesTab) {
 }
 
 @Composable
-private fun FilesListContent(tab: FilesTab) {
+private fun FilesListContent(tab: FilesTab, parentFolder: ContentHolder?) {
     when (tab.viewConfig.viewType) {
-        ViewType.LIST -> FilesListColumns(tab)
-        ViewType.GRID -> FilesListGrid(tab)
+        ViewType.LIST -> FilesListColumns(tab, parentFolder)
+        ViewType.GRID -> FilesListGrid(tab, parentFolder)
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FilesListColumns(tab: FilesTab) {
+fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
 
     LazyVerticalGrid(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .fastScrollbar(tab.activeListState),
         state = tab.activeListState,
         columns = GridCells.Fixed(tab.viewConfig.columnCount),
     ) {
+        // `..` parent directory entry
+        if (parentFolder != null) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
+            }
+        }
+
         itemsIndexed(
             tab.activeFolderContent,
             key = { _, item -> item.uid }
@@ -262,7 +325,7 @@ fun FilesListColumns(tab: FilesTab) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FilesListGrid(tab: FilesTab) {
+fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
@@ -270,8 +333,17 @@ fun FilesListGrid(tab: FilesTab) {
     LazyVerticalGrid(
         state = tab.activeListState,
         columns = GridCells.Fixed(tab.viewConfig.columnCount),
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .fastScrollbar(tab.activeListState)
     ) {
+        // `..` parent directory entry (spans full width)
+        if (parentFolder != null) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
+            }
+        }
+
         itemsIndexed(
             tab.activeFolderContent,
             key = { _, item -> item.uid }
@@ -369,9 +441,16 @@ private fun ColumnFileItem(
 
             Column(Modifier.weight(1f)) {
                 val fontSize = getFileListFontSize(tab.activeFolder)
+                // Hide extension from display name if setting is enabled
+                val prefs = globalClass.preferencesManager
+                val displayText = if (prefs.hideFileExtensions && item.isFile() && item.extension.isNotEmpty()) {
+                    item.displayName.substringBeforeLast(".")
+                } else {
+                    item.displayName
+                }
 
                 Text(
-                    text = item.displayName,
+                    text = displayText,
                     fontSize = fontSize.sp,
                     maxLines = 1,
                     lineHeight = (fontSize + 2).sp,
@@ -642,19 +721,66 @@ private fun FileDetails(
         }
     }
 
-    Text(
-        modifier = Modifier.alpha(0.7f),
-        text = details,
-        fontSize = (fontSize - 4).sp,
-        maxLines = 1,
-        lineHeight = (fontSize + 2).sp,
-        overflow = TextOverflow.Ellipsis,
-        color = if (isHighlighted) {
-            colorScheme.primary
-        } else {
-            Color.Unspecified
+    // Parse dual-aligned format: "leftInfo\trightDate"
+    val parts = details.split("\t", limit = 2)
+    val leftText = parts.getOrNull(0)?.trim().orEmpty()
+    val rightText = parts.getOrNull(1)?.trim().orEmpty()
+    val smallFontSize = (fontSize - 4).sp
+    val textColor = if (isHighlighted) colorScheme.primary else Color.Unspecified
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(0.7f),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        if (leftText.isNotEmpty()) {
+            Text(
+                text = leftText,
+                fontSize = smallFontSize,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = textColor,
+                modifier = Modifier.weight(1f, fill = false)
+            )
         }
-    )
+        if (rightText.isNotEmpty()) {
+            Text(
+                text = rightText,
+                fontSize = smallFontSize,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = textColor,
+                textAlign = TextAlign.End
+            )
+        }
+    }
+}
+
+// `..` parent directory navigation row
+@Composable
+fun ParentDirectoryItem(tab: FilesTab, parentFolder: ContentHolder) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { tab.openFolder(parentFolder, false) }
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .alpha(0.55f),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.SubdirectoryArrowLeft,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp)
+        )
+        Space(size = 8.dp)
+        Text(
+            text = "..",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+    HorizontalDivider(thickness = 0.5.dp)
 }
 
 @Composable

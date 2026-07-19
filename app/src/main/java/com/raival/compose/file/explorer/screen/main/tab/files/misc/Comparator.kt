@@ -49,7 +49,10 @@ private fun naturalCompare(str1: String, str2: String): Int {
         val c2 = s2[i2]
 
         if (c1.isDigit() && c2.isDigit()) {
-            // Parse numbers directly without regex
+            // Skip leading zeros so "01" and "1" compare as equal numerically
+            while (i1 < s1.length - 1 && s1[i1] == '0' && s1[i1 + 1].isDigit()) i1++
+            while (i2 < s2.length - 1 && s2[i2] == '0' && s2[i2 + 1].isDigit()) i2++
+
             var num1 = 0L
             var num2 = 0L
 

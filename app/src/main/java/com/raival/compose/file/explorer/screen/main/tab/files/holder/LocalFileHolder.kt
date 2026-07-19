@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import androidx.core.content.FileProvider
 import com.anggrayudi.storage.file.getBasePath
 import com.anggrayudi.storage.file.mimeType
@@ -15,6 +17,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.fromJson
 import com.raival.compose.file.explorer.common.hasParent
 import com.raival.compose.file.explorer.common.isNot
+import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.common.toFormattedSize
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ContentCount
@@ -80,26 +83,86 @@ class LocalFileHolder(file: File) : ContentHolder() {
     val basePath by lazy { file.getBasePath(globalClass) }
 
     override suspend fun getDetails(): String {
-        val separator = " | "
-
         if (details.isNotEmpty()) return details
 
-        return buildString {
-            append(getLastModifiedDate())
-            if (file.isDirectory) {
-                if (globalClass.preferencesManager.showFolderContentCount && file.canRead()) {
-                    append(separator)
-                    append(getFormattedFileCount())
+        // Right side: date formatted as DD/MM/YY • HH:MM
+        val rightSide = lastModified.toFormattedDate(
+            customFormat = "dd/MM/yy • HH:mm"
+        )
+
+        val prefs = globalClass.preferencesManager
+        val leftSide = if (file.isDirectory) {
+            if (prefs.showFolderContentCount && file.canRead()) {
+                // Pass showHidden so hidden items are only counted when enabled
+                val count = getContentCount(prefs.showHiddenFiles)
+                buildString {
+                    if (count.folders > 0) {
+                        append("📁 ${count.folders}")
+                        if (count.files > 0) append(" • ")
+                    }
+                    if (count.files > 0) {
+                        append("📄 ${count.files}")
+                    }
+                    if (count.folders == 0 && count.files == 0) {
+                        append(globalClass.getString(R.string.empty_folder))
+                    }
                 }
-            } else {
-                append(separator)
-                append(file.length().toFormattedSize())
-                append(separator)
-                append(file.extension)
+            } else ""
+        } else {
+            val sizeStr = file.length().toFormattedSize()
+            val ext = file.extension.lowercase()
+            // Only show extension in metadata when hide-extensions is ON
+            val extLabel = if (prefs.hideFileExtensions && file.extension.isNotEmpty())
+                file.extension.uppercase() else null
+
+            when {
+                // PDF: show page count
+                ext == "pdf" -> {
+                    val pages = getPdfPageCount()
+                    if (pages > 0) "$sizeStr • $pages ${if (pages == 1) "page" else "pages"}"
+                    else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
+                }
+                // Archives: show compression ratio
+                ext in archiveExtensions -> {
+                    val ratio = getArchiveCompressionRatio()
+                    if (ratio != null) "$sizeStr • $ratio"
+                    else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
+                }
+                // Default
+                else -> if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
             }
-        }.also {
-            details = it
         }
+
+        return "$leftSide\t$rightSide".also { details = it }
+    }
+
+    private val archiveExtensions = setOf("zip", "jar", "apk", "xapk", "rar", "7z", "tar", "gz", "bz2")
+
+    private fun getPdfPageCount(): Int {
+        return try {
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                PdfRenderer(pfd).use { renderer -> renderer.pageCount }
+            }
+        } catch (_: Exception) { 0 }
+    }
+
+    private fun getArchiveCompressionRatio(): String? {
+        if (!file.exists() || file.extension.lowercase() !in setOf("zip", "jar", "apk", "xapk")) return null
+        return try {
+            val zip = java.util.zip.ZipFile(file)
+            var compressedTotal = 0L
+            var uncompressedTotal = 0L
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                compressedTotal += entry.compressedSize.coerceAtLeast(0)
+                uncompressedTotal += entry.size.coerceAtLeast(0)
+            }
+            zip.close()
+            if (uncompressedTotal <= 0) return null
+            val ratio = (compressedTotal.toDouble() / uncompressedTotal.toDouble()) * 100.0
+            "${ratio.toInt()}% ratio"
+        } catch (_: Exception) { null }
     }
 
     override suspend fun isValid(): Boolean {
@@ -212,7 +275,9 @@ class LocalFileHolder(file: File) : ContentHolder() {
         }
     }
 
-    override suspend fun getContentCount(): ContentCount {
+    override suspend fun getContentCount(): ContentCount = getContentCount(globalClass.preferencesManager.showHiddenFiles)
+
+    suspend fun getContentCount(showHidden: Boolean): ContentCount {
         if (file.absolutePath == globalClass.recycleBinDir.file.absolutePath) {
             var files = 0
             var folders = 0
@@ -220,7 +285,10 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 if (subDir.isDirectory) {
                     subDir.listFiles()?.forEach { child ->
                         if (child.name != "metadata.json") {
-                            if (child.isDirectory) folders++ else files++
+                            val hidden = child.name.startsWith(".")
+                            if (showHidden || !hidden) {
+                                if (child.isDirectory) folders++ else files++
+                            }
                         }
                     }
                 }
@@ -230,10 +298,14 @@ class LocalFileHolder(file: File) : ContentHolder() {
             return ContentCount(fileCount, folderCount)
         }
 
-        if (fileCount == 0 && folderCount == 0) {
-            file.listFiles()?.let { list ->
-                list.forEach {
-                    if (it.name != "metadata.json") {
+        // Always recount with the current showHidden value
+        fileCount = 0
+        folderCount = 0
+        file.listFiles()?.let { list ->
+            list.forEach {
+                if (it.name != "metadata.json") {
+                    val hidden = it.name.startsWith(".")
+                    if (showHidden || !hidden) {
                         if (it.isFile) fileCount++ else folderCount++
                     }
                 }

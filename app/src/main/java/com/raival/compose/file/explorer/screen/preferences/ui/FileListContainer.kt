@@ -71,5 +71,18 @@ fun FileListContainer() {
             switchState = prefs.showFolderContentCount,
             onSwitchChange = { prefs.showFolderContentCount = it }
         )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Hide File Extensions",
+            supportingText = "Show file names without their extension suffix",
+            icon = Icons.Rounded.HideSource,
+            switchState = prefs.hideFileExtensions,
+            onSwitchChange = { prefs.hideFileExtensions = it }
+        )
     }
 }

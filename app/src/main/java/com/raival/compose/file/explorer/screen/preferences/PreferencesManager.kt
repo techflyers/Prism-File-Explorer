@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -88,6 +89,18 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var hideFileExtensions by prefMutableState(
+        keyName = "hideFileExtensions",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showParentDirectoryEntry by prefMutableState(
+        keyName = "showParentDirectoryEntry",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     //---------- Behavior -------------//
     var showFileOptionMenuOnLongClick by prefMutableState(
         keyName = "showFileOptionMenuOnLongClick",
@@ -97,6 +110,24 @@ class PreferencesManager {
 
     var disablePullDownToRefresh by prefMutableState(
         keyName = "disablePullDownToRefresh",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var disableNavigationGestures by prefMutableState(
+        keyName = "disableNavigationGestures",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var animationDurationMultiplier by prefMutableState(
+        keyName = "animationDurationMultiplier",
+        defaultValue = 1.0f,
+        getPreferencesKey = { floatPreferencesKey(it) }
+    )
+
+    var disableSpringEffect by prefMutableState(
+        keyName = "disableSpringEffect",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -422,6 +453,28 @@ class PreferencesManager {
                 it.remove(stringPreferencesKey("fileSortingPrefs_${content.uniquePath}"))
             }
         }
+    }
+
+    /**
+     * Deletes all files in the app's cache directory and any temp extraction folders.
+     * @return the total number of bytes freed.
+     */
+    fun clearTemporaryFiles(): Long {
+        var bytesFreed = 0L
+        fun deleteRecursively(file: java.io.File) {
+            if (file.isDirectory) {
+                file.listFiles()?.forEach { deleteRecursively(it) }
+            }
+            bytesFreed += file.length()
+            file.delete()
+        }
+
+        globalClass.cacheDir?.listFiles()?.forEach { deleteRecursively(it) }
+        // Also clear the external cache dirs
+        globalClass.externalCacheDirs?.forEach { dir ->
+            dir?.listFiles()?.forEach { deleteRecursively(it) }
+        }
+        return bytesFreed
     }
 
     class SingleChoiceDialog {

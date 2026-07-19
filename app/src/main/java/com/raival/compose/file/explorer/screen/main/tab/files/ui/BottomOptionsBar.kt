@@ -71,10 +71,14 @@ fun BottomOptionsBar(tab: FilesTab) {
                 Modifier
                     .fillMaxWidth()
                     .block(shape = RectangleShape)
-                    .detectVerticalSwipe(
-                        onSwipeUp = {
-                            tab.toggleFileOptionsMenu(tab.selectedFiles[tab.selectedFiles.keys.first()]!!)
-                        }
+                    .then(
+                        if (!globalClass.preferencesManager.disableNavigationGestures) {
+                            Modifier.detectVerticalSwipe(
+                                onSwipeUp = {
+                                    tab.toggleFileOptionsMenu(tab.selectedFiles[tab.selectedFiles.keys.first()]!!)
+                                }
+                            )
+                        } else Modifier
                     )
             ) {
                 // Delete
@@ -175,10 +179,14 @@ fun BottomOptionsBar(tab: FilesTab) {
         Modifier
             .fillMaxWidth()
             .block(shape = RectangleShape)
-            .detectVerticalSwipe(
-                onSwipeUp = {
-                    tab.toggleBookmarksDialog(true)
-                }
+            .then(
+                if (!globalClass.preferencesManager.disableNavigationGestures) {
+                    Modifier.detectVerticalSwipe(
+                        onSwipeUp = {
+                            tab.toggleBookmarksDialog(true)
+                        }
+                    )
+                } else Modifier
             )
     ) {
         if (state.showEmptyRecycleBinButton) {

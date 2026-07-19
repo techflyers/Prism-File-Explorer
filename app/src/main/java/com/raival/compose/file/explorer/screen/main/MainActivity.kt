@@ -237,6 +237,9 @@ class MainActivity : BaseActivity() {
             val animationScope = rememberCoroutineScope()
             var isAnimatingBack by remember { mutableStateOf(false) }
 
+            // Gate ALL navigation gestures (swipe-to-switch-tab, swipe-to-new-tab)
+            val gesturesEnabled = !globalClass.preferencesManager.disableNavigationGestures
+
             fun applyExponentialTension(current: Float, addition: Float, threshold: Float): Float {
                 return if (current < threshold) {
                     current + addition
@@ -247,79 +250,47 @@ class MainActivity : BaseActivity() {
                 }
             }
 
-            val nestedScrollConnection = remember {
+            val nestedScrollConnection = remember(gesturesEnabled) {
                 object : NestedScrollConnection {
-                    override fun onPreScroll(
-                        available: Offset,
-                        source: NestedScrollSource
-                    ): Offset {
+                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                        if (!gesturesEnabled) return Offset.Zero
                         val isLastPage = pagerState.currentPage == pagerState.pageCount - 1
-
-                        // If we're overscrolling and user drags back (positive x),
-                        // consume the scroll and reduce overscroll manually
                         if (isLastPage && overscrollAmount > 0 && available.x > 0 && !isAnimatingBack) {
                             val consumeAmount = minOf(available.x, overscrollAmount)
                             overscrollAmount = maxOf(0f, overscrollAmount - consumeAmount)
-
-                            // Consume exactly what we used to reduce overscroll
                             return Offset(consumeAmount, 0f)
                         }
-
                         return Offset.Zero
                     }
 
-                    override fun onPostScroll(
-                        consumed: Offset,
-                        available: Offset,
-                        source: NestedScrollSource
-                    ): Offset {
+                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                        if (!gesturesEnabled) return Offset.Zero
                         val isLastPage = pagerState.currentPage == pagerState.pageCount - 1
-
-                        // Only handle overscroll if we're on last page and scrolling right (negative x)
                         if (isLastPage && available.x < 0 && source == NestedScrollSource.UserInput && !isAnimatingBack) {
-                            val availableAmount = abs(available.x)
-
                             overscrollAmount = applyExponentialTension(
-                                overscrollAmount,
-                                availableAmount,
-                                threshold
+                                overscrollAmount, abs(available.x), threshold
                             )
-
-                            return Offset(available.x, 0f) // Consume the scroll
+                            return Offset(available.x, 0f)
                         }
-
                         return Offset.Zero
                     }
 
                     override suspend fun onPreFling(available: Velocity): Velocity {
+                        if (!gesturesEnabled) return Velocity.Zero
                         val isLastPage = pagerState.currentPage == pagerState.pageCount - 1
-
                         if (isLastPage && overscrollAmount > 0 && !isAnimatingBack) {
-                            // Trigger action when releasing overscroll
-                            if (overscrollAmount > threshold) {
-                                manager.addTabAndSelect(HomeTab())
-                            }
-
-                            // Animate overscroll back to 0
+                            if (overscrollAmount > threshold) manager.addTabAndSelect(HomeTab())
                             isAnimatingBack = true
                             animationScope.launch {
                                 animate(
                                     initialValue = overscrollAmount,
                                     targetValue = 0f,
-                                    animationSpec = tween(
-                                        durationMillis = 200,
-                                        easing = FastOutSlowInEasing
-                                    )
-                                ) { value, _ ->
-                                    overscrollAmount = value
-                                }
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                ) { value, _ -> overscrollAmount = value }
                                 isAnimatingBack = false
                             }
-
-                            // Consume all velocity to prevent pager interference
                             return Velocity.Zero
                         }
-
                         return Velocity.Zero
                     }
                 }
@@ -327,6 +298,8 @@ class MainActivity : BaseActivity() {
 
             HorizontalPager(
                 state = pagerState,
+                // Disable swipe-to-switch-tab when navigation gestures are off
+                userScrollEnabled = gesturesEnabled,
                 modifier = Modifier
                     .weight(1f)
                     .nestedScroll(nestedScrollConnection),

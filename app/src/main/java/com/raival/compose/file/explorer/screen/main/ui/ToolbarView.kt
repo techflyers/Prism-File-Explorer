@@ -12,12 +12,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
 import androidx.compose.material.icons.rounded.CheckBox
 import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.EditAttributes
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material.icons.rounded.ViewComfy
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -44,6 +46,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.icons.PrismIcons
 import com.raival.compose.file.explorer.common.icons.Upgrade
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod
 import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.raival.compose.file.explorer.screen.preferences.PreferencesActivity
 
@@ -54,6 +57,8 @@ fun Toolbar(
     onToggleAppInfoDialog: (Boolean) -> Unit,
     hasNewUpdate: Boolean
 ) {
+    val mainActivityManager = globalClass.mainActivityManager
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -101,6 +106,12 @@ fun Toolbar(
                 )
             }
         }
+
+        // Quick sort flyout — only visible on Files tabs
+        if (mainActivityManager.getActiveTab() is FilesTab) {
+            QuickSortButton(mainActivityManager.getActiveTab() as FilesTab)
+        }
+
         MoreOptionsButton()
     }
 }
@@ -245,6 +256,58 @@ fun MoreOptionsButton() {
                     },
                     leadingIcon = {
                         Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickSortButton(tab: FilesTab) {
+    val prefs = globalClass.preferencesManager
+    var showMenu by remember { mutableStateOf(false) }
+
+    val sortOptions = listOf(
+        SortingMethod.SORT_BY_NAME to "Name",
+        SortingMethod.SORT_BY_DATE to "Date",
+        SortingMethod.SORT_BY_SIZE to "Size",
+        SortingMethod.SORT_BY_TYPE to "Type"
+    )
+
+    Box {
+        IconButton(onClick = { showMenu = true }) {
+            Icon(imageVector = Icons.Rounded.SortByAlpha, contentDescription = "Quick sort")
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            sortOptions.forEach { (method, label) ->
+                val isCurrent = prefs.defaultSortMethod == method
+                DropdownMenuItem(
+                    text = { Text(text = label) },
+                    onClick = {
+                        prefs.defaultSortMethod = method
+                        // Reload the current folder with the new sort order
+                        tab.openFolder(tab.activeFolder, rememberListState = false)
+                        showMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.SortByAlpha,
+                            contentDescription = null
+                        )
+                    },
+                    trailingIcon = {
+                        if (isCurrent) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null
+                            )
+                        }
                     }
                 )
             }

@@ -193,10 +193,14 @@ fun TabLayout(
                                 )
                                 .padding(horizontal = 20.dp)
                                 .longPressDraggableHandle()
-                                .detectVerticalSwipe(
-                                    onSwipeDown = {
-                                        mainActivityManager.removeTabAt(index)
-                                    }
+                                .then(
+                                    if (!globalClass.preferencesManager.disableNavigationGestures) {
+                                        Modifier.detectVerticalSwipe(
+                                            onSwipeDown = {
+                                                mainActivityManager.removeTabAt(index)
+                                            }
+                                        )
+                                    } else Modifier
                                 ),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center

@@ -6,6 +6,7 @@ import com.raival.compose.file.explorer.App.Companion.logger
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.showMsg
+import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.common.toFormattedSize
 import com.raival.compose.file.explorer.common.toUuid
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
@@ -249,24 +250,26 @@ class ZipFileHolder(
     }
 
     private suspend fun createDetails(): String {
-        val separator = " | "
-        return buildString {
-            append(getLastModifiedDate())
-            if (node.isDirectory) {
-                if (globalClass.preferencesManager.showFolderContentCount) {
-                    append(separator)
-                    append(getFormattedFileCount())
-                }
-            } else {
-                append(separator)
-                append(node.size.toFormattedSize())
-                append(separator)
-                append(node.extension)
-            }
+        // Right side: date formatted as DD/MM/YY • HH:MM
+        val rightSide = lastModified.toFormattedDate(customFormat = "dd/MM/yy • HH:mm")
+
+        val prefs = globalClass.preferencesManager
+        val leftSide = if (node.isDirectory) {
+            if (prefs.showFolderContentCount) {
+                val count = getFormattedIconCount()
+                count
+            } else ""
+        } else {
+            val sizeStr = node.size.toFormattedSize()
+            if (prefs.hideFileExtensions && node.extension.isNotEmpty()) {
+                "$sizeStr • ${node.extension.uppercase()}"
+            } else sizeStr
         }
+
+        return "$leftSide\t$rightSide"
     }
 
-    private suspend fun getFormattedFileCount(): String {
+    private suspend fun getFormattedIconCount(): String {
         if (filesCount == 0 && foldersCount == 0) {
             runBlocking {
                 listContent().forEach {
@@ -276,9 +279,13 @@ class ZipFileHolder(
             }
         }
 
-        return getFormattedFileCount(
-            filesCount,
-            foldersCount
-        )
+        return buildString {
+            if (foldersCount > 0) {
+                append("📁 $foldersCount")
+                if (filesCount > 0) append(" • ")
+            }
+            if (filesCount > 0) append("📄 $filesCount")
+            if (foldersCount == 0 && filesCount == 0) append(globalClass.getString(R.string.empty_folder))
+        }
     }
 }
