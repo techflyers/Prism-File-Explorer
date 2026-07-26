@@ -26,4 +26,8 @@ dependencyResolutionManagement {
 rootProject.name = "File Explorer"
 include(":app")
 include(":baselineprofile")
+include(":terminal-emulator")
+include(":terminal-view")
+include(":proot")
+include(":link2symlink")
 

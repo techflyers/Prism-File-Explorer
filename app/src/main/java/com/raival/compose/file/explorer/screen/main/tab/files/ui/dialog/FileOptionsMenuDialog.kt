@@ -59,6 +59,10 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.FileIcon
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRow
+import android.content.Intent
+import androidx.compose.material.icons.rounded.Terminal
+import com.raival.compose.file.explorer.screen.terminal.TerminalActivity
+import com.raival.compose.file.explorer.screen.terminal.openFolderInTerminal
 
 @Composable
 fun FileOptionsMenuDialog(
@@ -219,6 +223,22 @@ fun FileOptionsMenuDialog(
                     onDismissRequest()
                     tab.requestNewTab(FilesTab(targetContentHolder))
                     tab.unselectAllFiles()
+                }
+
+                // Open in Terminal
+                if (targetContentHolder is LocalFileHolder) {
+                    FileOption(
+                        Icons.Rounded.Terminal,
+                        "Open in Terminal"
+                    ) {
+                        onDismissRequest()
+                        openFolderInTerminal(context, targetContentHolder.file.absolutePath)
+                        val intent = Intent(context, TerminalActivity::class.java).apply {
+                            putExtra("cwd", targetContentHolder.file.absolutePath)
+                        }
+                        context.startActivity(intent)
+                        tab.unselectAllFiles()
+                    }
                 }
             }
 

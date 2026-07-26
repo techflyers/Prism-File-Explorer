@@ -1,15 +1,18 @@
 *.iml
 .gradle
-/local.properties
 .idea/
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
 .kotlin
+.DS_Store
+.cxx
+.externalNativeBuild
+**/build/
+**/.cxx
+**/.externalNativeBuild
 
-# Logs & debug artifacts
+# Android & Local Config
+local.properties
+/captures
+
+
+# Logs & Debug Artifacts
 *.log
-

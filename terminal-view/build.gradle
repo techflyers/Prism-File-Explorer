@@ -1,0 +1,38 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+android {
+    compileSdkVersion 36
+    namespace = "com.termux.view"
+
+    dependencies {
+        implementation "androidx.annotation:annotation:1.8.2"
+        api project(":terminal-emulator")
+    }
+
+    defaultConfig {
+        minSdkVersion 26
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+}
+
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    archiveClassifier.set("sources")
+}

@@ -81,7 +81,10 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
     val cleanOnExitDir
         get() = LocalFileHolder(
             File(
-                getExternalFilesDir(null),
+                // getExternalCacheDir() gives external storage capacity (safe for large archives)
+                // with cache semantics (OS/user can clear it). Falls back to internal cacheDir
+                // on devices without external storage.
+                getExternalCacheDir() ?: cacheDir,
                 "cleanOnExit"
             ).apply { mkdirs() }
         )

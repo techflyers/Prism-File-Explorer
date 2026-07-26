@@ -35,7 +35,7 @@ class PreferencesManager {
     //---------- Appearance -------------//
     var theme by prefMutableState(
         keyName = "theme",
-        defaultValue = ThemePreference.SYSTEM.ordinal,
+        defaultValue = ThemePreference.DARK.ordinal,
         getPreferencesKey = { intPreferencesKey(it) }
     )
 

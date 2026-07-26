@@ -11,6 +11,7 @@ android {
     namespace = "com.raival.compose.file.explorer"
     compileSdk = 36
     compileSdkExtension = 19
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.raival.compose.file.explorer"
@@ -97,6 +98,12 @@ dependencies {
     "baselineProfile"(project(":baselineprofile"))
     implementation(libs.androidx.profileinstaller)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
+
+    // Terminal Emulator
+    implementation(project(":terminal-emulator"))
+    implementation(project(":terminal-view"))
+    implementation(project(":proot"))
+    implementation(project(":link2symlink"))
 
     // Local/File-based dependencies
     implementation(files("libs/APKEditor.jar"))
