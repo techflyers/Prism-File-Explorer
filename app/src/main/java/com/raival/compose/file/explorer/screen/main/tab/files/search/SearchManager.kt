@@ -18,6 +18,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.AiSearchResult
 import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.FileIndexer
 import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.FileSearchIndex
+import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.MlKitOcrEngine
 import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager
 import com.raival.compose.file.explorer.screen.main.tab.files.search.ai.SemanticSearchEngine
 import kotlinx.coroutines.CancellationException
@@ -123,6 +124,7 @@ class SearchManager {
                 fileIndex = FileIndexer.buildIndex(
                     rootPath = folderPath,
                     engine = engine,
+                    ocrEngine = MlKitOcrEngine(),
                     onProgress = { phase, current, total ->
                         indexingPhase = phase
                         indexingCurrent = current

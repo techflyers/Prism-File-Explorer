@@ -179,6 +179,9 @@ dependencies {
     // QR Code Generation (offline)
     implementation("com.google.zxing:core:3.5.3")
 
+    // Google ML Kit — on-device OCR for images and scanned PDFs
+    implementation(libs.mlkit.text.recognition)
+
     // Shizuku (privileged file access)
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")

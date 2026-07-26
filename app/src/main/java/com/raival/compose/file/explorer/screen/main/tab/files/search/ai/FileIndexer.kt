@@ -3,6 +3,7 @@ package com.raival.compose.file.explorer.screen.main.tab.files.search.ai
 import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -123,7 +124,14 @@ object FileIndexer {
         ".sql", ".graphql",
         ".r", ".jl", ".lua", ".php", ".pl", ".pm",
         ".gradle", ".cmake",
-        ".docx", ".xlsx", ".pptx", ".pdf", ".tex"
+        ".docx", ".xlsx", ".pptx", ".pdf", ".tex",
+        // Image files — text extracted via ML Kit OCR when an OcrEngine is provided
+        ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"
+    )
+
+    /** Image extensions that require OCR to produce any text. */
+    private val IMAGE_EXTENSIONS = setOf(
+        ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"
     )
 
     /** Directories to skip. */
@@ -151,6 +159,7 @@ object FileIndexer {
         extensions: Set<String>? = null,
         forceReindex: Boolean = false,
         batchSize: Int = 32,
+        ocrEngine: OcrEngine? = null,
         onProgress: IndexProgressCallback? = null
     ): FileSearchIndex = withContext(Dispatchers.IO) {
         val tag = "FileIndexer"
@@ -220,7 +229,7 @@ object FileIndexer {
 
         for (i in filesToEmbed.indices) {
             onProgress?.invoke("Reading files", i + 1, filesToEmbed.size)
-            val content = readFileContent(filesToEmbed[i])
+            val content = readFileContent(filesToEmbed[i], ocrEngine = ocrEngine)
             if (content.isNotBlank()) {
                 texts.add(content)
                 validPaths.add(filesToEmbed[i])
@@ -318,15 +327,29 @@ object FileIndexer {
     /**
      * Read file content with a header, truncated to MAX_CHARS.
      */
-    private fun readFileContent(path: String): String {
+    private suspend fun readFileContent(path: String, ocrEngine: OcrEngine? = null): String {
         return try {
             val file = File(path)
-            val ext = file.extension.lowercase()
+            val ext = ".${file.extension.lowercase()}"
 
-            val content = when (ext) {
-                "docx" -> extractDocxText(file)
-                "xlsx" -> extractXlsxText(file)
-                "pptx" -> extractPptxText(file)
+            val content: String = when {
+                ext == ".docx" -> extractDocxText(file)
+                ext == ".xlsx" -> extractXlsxText(file)
+                ext == ".pptx" -> extractPptxText(file)
+                ext == ".pdf" -> {
+                    // Use pdfbox-android for native text extraction
+                    val native = extractPdfText(file)
+                    // Fall back to ML Kit OCR for scanned/image-only PDFs
+                    if (native.trim().length < 50 && ocrEngine != null) {
+                        ocrEngine.extractTextFromPdf(file)
+                    } else {
+                        native
+                    }
+                }
+                ext in IMAGE_EXTENSIONS -> {
+                    // Images have no embedded text — rely entirely on OCR
+                    ocrEngine?.extractTextFromImage(file) ?: ""
+                }
                 else -> file.readText(Charsets.UTF_8)
             }
 
@@ -404,6 +427,26 @@ object FileIndexer {
                 }
             }
             sb.toString()
+        } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Extract plain text from a PDF file using pdfbox-android.
+     *
+     * [PDFBoxResourceLoader.init] must be called before [PDDocument.load] or pdfbox-android
+     * silently fails and returns empty. The init is idempotent so calling it every time is safe.
+     *
+     * Returns an empty string if extraction fails or produces no text
+     * (e.g. a scanned/image-only PDF), in which case the caller should
+     * fall back to [OcrEngine.extractTextFromPdf].
+     */
+    private fun extractPdfText(file: File): String {
+        return try {
+            PDFBoxResourceLoader.init(com.raival.compose.file.explorer.App.globalClass)
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(file)
+            document.use { doc ->
+                com.tom_roush.pdfbox.text.PDFTextStripper().getText(doc)
+            }
         } catch (_: Exception) { "" }
     }
 }
