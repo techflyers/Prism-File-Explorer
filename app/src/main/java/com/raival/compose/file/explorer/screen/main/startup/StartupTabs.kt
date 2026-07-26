@@ -3,8 +3,16 @@ package com.raival.compose.file.explorer.screen.main.startup
 import com.raival.compose.file.explorer.common.emptyString
 import java.util.UUID
 
+enum class PlusButtonOverride {
+    DEFAULT, // First startup tab in order
+    HOME,
+    APPS,
+    FILES
+}
+
 data class StartupTabs(
-    val tabs: List<StartupTab>
+    val tabs: List<StartupTab>,
+    val plusButtonOverride: PlusButtonOverride = PlusButtonOverride.DEFAULT
 ) {
     companion object {
         fun default() = StartupTabs(arrayListOf(StartupTab(StartupTabType.HOME)))

@@ -64,9 +64,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.raival.compose.file.explorer.common.resolveUriToPath
+
 class MarkdownViewerActivity : ViewerActivity() {
     override fun onCreateNewInstance(uri: Uri, uid: String): ViewerInstance {
-        return MarkdownViewerInstance(uri, uid)
+        val extraPath = intent.getStringExtra("extra_file_path")
+        return MarkdownViewerInstance(uri, uid, extraPath)
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -92,7 +97,8 @@ class MarkdownViewerActivity : ViewerActivity() {
 
 class MarkdownViewerInstance(
     override val uri: Uri,
-    override val id: String
+    override val id: String,
+    val extraFilePath: String? = null
 ) : ViewerInstance {
     override fun onClose() {}
 }
@@ -115,38 +121,27 @@ private fun MarkdownViewerScreen(
     val scope = rememberCoroutineScope()
 
     val filePath = remember {
-        try {
-            val cursor = context.contentResolver.query(instance.uri, null, null, null, null)
-            var path = ""
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex("_data")
-                    if (idx >= 0) path = it.getString(idx) ?: ""
-                }
-            }
-            if (path.isEmpty()) instance.uri.path ?: "" else path
-        } catch (_: Exception) {
-            instance.uri.path ?: ""
-        }
+        resolveUriToPath(context, instance.uri, instance.extraFilePath)
     }
 
     val fileName = remember { filePath.substringAfterLast('/') }
 
-    // Load content
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
+    // Load / reload content on resume
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch(Dispatchers.IO) {
             try {
                 val file = File(filePath)
                 if (file.exists()) {
-                    sourceContent = file.readText()
+                    val text = file.readText()
+                    withContext(Dispatchers.Main) { sourceContent = text }
                 } else {
-                    // Try to read from URI
                     context.contentResolver.openInputStream(instance.uri)?.use { stream ->
-                        sourceContent = stream.bufferedReader().readText()
+                        val text = stream.bufferedReader().readText()
+                        withContext(Dispatchers.Main) { sourceContent = text }
                     }
                 }
             } catch (e: Exception) {
-                sourceContent = "Failed to load file: ${e.message}"
+                withContext(Dispatchers.Main) { sourceContent = "Failed to load file: ${e.message}" }
             }
         }
     }

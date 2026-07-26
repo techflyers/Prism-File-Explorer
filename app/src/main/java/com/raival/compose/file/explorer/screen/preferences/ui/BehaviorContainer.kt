@@ -79,50 +79,6 @@ fun BehaviorContainer() {
             thickness = 3.dp
         )
 
-        // Animation Duration slider
-        var animMultiplier by remember { mutableFloatStateOf(prefs.animationDurationMultiplier) }
-        Column(
-            modifier = androidx.compose.ui.Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Row(
-                modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.material3.Icon(
-                    imageVector = Icons.Rounded.Animation,
-                    contentDescription = null,
-                    modifier = androidx.compose.ui.Modifier.padding(end = 16.dp)
-                )
-                Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
-                    Text(text = "Animation Speed", fontSize = 14.sp)
-                    Text(
-                        text = when {
-                            animMultiplier < 0.05f -> "Disabled"
-                            animMultiplier < 0.75f -> "Fast (${"%.1f".format(animMultiplier)}x)"
-                            animMultiplier < 1.25f -> "Normal"
-                            else -> "Slow (${"%.1f".format(animMultiplier)}x)"
-                        },
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                }
-            }
-            Slider(
-                value = animMultiplier,
-                onValueChange = { animMultiplier = it },
-                onValueChangeFinished = { prefs.animationDurationMultiplier = animMultiplier },
-                valueRange = 0f..2f,
-                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
-            )
-        }
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
-
         PreferenceItem(
             label = "Disable Spring / Bounce Effect",
             supportingText = "Remove elastic bounce from pull-to-refresh",

@@ -29,6 +29,8 @@ import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.Net
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.screen.main.tab.nfile_tools.*
+import com.raival.compose.file.explorer.screen.preferences.PreferencesActivity
+import android.content.Intent
 import java.io.File
 
 @Composable
@@ -223,6 +225,16 @@ fun NFileDrawerContent(
                 tint = MaterialTheme.colorScheme.secondary
             ) {
                 manager.replaceCurrentTabWith(NetworkConnectionWizardTab())
+                onNavigate()
+            }
+
+            // Settings / Preferences button
+            DrawerItem(
+                icon = Icons.Rounded.Settings,
+                label = stringResource(R.string.preferences),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                context.startActivity(Intent(context, PreferencesActivity::class.java))
                 onNavigate()
             }
 

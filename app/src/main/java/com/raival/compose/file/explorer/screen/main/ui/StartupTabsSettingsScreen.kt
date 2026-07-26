@@ -61,6 +61,13 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.util.UUID
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.raival.compose.file.explorer.screen.main.startup.PlusButtonOverride
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartupTabsSettingsScreen(
@@ -70,6 +77,7 @@ fun StartupTabsSettingsScreen(
     if (show) {
         val useDarkIcons = !isSystemInDarkTheme()
         val tabs = remember { mutableStateListOf<StartupTab>() }
+        var plusButtonOverride by remember { mutableStateOf(PlusButtonOverride.DEFAULT) }
         val lazyListState = rememberLazyListState()
         val reorderableState = rememberReorderableLazyListState(
             lazyListState = lazyListState,
@@ -82,7 +90,7 @@ fun StartupTabsSettingsScreen(
         )
 
         Dialog(
-            onDismissRequest = { onBackClick(StartupTabs(tabs)) },
+            onDismissRequest = { onBackClick(StartupTabs(tabs, plusButtonOverride)) },
             properties = DialogProperties(
                 dismissOnClickOutside = false,
                 decorFitsSystemWindows = false,
@@ -97,14 +105,17 @@ fun StartupTabsSettingsScreen(
             }
 
             LaunchedEffect(Unit) {
-                val config = try {
+                val startupTabsObj = try {
                     fromJson<StartupTabs>(
                         globalClass.preferencesManager.startupTabs
                     ) ?: StartupTabs.default()
                 } catch (e: Exception) {
                     logger.logError(e)
                     StartupTabs.default()
-                }.tabs
+                }
+
+                plusButtonOverride = startupTabsObj.plusButtonOverride
+                val config = startupTabsObj.tabs
 
                 config.forEach {
                     // Gson can actually make this null
@@ -127,7 +138,7 @@ fun StartupTabsSettingsScreen(
                             )
                         },
                         navigationIcon = {
-                            IconButton(onClick = { onBackClick(StartupTabs(tabs)) }) {
+                            IconButton(onClick = { onBackClick(StartupTabs(tabs, plusButtonOverride)) }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = null
@@ -139,6 +150,7 @@ fun StartupTabsSettingsScreen(
                                 onClick = {
                                     tabs.clear()
                                     tabs.addAll(StartupTabs.default().tabs)
+                                    plusButtonOverride = PlusButtonOverride.DEFAULT
                                 }
                             ) {
                                 Icon(
@@ -160,6 +172,55 @@ fun StartupTabsSettingsScreen(
                         .padding(paddingValues)
                         .padding(vertical = 16.dp)
                 ) {
+                    // '+' Button Action Override Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "'+' Button Action Override",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Choose what tab type the '+' button creates",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                PlusButtonOverride.values().forEach { mode ->
+                                    FilterChip(
+                                        selected = plusButtonOverride == mode,
+                                        onClick = { plusButtonOverride = mode },
+                                        label = {
+                                            Text(
+                                                text = when (mode) {
+                                                    PlusButtonOverride.DEFAULT -> "First Tab"
+                                                    PlusButtonOverride.HOME -> "Home"
+                                                    PlusButtonOverride.APPS -> "Apps"
+                                                    PlusButtonOverride.FILES -> "Files"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     // Tabs list
                     LazyColumn(
                         state = lazyListState,

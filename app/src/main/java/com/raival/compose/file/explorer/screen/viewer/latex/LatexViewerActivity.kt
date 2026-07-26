@@ -38,6 +38,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.rounded.Edit
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -191,6 +194,12 @@ private fun LatexViewerScreen(
     }
 
     val fileName = remember { filePath.substringAfterLast('/') }
+    val baseName = remember(fileName) {
+        val name = fileName.ifEmpty { "document" }
+        if (name.contains('.')) name.substringBeforeLast('.') else name
+    }
+    val targetTexName = "$baseName.tex"
+    val targetPdfName = "$baseName.pdf"
 
     // Load source
     LaunchedEffect(Unit) {
@@ -199,6 +208,24 @@ private fun LatexViewerScreen(
                 val file = File(filePath)
                 if (file.exists()) {
                     sourceContent = file.readText()
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Load / reload content on resume (e.g. after editing in TextEditorActivity)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val file = File(filePath)
+                if (file.exists()) {
+                    val text = file.readText()
+                    withContext(Dispatchers.Main) { sourceContent = text }
+                } else {
+                    context.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                        val text = stream.bufferedReader().readText()
+                        withContext(Dispatchers.Main) { sourceContent = text }
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -220,8 +247,8 @@ private fun LatexViewerScreen(
                 val workDir = File(context.cacheDir, "latex_work_${System.currentTimeMillis()}")
                 workDir.mkdirs()
 
-                // Copy source file to workDir/input.tex to avoid scoped storage restrictions
-                val localTexFile = File(workDir, "input.tex")
+                // Copy source file to workDir/targetTexName to avoid scoped storage restrictions
+                val localTexFile = File(workDir, targetTexName)
                 context.contentResolver.openInputStream(instance.uri)?.use { input ->
                     localTexFile.outputStream().use { output ->
                         input.copyTo(output)
@@ -237,16 +264,22 @@ private fun LatexViewerScreen(
                 )
 
                 if (result.success) {
-                    // Find generated PDF (input.pdf)
-                    val pdfFile = File(workDir, "input.pdf")
+                    // Find generated PDF with targetPdfName
+                    val pdfFile = File(workDir, targetPdfName)
                     if (pdfFile.exists()) {
                         pdfPath = pdfFile.absolutePath
                         viewState = LatexViewState.PDF
                     } else {
-                        // Check for any PDF in workdir
+                        // Check for any PDF in workdir and rename it to match source filename
                         val anyPdf = workDir.listFiles()?.find { it.extension == "pdf" }
                         if (anyPdf != null) {
-                            pdfPath = anyPdf.absolutePath
+                            val targetPdf = File(workDir, targetPdfName)
+                            if (anyPdf.absolutePath != targetPdf.absolutePath) {
+                                anyPdf.renameTo(targetPdf)
+                                pdfPath = targetPdf.absolutePath
+                            } else {
+                                pdfPath = anyPdf.absolutePath
+                            }
                             viewState = LatexViewState.PDF
                         } else {
                             errorLog = "Compilation succeeded but no PDF was generated.\n\n${result.output}"
@@ -299,26 +332,48 @@ private fun LatexViewerScreen(
                             )
                         }
                     }
-                    if (viewState == LatexViewState.PDF || viewState == LatexViewState.ERROR || viewState == LatexViewState.SOURCE) {
+                    // Edit in text editor button
+                    IconButton(onClick = {
+                        val file = File(filePath)
+                        if (file.exists()) {
+                            globalClass.textEditorManager.openTextEditor(
+                                LocalFileHolder(file),
+                                context
+                            )
+                        } else {
+                            try {
+                                val tempFile = File(context.cacheDir, targetTexName)
+                                tempFile.writeText(sourceContent)
+                                globalClass.textEditorManager.openTextEditor(
+                                    LocalFileHolder(tempFile),
+                                    context
+                                )
+                            } catch (e: Exception) {
+                                globalClass.showMsg("Could not open text editor")
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Rounded.Edit, contentDescription = "Edit in text editor")
+                    }
+                    // View compiled PDF button
+                    if (pdfPath != null) {
                         IconButton(onClick = {
-                            if (viewState == LatexViewState.SOURCE) {
-                                searchVisible = false
-                                searchQuery = ""
-                                viewState = LatexViewState.PDF
-                            } else {
-                                // Open in text editor
-                                val file = File(filePath)
-                                if (file.exists()) {
-                                    globalClass.textEditorManager.openTextEditor(
-                                        LocalFileHolder(file),
-                                        context
-                                    )
-                                } else {
-                                    viewState = LatexViewState.SOURCE
+                            val pdfFile = File(pdfPath!!)
+                            if (pdfFile.exists()) {
+                                val pdfUri = FileProvider.getUriForFile(
+                                    context,
+                                    "com.raival.compose.file.explorer.provider",
+                                    pdfFile
+                                )
+                                val intent = Intent(context, PdfViewerActivity::class.java).apply {
+                                    data = pdfUri
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 }
+                                context.startActivity(intent)
                             }
                         }) {
-                            Icon(Icons.Rounded.Code, contentDescription = "View Source")
+                            Icon(Icons.Rounded.PictureAsPdf, contentDescription = "View Compiled PDF")
                         }
                     }
                     IconButton(onClick = { compile() }) {
@@ -338,11 +393,6 @@ private fun LatexViewerScreen(
                         )
                     }) {
                         Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
-                    }
-                    IconButton(onClick = {
-                        ConvertioService.convertToPdf(context, filePath)
-                    }) {
-                        Icon(Icons.Rounded.PictureAsPdf, contentDescription = "Convert to PDF")
                     }
                 }
             )

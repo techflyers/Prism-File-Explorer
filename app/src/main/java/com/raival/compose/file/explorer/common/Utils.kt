@@ -726,7 +726,11 @@ fun showMsg(msgId: Int) {
     globalClass.showMsg(msgId)
 }
 
-fun resolveUriToPath(context: Context, uri: Uri): String {
+fun resolveUriToPath(context: Context, uri: Uri, extraFilePath: String? = null): String {
+    if (!extraFilePath.isNullOrEmpty() && File(extraFilePath).exists()) {
+        return extraFilePath
+    }
+
     if (uri.scheme == "file") {
         return uri.path ?: ""
     }
@@ -734,7 +738,7 @@ fun resolveUriToPath(context: Context, uri: Uri): String {
     var path = ""
     try {
         if (uri.scheme == "content") {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            val cursor = context.contentResolver.query(uri, arrayOf("_data"), null, null, null)
             cursor?.use {
                 if (it.moveToFirst()) {
                     val idx = it.getColumnIndex("_data")
@@ -745,6 +749,30 @@ fun resolveUriToPath(context: Context, uri: Uri): String {
             }
         }
     } catch (_: Exception) {}
+
+    if (path.isEmpty() || !File(path).exists()) {
+        val uriPath = uri.path ?: ""
+        val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
+        val prefixMappings = listOf(
+            "/external_files_path/" to externalStorage,
+            "/external_files/" to externalStorage,
+            "/external-path/" to externalStorage,
+            "/root_path/" to "",
+            "/files/" to externalStorage,
+            "/storage/" to "/storage"
+        )
+        for ((prefix, basePath) in prefixMappings) {
+            val idx = uriPath.indexOf(prefix)
+            if (idx >= 0) {
+                val relativePart = uriPath.substring(idx + prefix.length)
+                val candidate = if (basePath.isEmpty()) "/$relativePart" else "$basePath/$relativePart"
+                if (File(candidate).exists()) {
+                    path = candidate
+                    break
+                }
+            }
+        }
+    }
 
     if (path.isEmpty()) {
         path = uri.path ?: ""

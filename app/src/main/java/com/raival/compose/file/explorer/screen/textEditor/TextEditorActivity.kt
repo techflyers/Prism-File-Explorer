@@ -75,6 +75,12 @@ class TextEditorActivity : BaseActivity() {
                             textEditorManager.hideSearchPanel(codeEditor)
                         }
 
+                        BackHandler(enabled = !textEditorManager.showSearchPanel && textEditorManager.requireSaveCurrentFile) {
+                            textEditorManager.getFileInstance()?.let { instance ->
+                                textEditorManager.showSaveFileBeforeClose(instance) { finish() }
+                            } ?: finish()
+                        }
+
                         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                             textEditorManager.checkActiveFileValidity(
                                 onSourceReload = {

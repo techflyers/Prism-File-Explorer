@@ -203,7 +203,7 @@ class TextEditorManager {
         return instance
     }
 
-    fun showSaveFileBeforeClose(fileInstance: FileInstance) {
+    fun showSaveFileBeforeClose(fileInstance: FileInstance, onFinish: (() -> Unit)? = null) {
         warningDialogProperties.apply {
             title = globalClass.getString(R.string.warning)
             message = globalClass.getString(R.string.save_file_msg)
@@ -212,6 +212,7 @@ class TextEditorManager {
             onDismiss = {
                 fileInstanceList.remove(fileInstance)
                 showWarningDialog = false
+                onFinish?.invoke()
             }
             onConfirm = {
                 save(
@@ -219,6 +220,7 @@ class TextEditorManager {
                         save(fileInstance) {
                             globalClass.showMsg(R.string.saved)
                             fileInstanceList.remove(fileInstance)
+                            onFinish?.invoke()
                         }
                     },
                     onFailed = { globalClass.showMsg(R.string.failed_to_save) }

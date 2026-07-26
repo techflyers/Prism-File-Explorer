@@ -14,6 +14,7 @@ import com.raival.compose.file.explorer.common.printFullStackTrace
 import com.raival.compose.file.explorer.common.showMsg
 import com.raival.compose.file.explorer.common.toJson
 import com.raival.compose.file.explorer.screen.main.model.GithubRelease
+import com.raival.compose.file.explorer.screen.main.startup.PlusButtonOverride
 import com.raival.compose.file.explorer.screen.main.startup.StartupTab
 import com.raival.compose.file.explorer.screen.main.startup.StartupTabType
 import com.raival.compose.file.explorer.screen.main.startup.StartupTabs
@@ -266,6 +267,49 @@ class MainActivityManager {
      *    a dialog is shown to save the files and the app cannot exit.
      *
      * If none of the above conditions are met, the app can exit.
+     */
+    private var isExitingViaBackPress = false
+
+    fun addDefaultOrOverriddenNewTab() {
+        val startupTabsObj = try {
+            fromJson<StartupTabs>(globalClass.preferencesManager.startupTabs) ?: StartupTabs.default()
+        } catch (e: Exception) {
+            StartupTabs.default()
+        }
+
+        val tabToCreate: Tab = when (startupTabsObj.plusButtonOverride) {
+            PlusButtonOverride.HOME -> HomeTab()
+            PlusButtonOverride.APPS -> AppsTab()
+            PlusButtonOverride.FILES -> FilesTab(LocalFileHolder(File("/storage/emulated/0")))
+            PlusButtonOverride.DEFAULT -> {
+                val firstTab = startupTabsObj.tabs.firstOrNull()
+                if (firstTab != null) {
+                    when (firstTab.type) {
+                        StartupTabType.FILES -> FilesTab(LocalFileHolder(File(firstTab.extra.ifEmpty { "/storage/emulated/0" })))
+                        StartupTabType.APPS -> AppsTab()
+                        StartupTabType.HOME -> HomeTab()
+                    }
+                } else {
+                    HomeTab()
+                }
+            }
+        }
+
+        addTabAndSelect(tabToCreate)
+    }
+
+    /**
+     * Checks if the app can exit.
+     *
+     * 1. If the active tab handles the back press, the app cannot exit.
+     * 2. If the active tab is not the home tab and the "skip home when tab closed" setting is disabled,
+     *    the active tab is replaced with the home tab and the app cannot exit.
+     * 3. If there is more than one tab and the selected tab is not the first tab,
+     *    the active tab is removed and the app cannot exit.
+     * 4. If there is only one tab and there are unsaved files in the text editor,
+     *    a dialog is shown to save the files and the app cannot exit.
+     *
+     * If none of the above conditions are met, the app can exit.
      *
      * @return True if the app can exit, false otherwise.
      */
@@ -290,6 +334,7 @@ class MainActivityManager {
 
         // Replace the active tab with the home tab (if turned on in settings)
         if (getActiveTab() !is HomeTab && !globalClass.preferencesManager.skipHomeWhenTabClosed) {
+            isExitingViaBackPress = true
             replaceCurrentTabWith(HomeTab())
             return false
         }
@@ -351,7 +396,21 @@ class MainActivityManager {
         }
     }
 
+    fun clearTabsForExit() {
+        _state.update {
+            it.copy(
+                tabs = emptyList(),
+                selectedTabIndex = 0
+            )
+        }
+    }
+
     fun saveSession() {
+        if (isExitingViaBackPress) return
+
+        val configuredStartupTabsObj: StartupTabs? = fromJson(globalClass.preferencesManager.startupTabs)
+        val configuredHasHome = configuredStartupTabsObj?.tabs?.any { it.type == StartupTabType.HOME } == true
+
         val startupTabs = arrayListOf<StartupTab>()
         _state.value.tabs.forEach { tab ->
             when (tab) {
@@ -372,37 +431,66 @@ class MainActivityManager {
                     )
                 }
 
-                else -> {
-                    startupTabs.add(
-                        StartupTab(
-                            type = StartupTabType.HOME
+                is HomeTab -> {
+                    if (configuredHasHome) {
+                        startupTabs.add(
+                            StartupTab(
+                                type = StartupTabType.HOME
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
-        globalClass.preferencesManager.lastSessionTabs = StartupTabs(startupTabs).toJson()
+        if (startupTabs.isNotEmpty()) {
+            globalClass.preferencesManager.lastSessionTabs = StartupTabs(startupTabs).toJson()
+        }
     }
 
     fun loadStartupTabs() {
+        isExitingViaBackPress = false
         managerScope.launch {
-            val startupTabs: StartupTabs =
-                if (globalClass.preferencesManager.rememberLastSession)
-                    fromJson(globalClass.preferencesManager.lastSessionTabs)
-                        ?: StartupTabs.default()
-                else fromJson(globalClass.preferencesManager.startupTabs)
-                    ?: StartupTabs.default()
+            val configuredStartupTabsObj: StartupTabs =
+                fromJson(globalClass.preferencesManager.startupTabs) ?: StartupTabs.default()
+
+            val startupTabsObj: StartupTabs =
+                if (globalClass.preferencesManager.rememberLastSession) {
+                    val lastSessionObj: StartupTabs? = fromJson(globalClass.preferencesManager.lastSessionTabs)
+                    if (lastSessionObj != null && lastSessionObj.tabs.isNotEmpty()) {
+                        val configuredHasHome = configuredStartupTabsObj.tabs.any { it.type == StartupTabType.HOME }
+                        if (!configuredHasHome) {
+                            val filteredTabs = lastSessionObj.tabs.filter { it.type != StartupTabType.HOME }
+                            if (filteredTabs.isNotEmpty()) StartupTabs(filteredTabs) else configuredStartupTabsObj
+                        } else {
+                            lastSessionObj
+                        }
+                    } else {
+                        configuredStartupTabsObj
+                    }
+                } else {
+                    configuredStartupTabsObj
+                }
 
             val tabs = arrayListOf<Tab>()
             val index = 0
 
-            startupTabs.tabs.forEachIndexed { _, tab ->
+            startupTabsObj.tabs.forEachIndexed { _, tab ->
                 val newTab = when (tab.type) {
-                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(tab.extra)))
+                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(tab.extra.ifEmpty { "/storage/emulated/0" })))
                     StartupTabType.APPS -> AppsTab()
                     else -> HomeTab()
                 }
                 tabs.add(newTab)
+            }
+
+            if (tabs.isEmpty()) {
+                val firstConfigured = configuredStartupTabsObj.tabs.firstOrNull()
+                val fallbackTab = when (firstConfigured?.type) {
+                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(firstConfigured.extra.ifEmpty { "/storage/emulated/0" })))
+                    StartupTabType.APPS -> AppsTab()
+                    else -> HomeTab()
+                }
+                tabs.add(fallbackTab)
             }
 
             // Update the state first

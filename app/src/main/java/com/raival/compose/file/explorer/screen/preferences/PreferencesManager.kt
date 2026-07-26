@@ -120,12 +120,6 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
-    var animationDurationMultiplier by prefMutableState(
-        keyName = "animationDurationMultiplier",
-        defaultValue = 1.0f,
-        getPreferencesKey = { floatPreferencesKey(it) }
-    )
-
     var disableSpringEffect by prefMutableState(
         keyName = "disableSpringEffect",
         defaultValue = false,

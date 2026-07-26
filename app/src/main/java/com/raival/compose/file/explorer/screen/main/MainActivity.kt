@@ -94,6 +94,7 @@ class MainActivity : BaseActivity() {
                         coroutineScope.launch {
                             if (mainActivityManager.canExit()) {
                                 if (!globalClass.preferencesManager.confirmBeforeAppClose || backPressedOnce) {
+                                    mainActivityManager.clearTabsForExit()
                                     finish()
                                 } else {
                                     backPressedOnce = true
@@ -163,6 +164,7 @@ class MainActivity : BaseActivity() {
 
                     ModalNavigationDrawer(
                         drawerState = drawerState,
+                        gesturesEnabled = drawerState.isOpen || !globalClass.preferencesManager.disableNavigationGestures,
                         drawerContent = {
                             NFileDrawerContent(
                                 drawerState = drawerState,
@@ -188,7 +190,7 @@ class MainActivity : BaseActivity() {
                                 tabs = mainActivityState.tabs,
                                 selectedTabIndex = mainActivityState.selectedTabIndex,
                                 onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-                                onAddNewTab = { mainActivityManager.addTabAndSelect(HomeTab()) },
+                                onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() },
                             )
                             TabsPager(mainActivityState)
                         }
