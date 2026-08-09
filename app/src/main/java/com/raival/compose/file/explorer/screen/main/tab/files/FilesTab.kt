@@ -682,22 +682,25 @@ class FilesTab(
             }
         }
 
-        val builder = ShareCompat.IntentBuilder(globalClass)
+        if (uris.isEmpty()) return
+
+        val builder = ShareCompat.IntentBuilder(context)
             .setType(if (uris.size == 1) uris[0].getMimeType(globalClass) else anyFileType)
+        
         uris.forEach {
             builder.addStream(it)
         }
 
-        context.startActivity(
-            builder.intent.apply {
-                if (uris.size > 1) action = Intent.ACTION_SEND_MULTIPLE
+        val intent = builder.intent.apply {
+            if (uris.size > 1) action = Intent.ACTION_SEND_MULTIPLE
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
 
-                addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-        )
+        val chooserIntent = Intent.createChooser(intent, null)
+        
+        // On Android 14+ (API 34+), the system automatically uses the new share sheet.
+        // We can add custom actions or preview data here if needed.
+        context.startActivity(chooserIntent)
     }
 
     fun addToHomeScreen(context: Context, file: LocalFileHolder) {
