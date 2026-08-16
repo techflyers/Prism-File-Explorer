@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Numbers
 import androidx.compose.material.icons.rounded.SdStorage
@@ -26,6 +27,7 @@ import com.raival.compose.file.explorer.common.toFormattedSize
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.REMOTE_STORAGE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.ROOT
 
 @Composable
@@ -33,6 +35,12 @@ fun StorageDeviceView(
     storageDevice: StorageDevice,
     onClick: () -> Unit = {}
 ) {
+    val progress = if (storageDevice.totalSize > 0) {
+        storageDevice.usedSize.toFloat() / storageDevice.totalSize
+    } else {
+        0f
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -46,6 +54,7 @@ fun StorageDeviceView(
             imageVector = when (storageDevice.type) {
                 INTERNAL_STORAGE -> Icons.Rounded.FolderOpen
                 ROOT -> Icons.Rounded.Numbers
+                REMOTE_STORAGE -> Icons.Rounded.Cloud
                 else -> Icons.Rounded.SdStorage
             },
             contentDescription = null
@@ -53,36 +62,38 @@ fun StorageDeviceView(
         Space(size = 8.dp)
         Column {
             Text(text = storageDevice.title)
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(8.dp),
-                    progress = { storageDevice.usedSize.toFloat() / storageDevice.totalSize },
-                    strokeCap = StrokeCap.Round,
-                    color = if ((storageDevice.usedSize.toFloat() / storageDevice.totalSize) > 0.85f) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                )
-                Space(size = 8.dp)
-                Text(
-                    modifier = Modifier
-                        .alpha(0.8f)
-                        .weight(1f),
-                    text = "${storageDevice.usedSize.toFormattedSize()}/${storageDevice.totalSize.toFormattedSize()}",
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    color = if ((storageDevice.usedSize.toFloat() / storageDevice.totalSize) > 0.85f) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                )
+            if (storageDevice.totalSize > 0) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(8.dp),
+                        progress = { progress },
+                        strokeCap = StrokeCap.Round,
+                        color = if (progress > 0.85f) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    )
+                    Space(size = 8.dp)
+                    Text(
+                        modifier = Modifier
+                            .alpha(0.8f)
+                            .weight(1f),
+                        text = "${storageDevice.usedSize.toFormattedSize()}/${storageDevice.totalSize.toFormattedSize()}",
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.End,
+                        color = if (progress > 0.85f) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    )
+                }
             }
         }
     }

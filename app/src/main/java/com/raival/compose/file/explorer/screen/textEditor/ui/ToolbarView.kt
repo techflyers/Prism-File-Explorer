@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.SaveAs
 import androidx.compose.material3.Icon
@@ -25,17 +26,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
+import com.raival.compose.file.explorer.screen.textEditor.FileRunner
 import io.github.rosemoe.sora.widget.CodeEditor
 
 @Composable
 fun ToolbarView(codeEditor: CodeEditor, onBackPressedDispatcher: OnBackPressedDispatcher) {
     val textEditorManager = globalClass.textEditorManager
     var showOptionsMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activeFile = textEditorManager.getFileInstance()?.file
+    val canRun = activeFile?.file?.let { FileRunner.isRunnable(it) } == true
 
     Row(
         modifier = Modifier
@@ -85,6 +92,27 @@ fun ToolbarView(codeEditor: CodeEditor, onBackPressedDispatcher: OnBackPressedDi
                     Icons.Rounded.Save
                 }, contentDescription = null
             )
+        }
+
+        if (canRun) {
+            IconButton(
+                onClick = {
+                    val file = textEditorManager.getFileInstance()?.file ?: return@IconButton
+                    val run = {
+                        FileRunner.run(context, file)
+                    }
+                    if (textEditorManager.requireSaveCurrentFile) {
+                        textEditorManager.save(
+                            onSaved = { run() },
+                            onFailed = { globalClass.showMsg(R.string.failed_to_save) }
+                        )
+                    } else {
+                        run()
+                    }
+                }
+            ) {
+                Icon(imageVector = Icons.Rounded.PlayArrow, contentDescription = stringResource(R.string.run))
+            }
         }
 
         IconButton(onClick = { showOptionsMenu = !showOptionsMenu }) {

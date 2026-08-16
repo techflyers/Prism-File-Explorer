@@ -3,6 +3,7 @@ package com.raival.compose.file.explorer.screen.main.tab.files.service.remote
 import org.apache.commons.net.ftp.FTP
 import org.apache.commons.net.ftp.FTPClient
 import org.apache.commons.net.ftp.FTPReply
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -99,5 +100,21 @@ class FtpRemoteClient(
             ftp.storeFile(remotePath, fis)
         }
         onProgress(1.0)
+    }
+
+    override fun createFile(path: String) {
+        val ok = ftp.storeFile(path, ByteArrayInputStream(ByteArray(0)))
+        if (!ok) throw Exception("Failed to create FTP file: $path")
+    }
+
+    override fun rename(fromPath: String, toPath: String) {
+        if (!ftp.rename(fromPath, toPath)) {
+            throw Exception("Failed to rename FTP item: $fromPath")
+        }
+    }
+
+    override fun exists(path: String): Boolean {
+        val files = ftp.listFiles(path) ?: return false
+        return files.isNotEmpty()
     }
 }

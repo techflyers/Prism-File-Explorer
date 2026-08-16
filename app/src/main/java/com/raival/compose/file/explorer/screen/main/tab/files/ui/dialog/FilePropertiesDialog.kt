@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Category
@@ -70,6 +71,7 @@ import com.raival.compose.file.explorer.common.copyToClipboard
 import com.raival.compose.file.explorer.common.showMsg
 import com.raival.compose.file.explorer.common.ui.BottomSheetDialog
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.CalculationProgress
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.ContentPropertiesProvider
@@ -127,10 +129,13 @@ fun FilePropertiesDialog(
 
                 Space(12.dp)
 
+                val propertiesListState = rememberLazyListState()
                 LazyColumn(
+                    state = propertiesListState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 600.dp),
+                        .heightIn(max = 600.dp)
+                        .fastScrollbar(propertiesListState),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     item {

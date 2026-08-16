@@ -33,6 +33,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.asCodeEditorCursorCoordinates
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import io.github.rosemoe.sora.widget.CodeEditor
 
 @Composable
@@ -86,7 +87,9 @@ fun JumpToPositionDialog(
                 }
 
                 TextField(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .autoShowKeyboard(),
                     value = posInput,
                     onValueChange = {
                         posInput = it

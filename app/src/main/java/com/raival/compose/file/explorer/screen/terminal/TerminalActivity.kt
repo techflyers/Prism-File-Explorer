@@ -80,7 +80,10 @@ class TerminalActivity : AppCompatActivity() {
     fun handleIntent(intent: Intent) {
         this.intent = intent
         val pwd = intent.getStringExtra("cwd") ?: return
-        openFolderInTerminal(this, pwd)
+        // Keep a pending run command set by FileRunner; otherwise just cd into the folder.
+        if (pendingTerminalCommand == null) {
+            openFolderInTerminal(this, pwd)
+        }
         val binder = sessionBinder?.get() ?: return
         if (terminalView.get() == null) return
 

@@ -7,8 +7,10 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemotePaths
 import com.reandroid.archive.ZipAlign
 import java.io.File
 import java.io.FileOutputStream
@@ -139,6 +141,7 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
         when (sampleContent) {
             is ZipFileHolder -> handleZipFileRenaming()
             is LocalFileHolder -> handleLocalFileRenaming()
+            is RemoteFileHolder -> handleRemoteFileRenaming()
             else -> {
                 markAsFailed(globalClass.getString(R.string.unsupported_source_type))
                 return
@@ -390,6 +393,40 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
         }
     }
 
+    private suspend fun handleRemoteFileRenaming() {
+        pendingContent.forEachIndexed { index, itemToRename ->
+            if (aborted) {
+                markAsAborted()
+                return
+            }
+
+            if (itemToRename.status == TaskContentStatus.PENDING) {
+                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+
+                progressMonitor.apply {
+                    contentName = itemToRename.source.displayName
+                    remainingContent = pendingContent.size - (index + 1)
+                    progress = progressPercent
+                }
+
+                try {
+                    val remote = itemToRename.source as RemoteFileHolder
+                    remote.client.rename(remote.remotePath, itemToRename.newPath)
+                    itemToRename.status = TaskContentStatus.SUCCESS
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    markAsFailed(
+                        globalClass.resources.getString(
+                            R.string.task_summary_failed,
+                            e.message ?: emptyString
+                        )
+                    )
+                    return
+                }
+            }
+        }
+    }
+
     override suspend fun continueTask() {
         if (parameters == null) {
             markAsFailed(globalClass.getString(R.string.unable_to_continue_task))
@@ -407,6 +444,22 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
         newName: String,
         index: Int,
     ): String {
+        if (content is RemoteFileHolder) {
+            val parentPath = RemotePaths.parent(content.remotePath) ?: "/"
+            if (sourceContent.size == 1) {
+                return RemotePaths.join(parentPath, newName)
+            }
+            val newFileName = content.displayName.transformFileName(
+                newName = newName,
+                index = index,
+                textToFind = parameters!!.toFind,
+                replaceText = parameters!!.toReplace,
+                useRegex = parameters!!.useRegex,
+                onLastModified = { content.lastModified }
+            )
+            return RemotePaths.join(parentPath, newFileName)
+        }
+
         val file = File(content.uniquePath)
 
         // 1. Deconstruct the original path and file name

@@ -92,39 +92,44 @@ object MkSession {
         val sandboxSH = localBinDir(context).child("sandbox")
         val setupSH   = localBinDir(context).child("setup")
 
+        val intermediateArgs: Array<String>
         val shell: String
-        val args: Array<String>
 
         when {
-            isExtraction -> {
-                // Run setup.sh to extract the tar and configure the container
-                shell = "/system/bin/sh"
-                args  = arrayOf("-c", setupSH.absolutePath)
-            }
             pendingTerminalCommand == null || (pendingTerminalCommand!!.sandbox && pendingTerminalCommand!!.exe.isEmpty()) -> {
                 // Normal interactive sandbox session
                 shell = "/system/bin/sh"
-                args  = arrayOf("-c", sandboxSH.absolutePath)
+                intermediateArgs = arrayOf(sandboxSH.absolutePath)
             }
             pendingTerminalCommand!!.sandbox -> {
                 // Sandbox + custom command
                 shell = "/system/bin/sh"
-                args  = mutableListOf(sandboxSH.absolutePath, pendingTerminalCommand!!.exe,
+                intermediateArgs = mutableListOf(sandboxSH.absolutePath, pendingTerminalCommand!!.exe,
                     *pendingTerminalCommand!!.args).toTypedArray()
             }
             else -> {
                 // Raw (no sandbox) custom command
                 shell = pendingTerminalCommand!!.exe
-                args  = pendingTerminalCommand!!.args
+                intermediateArgs = pendingTerminalCommand!!.args
             }
+        }
+
+        // Wrap in -c like xed-editor does: extraction uses setup.sh prefix
+        val actualShell: String
+        val actualArgs: Array<String> = if (isExtraction) {
+            actualShell = "/system/bin/sh"
+            mutableListOf("-c", setupSH.absolutePath, *intermediateArgs).toTypedArray()
+        } else {
+            actualShell = shell
+            arrayOf("-c", *intermediateArgs)
         }
 
         pendingTerminalCommand = null
 
         val session = TerminalSession(
-            /* mShellPath  = */ shell,
+            /* mShellPath  = */ actualShell,
             /* mCwd        = */ localDir(context).absolutePath,
-            /* mArgs       = */ args,
+            /* mArgs       = */ actualArgs,
             /* mEnv        = */ env.toTypedArray(),
             /* mTranscriptRows = */ 5000,
             /* mClient     = */ sessionClient,
@@ -148,25 +153,26 @@ object MkSession {
     /**
      * Writes shell scripts from assets into the local bin directory,
      * and creates the empty stat/vmstat stub files used by StatUpdater.
+     * Scripts are always refreshed from assets to ensure they match the current APK version.
      */
     private fun setupTerminalFiles(context: Context) {
-        if (!sandboxDir(context).exists() || !localBinDir(context).exists()) return
+        // Ensure directories exist (they auto-create via their factory methods)
+        sandboxDir(context)
+        localBinDir(context)
 
         // Create /proc/stat and /proc/vmstat stubs
         localDir(context).child("stat").createFileIfNot()
         localDir(context).child("vmstat").createFileIfNot()
 
-        // Extract asset scripts
+        // Always extract asset scripts (ensures fresh after reset/upgrade)
         val scripts = listOf("init", "sandbox", "setup", "utils")
         scripts.forEach { name ->
             val dest = localBinDir(context).child(name)
-            if (!dest.exists()) {
-                dest.createFileIfNot()
-                dest.writeText(
-                    context.assets.open("terminal/$name.sh").bufferedReader().use { it.readText() }
-                )
-                dest.setExecutable(true)
-            }
+            dest.createFileIfNot()
+            dest.writeText(
+                context.assets.open("terminal/$name.sh").bufferedReader().use { it.readText() }
+            )
+            dest.setExecutable(true)
         }
     }
 }

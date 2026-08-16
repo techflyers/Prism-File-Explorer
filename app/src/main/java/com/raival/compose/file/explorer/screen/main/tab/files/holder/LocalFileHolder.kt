@@ -17,6 +17,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.fromJson
 import com.raival.compose.file.explorer.common.hasParent
 import com.raival.compose.file.explorer.common.isNot
+import com.raival.compose.file.explorer.common.magika.MagikaFileTypeDetector
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.common.toFormattedSize
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
@@ -445,6 +446,18 @@ class LocalFileHolder(file: File) : ContentHolder() {
 
         if (skipSupportedExtensions) return false
 
+        val magika = MagikaFileTypeDetector.detect(file)
+        val skipMagikaOverride = extension.isNotEmpty() &&
+            globalClass.preferencesManager.disableMagikaExtOverride
+        if (!skipMagikaOverride && magika != null && magika.probability >= 0.55f) {
+            val detectedExt = magika.suggestedExtension.lowercase()
+            val extensionMissingOrWrong = extension.isEmpty() ||
+                (detectedExt.isNotEmpty() && !extensionsEquivalent(extension, detectedExt))
+            if (extensionMissingOrWrong && openByDetectedType(magika, context)) {
+                return true
+            }
+        }
+
         // LaTeX files → dedicated LaTeX viewer with tectonic compilation
         if (FileMimeType.latexFileType.contains(extension)) {
             openFileWithPackage(
@@ -529,47 +542,80 @@ class LocalFileHolder(file: File) : ContentHolder() {
             return true
         }
 
-        // MIME type detection fallback for missing/rare extensions
+        // MIME / Magika fallback for missing/rare/wrong extensions
         if (extension.isEmpty() || !hasKnownExtension()) {
-            val detected = MimeTypeDetector.detect(file)
-            if (detected != null) {
-                if (detected.isText) {
-                    // Text-based file → open in text editor
-                    globalClass.textEditorManager.openTextEditor(this, context)
-                    return true
-                }
-                when {
-                    detected.mimeType.startsWith("image/") -> {
-                        openFileWithPackage(context, context.packageName, ImageViewerActivity::class.java.name)
-                        return true
-                    }
-                    detected.mimeType.startsWith("video/") -> {
-                        openFileWithPackage(context, context.packageName, VideoPlayerActivity::class.java.name)
-                        return true
-                    }
-                    detected.mimeType.startsWith("audio/") -> {
-                        openFileWithPackage(context, context.packageName, AudioPlayerActivity::class.java.name)
-                        return true
-                    }
-                    detected.mimeType == "application/pdf" -> {
-                        openFileWithPackage(context, context.packageName, PdfViewerActivity::class.java.name)
-                        return true
-                    }
-                    // Route any detected archive MIME type to the archive browser
-                    detected.mimeType.contains("zip") || detected.mimeType.contains("archive") ||
-                    detected.mimeType.contains("7z") || detected.mimeType.contains("rar") ||
-                    detected.mimeType.contains("tar") || detected.mimeType.contains("gzip") ||
-                    detected.mimeType.contains("bzip") || detected.mimeType.contains("xz") ||
-                    detected.mimeType.contains("wim") || detected.mimeType.contains("iso") ||
-                    detected.mimeType.contains("compressed") -> {
-                        globalClass.zipManager.openArchive(this)
-                        return true
-                    }
-                }
+            val detected = MagikaFileTypeDetector.detect(file)
+            if (detected != null && openByDetectedType(detected, context)) {
+                return true
             }
         }
 
         return false
+    }
+
+    private fun openByDetectedType(
+        detected: MagikaFileTypeDetector.Result,
+        context: Context
+    ): Boolean {
+        val mime = detected.mimeType
+        val label = detected.label
+        when {
+            label == "html" || mime == "text/html" -> {
+                openFileWithPackage(context, context.packageName, HtmlViewerActivity::class.java.name)
+                return true
+            }
+            label == "markdown" || mime == "text/markdown" -> {
+                openFileWithPackage(context, context.packageName, MarkdownViewerActivity::class.java.name)
+                return true
+            }
+            label == "latex" || mime.contains("tex") -> {
+                openFileWithPackage(context, context.packageName, LatexViewerActivity::class.java.name)
+                return true
+            }
+            label in setOf("pdf") || mime == "application/pdf" -> {
+                openFileWithPackage(context, context.packageName, PdfViewerActivity::class.java.name)
+                return true
+            }
+            mime.startsWith("image/") || label in setOf("png", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "ico") -> {
+                openFileWithPackage(context, context.packageName, ImageViewerActivity::class.java.name)
+                return true
+            }
+            mime.startsWith("video/") || label in setOf("mp4", "mkv", "webm", "flv", "3gp") -> {
+                openFileWithPackage(context, context.packageName, VideoPlayerActivity::class.java.name)
+                return true
+            }
+            mime.startsWith("audio/") || label in setOf("mp3", "wav", "ogg", "flac", "midi") -> {
+                openFileWithPackage(context, context.packageName, AudioPlayerActivity::class.java.name)
+                return true
+            }
+            label in setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp") -> {
+                openFileWithPackage(context, context.packageName, DocumentViewerActivity::class.java.name)
+                return true
+            }
+            mime.contains("zip") || mime.contains("archive") || mime.contains("7z") ||
+                mime.contains("rar") || mime.contains("tar") || mime.contains("gzip") ||
+                mime.contains("bzip") || mime.contains("xz") || mime.contains("iso") ||
+                label in setOf("zip", "jar", "apk", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "iso", "dmg", "cab") -> {
+                globalClass.zipManager.openArchive(this)
+                return true
+            }
+            detected.isText || MimeTypeDetector.isTextMimeType(mime) -> {
+                globalClass.textEditorManager.openTextEditor(this, context)
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun extensionsEquivalent(actual: String, detected: String): Boolean {
+        if (actual == detected) return true
+        val aliases = mapOf(
+            "jpg" to "jpeg", "jpeg" to "jpg",
+            "htm" to "html", "html" to "htm",
+            "yml" to "yaml", "yaml" to "yml",
+            "py" to "python"
+        )
+        return aliases[actual] == detected
     }
 
     /**

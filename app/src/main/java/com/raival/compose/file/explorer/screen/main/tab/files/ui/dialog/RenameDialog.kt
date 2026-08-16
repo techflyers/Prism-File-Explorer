@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -69,10 +71,16 @@ import coil3.request.ImageRequest
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.isNot
 import com.raival.compose.file.explorer.common.isValidAsFileName
+import com.raival.compose.file.explorer.common.joinFileName
+import com.raival.compose.file.explorer.common.splitFileName
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
@@ -96,8 +104,14 @@ fun RenameDialog(
             val listContent by remember {
                 mutableStateOf(tab.activeFolderContent.map { it.displayName }.toTypedArray())
             }
-
-            var newNameInput by remember { mutableStateOf(target.displayName) }
+            val split = remember(target.displayName, target.isFolder) {
+                splitFileName(target.displayName, target.isFolder)
+            }
+            var nameInput by remember {
+                mutableStateOf(TextFieldValue(split.first, TextRange(0, split.first.length)))
+            }
+            var extensionInput by remember { mutableStateOf(split.second) }
+            val newNameInput = joinFileName(nameInput.text, if (target.isFolder) emptyString else extensionInput)
             var error by remember { mutableStateOf("") }
 
             LaunchedEffect(newNameInput) {
@@ -143,26 +157,73 @@ fun RenameDialog(
                             )
                         }
 
-                        TextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = newNameInput,
-                            onValueChange = {
-                                newNameInput = it
-                            },
-                            label = { Text(text = stringResource(R.string.new_name)) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(6.dp),
-                            colors = TextFieldDefaults.colors(
-                                errorIndicatorColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent
-                            ),
-                            isError = error.isNotEmpty(),
-                            supportingText = if (error.isNotEmpty()) {
-                                { Text(error) }
-                            } else null
-                        )
+                        if (target.isFolder) {
+                            TextField(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .autoShowKeyboard(),
+                                value = nameInput,
+                                onValueChange = { nameInput = it },
+                                label = { Text(text = stringResource(R.string.name)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(6.dp),
+                                colors = TextFieldDefaults.colors(
+                                    errorIndicatorColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                isError = error.isNotEmpty(),
+                                supportingText = if (error.isNotEmpty()) {
+                                    { Text(error) }
+                                } else null
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                TextField(
+                                    modifier = Modifier
+                                        .weight(1.4f)
+                                        .autoShowKeyboard(),
+                                    value = nameInput,
+                                    onValueChange = { nameInput = it },
+                                    label = { Text(text = stringResource(R.string.name)) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = TextFieldDefaults.colors(
+                                        errorIndicatorColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        disabledIndicatorColor = Color.Transparent
+                                    ),
+                                    isError = error.isNotEmpty()
+                                )
+                                TextField(
+                                    modifier = Modifier.weight(0.8f),
+                                    value = extensionInput,
+                                    onValueChange = { extensionInput = it.replace(".", "") },
+                                    label = { Text(text = stringResource(R.string.extension)) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = TextFieldDefaults.colors(
+                                        errorIndicatorColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        disabledIndicatorColor = Color.Transparent
+                                    )
+                                )
+                            }
+                            if (error.isNotEmpty()) {
+                                Text(
+                                    text = error,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -207,7 +268,7 @@ fun RenameDialog(
                                         }
                                     }
                                 },
-                                enabled = error.isEmpty() && newNameInput.isNotBlank() && newNameInput isNot target.displayName,
+                                enabled = error.isEmpty() && nameInput.text.isNotBlank() && newNameInput isNot target.displayName,
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(

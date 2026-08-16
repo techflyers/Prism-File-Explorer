@@ -11,8 +11,10 @@ import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.common.toRelativeString
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemotePaths
 import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.runBlocking
 import net.lingala.zip4j.ZipFile
@@ -22,6 +24,7 @@ import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.UUID
 
 class CopyTask(
     val sourceFiles: List<ContentHolder>,
@@ -30,6 +33,7 @@ class CopyTask(
     private var parameters: CopyTaskParameters? = null
     private val pendingFiles: ArrayList<TaskContentItem> = arrayListOf()
     private var canPerformAtomicFileMove = true
+    private var skippedSourceDeletion = false
 
     override val metadata = createTaskMetadata()
     override val progressMonitor = TaskProgressMonitor(
@@ -55,7 +59,7 @@ class CopyTask(
 
         try {
             executeTaskBasedOnSourceType()
-            if (deleteSourceFiles) {
+            if (deleteSourceFiles && !skippedSourceDeletion) {
                 performSourceDeletion()
             }
             alignApkIfNecessary()
@@ -160,6 +164,21 @@ class CopyTask(
             sample is ZipFileHolder && destHolder is ZipFileHolder ->
                 copyZipFilesToZip(sourcePath, destHolder)
 
+            sample is LocalFileHolder && destHolder is RemoteFileHolder ->
+                copyLocalFilesToRemote(sourcePath, destHolder)
+
+            sample is RemoteFileHolder && destHolder is LocalFileHolder ->
+                copyRemoteFilesToLocal(sourcePath, destHolder)
+
+            sample is RemoteFileHolder && destHolder is RemoteFileHolder ->
+                copyRemoteFilesToRemote(sourcePath, destHolder)
+
+            sample is ZipFileHolder && destHolder is RemoteFileHolder ->
+                copyZipFilesToRemote(sourcePath, destHolder)
+
+            sample is RemoteFileHolder && destHolder is ZipFileHolder ->
+                copyRemoteFilesToZip(sourcePath, destHolder)
+
             else ->
                 throw IllegalStateException(globalClass.getString(R.string.unsupported_source_destination_combination))
         }
@@ -209,10 +228,21 @@ class CopyTask(
                 if (deleteSourceFiles
                     && source.isFolder
                     && (((source is ZipFileHolder && destHolder is ZipFileHolder) && (isSameZipFiles))
-                            || (source is LocalFileHolder && destHolder is LocalFileHolder))
+                            || (source is LocalFileHolder && destHolder is LocalFileHolder)
+                            || (source is RemoteFileHolder && destHolder is RemoteFileHolder
+                            && source.connection.id == destHolder.connection.id))
                 ) {
-                    val destPath = destHolder.uniquePath
-                    if (!hasInvalidNesting && destPath.startsWith(source.uniquePath)) {
+                    val destPath = if (source is RemoteFileHolder && destHolder is RemoteFileHolder) {
+                        destHolder.remotePath
+                    } else {
+                        destHolder.uniquePath
+                    }
+                    val sourcePathForNesting = if (source is RemoteFileHolder) {
+                        source.remotePath
+                    } else {
+                        source.uniquePath
+                    }
+                    if (!hasInvalidNesting && destPath.startsWith(sourcePathForNesting)) {
                         hasInvalidNesting = true
                     } else {
                         pendingFiles.addAll(listFilesWithRelativePath(sourcePath, source, renameInSameFolder))
@@ -269,6 +299,7 @@ class CopyTask(
         when (val sample = sourceFiles.first()) {
             is LocalFileHolder -> deleteLocalSources()
             is ZipFileHolder -> deleteZipSources(sample)
+            is RemoteFileHolder -> deleteRemoteSources()
         }
     }
 
@@ -329,6 +360,17 @@ class CopyTask(
         } catch (e: Exception) {
             logger.logError(e)
             // Don't fail the entire task if deletion fails
+        }
+    }
+
+    private fun deleteRemoteSources() {
+        sourceFiles.forEach { content ->
+            val remote = content as RemoteFileHolder
+            try {
+                remote.client.deleteRecursive(remote.remotePath, remote.isFolder)
+            } catch (e: Exception) {
+                logger.logError(e)
+            }
         }
     }
 
@@ -831,7 +873,360 @@ class CopyTask(
                 }
             }
 
+            is RemoteFileHolder -> collectRemoteItems(startFile, renamedName)
+
             else -> emptyList()
         }
+    }
+
+    private fun collectRemoteItems(
+        start: RemoteFileHolder,
+        relativeRoot: String
+    ): List<TaskContentItem> {
+        val result = mutableListOf<TaskContentItem>()
+        fun walk(holder: RemoteFileHolder, relative: String) {
+            result.add(
+                TaskContentItem(
+                    content = holder,
+                    relativePath = relative,
+                    status = TaskContentStatus.PENDING
+                )
+            )
+            if (holder.isFolder) {
+                val children = try {
+                    holder.client.listDirectory(holder.remotePath)
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    emptyList()
+                }
+                children.forEach { child ->
+                    val childHolder = RemoteFileHolder(
+                        connection = holder.connection,
+                        remotePath = child.path,
+                        item = child
+                    )
+                    val childRel = if (relative.isEmpty()) child.name else "$relative/${child.name}"
+                    walk(childHolder, childRel)
+                }
+            }
+        }
+        walk(start, relativeRoot)
+        return result
+    }
+
+    private fun copyLocalFilesToRemote(sourcePath: String, destinationHolder: RemoteFileHolder) {
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        val client = destinationHolder.client
+        pendingFiles.forEachIndexed { index, item ->
+            if (!prepareItem(index, item)) return
+            val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+            val sourceFile = (item.content as LocalFileHolder).file
+            if (item.status == TaskContentStatus.PENDING) {
+                val conflictExists = !sourceFile.isDirectory && client.exists(destPath)
+                if (conflictExists && !handleConflict(item)) return
+            }
+            when (item.status) {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                    item.status = try {
+                        if (sourceFile.isDirectory) {
+                            client.ensureDirectory(destPath)
+                        } else {
+                            if (item.status == TaskContentStatus.REPLACE && client.exists(destPath)) {
+                                client.delete(destPath, false)
+                            }
+                            client.ensureDirectory(RemotePaths.parent(destPath) ?: destinationHolder.remotePath)
+                            client.uploadFile(sourceFile.absolutePath, destPath) {}
+                        }
+                        TaskContentStatus.SUCCESS
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                        TaskContentStatus.FAILED
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun copyRemoteFilesToLocal(sourcePath: String, destinationHolder: LocalFileHolder) {
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        pendingFiles.forEachIndexed { index, item ->
+            if (!prepareItem(index, item)) return
+            val source = item.content as RemoteFileHolder
+            val destinationFile = File(destinationHolder.file, item.relativePath)
+            if (item.status == TaskContentStatus.PENDING) {
+                val conflictExists = destinationFile.exists() && destinationFile.isFile
+                if (conflictExists && !handleConflict(item)) return
+            }
+            when (item.status) {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                    item.status = try {
+                        if (source.isFolder) {
+                            destinationFile.mkdirs()
+                        } else {
+                            destinationFile.parentFile?.mkdirs()
+                            source.client.downloadFile(
+                                source.remotePath,
+                                destinationFile.absolutePath
+                            ) {}
+                        }
+                        TaskContentStatus.SUCCESS
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                        TaskContentStatus.FAILED
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun copyRemoteFilesToRemote(sourcePath: String, destinationHolder: RemoteFileHolder) {
+        val sample = sourceFiles.first() as RemoteFileHolder
+        val sameServer = sample.connection.id == destinationHolder.connection.id
+
+        if (sameServer && deleteSourceFiles) {
+            moveRemoteServerSide(destinationHolder)
+            return
+        }
+
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        val destClient = destinationHolder.client
+        pendingFiles.forEachIndexed { index, item ->
+            if (!prepareItem(index, item)) return
+            val source = item.content as RemoteFileHolder
+            val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+            if (item.status == TaskContentStatus.PENDING) {
+                val conflictExists = !source.isFolder && destClient.exists(destPath)
+                if (conflictExists && !handleConflict(item)) return
+            }
+            when (item.status) {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                    item.status = try {
+                        if (source.isFolder) {
+                            destClient.ensureDirectory(destPath)
+                        } else {
+                            if (item.status == TaskContentStatus.REPLACE && destClient.exists(destPath)) {
+                                destClient.delete(destPath, false)
+                            }
+                            destClient.ensureDirectory(
+                                RemotePaths.parent(destPath) ?: destinationHolder.remotePath
+                            )
+                            val temp = File(
+                                globalClass.cleanOnExitDir.file,
+                                "remote-copy-${UUID.randomUUID()}"
+                            )
+                            try {
+                                source.client.downloadFile(source.remotePath, temp.absolutePath) {}
+                                destClient.uploadFile(temp.absolutePath, destPath) {}
+                            } finally {
+                                temp.delete()
+                            }
+                        }
+                        TaskContentStatus.SUCCESS
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                        TaskContentStatus.FAILED
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun moveRemoteServerSide(destinationHolder: RemoteFileHolder) {
+        skippedSourceDeletion = true
+        val destClient = destinationHolder.client
+        if (pendingFiles.isEmpty()) {
+            sourceFiles.forEach { source ->
+                pendingFiles.add(
+                    TaskContentItem(
+                        content = source,
+                        relativePath = source.displayName,
+                        status = TaskContentStatus.PENDING
+                    )
+                )
+            }
+        }
+
+        progressMonitor.apply {
+            totalContent = pendingFiles.size
+            processName = globalClass.resources.getString(R.string.moving)
+        }
+
+        pendingFiles.forEachIndexed { index, item ->
+            if (!prepareItem(index, item)) return
+            val source = item.content as RemoteFileHolder
+            val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+            if (item.status == TaskContentStatus.PENDING) {
+                val conflictExists = destClient.exists(destPath) && !source.isFolder
+                if (conflictExists && !handleConflict(item)) return
+            }
+            when (item.status) {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                    item.status = try {
+                        if (item.status == TaskContentStatus.REPLACE && destClient.exists(destPath)) {
+                            destClient.deleteRecursive(destPath, source.isFolder)
+                        }
+                        destClient.rename(source.remotePath, destPath)
+                        TaskContentStatus.SUCCESS
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                        TaskContentStatus.FAILED
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun copyZipFilesToRemote(sourcePath: String, destinationHolder: RemoteFileHolder) {
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        val sourceZipFile = (sourceFiles.first() as ZipFileHolder).zipTree.source.file
+        val destClient = destinationHolder.client
+        try {
+            ZipFile(sourceZipFile).use { sourceZip ->
+                pendingFiles.forEachIndexed { index, item ->
+                    if (!prepareItem(index, item)) return
+                    val sourceHolder = item.content as ZipFileHolder
+                    val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+                    if (item.status == TaskContentStatus.PENDING) {
+                        val conflictExists = sourceHolder.isFile() && destClient.exists(destPath)
+                        if (conflictExists && !handleConflict(item)) return
+                    }
+                    when (item.status) {
+                        TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                            item.status = try {
+                                if (sourceHolder.isFolder) {
+                                    destClient.ensureDirectory(destPath)
+                                } else {
+                                    destClient.ensureDirectory(
+                                        RemotePaths.parent(destPath) ?: destinationHolder.remotePath
+                                    )
+                                    val temp = File(
+                                        globalClass.cleanOnExitDir.file,
+                                        "zip-remote-${UUID.randomUUID()}"
+                                    )
+                                    try {
+                                        temp.parentFile?.mkdirs()
+                                        sourceZip.getInputStream(
+                                            sourceZip.getFileHeader(sourceHolder.node.path)
+                                        ).use { input ->
+                                            temp.outputStream().use { output -> input.copyTo(output) }
+                                        }
+                                        destClient.uploadFile(temp.absolutePath, destPath) {}
+                                    } finally {
+                                        temp.delete()
+                                    }
+                                }
+                                TaskContentStatus.SUCCESS
+                            } catch (e: Exception) {
+                                logger.logError(e)
+                                TaskContentStatus.FAILED
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(globalClass.getString(R.string.failed_to_extract_files_from_zip), e)
+        }
+    }
+
+    private fun copyRemoteFilesToZip(sourcePath: String, destinationHolder: ZipFileHolder) {
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        try {
+            ZipFile(destinationHolder.zipTree.source.file).use { targetZipFile ->
+                pendingFiles.forEachIndexed { index, item ->
+                    if (!prepareItem(index, item)) return
+                    val source = item.content as RemoteFileHolder
+                    val targetPath = createZipEntryPath(destinationHolder.node.path, item.relativePath)
+                    if (item.status == TaskContentStatus.PENDING) {
+                        val existingHeader = targetZipFile.getFileHeader(targetPath)
+                        val conflictExists = existingHeader != null && !existingHeader.isDirectory
+                        if (conflictExists && !handleConflict(item)) return
+                    }
+                    when (item.status) {
+                        TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                            item.status = try {
+                                val params = ZipParameters().apply {
+                                    isOverrideExistingFilesInZip = item.status == TaskContentStatus.REPLACE
+                                    fileNameInZip = if (source.isFolder) "$targetPath/" else targetPath
+                                }
+                                if (source.isFolder) {
+                                    targetZipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                                } else {
+                                    val temp = File(
+                                        globalClass.cleanOnExitDir.file,
+                                        "remote-zip-${UUID.randomUUID()}"
+                                    )
+                                    try {
+                                        source.client.downloadFile(source.remotePath, temp.absolutePath) {}
+                                        targetZipFile.addFile(temp, params)
+                                    } finally {
+                                        temp.delete()
+                                    }
+                                }
+                                TaskContentStatus.SUCCESS
+                            } catch (e: Exception) {
+                                logger.logError(e)
+                                TaskContentStatus.FAILED
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+        }
+    }
+
+    private fun prepareCopyProgress() {
+        progressMonitor.apply {
+            totalContent = pendingFiles.size
+            processName = if (deleteSourceFiles)
+                globalClass.resources.getString(R.string.moving)
+            else globalClass.resources.getString(R.string.copying)
+        }
+    }
+
+    private fun prepareItem(index: Int, item: TaskContentItem): Boolean {
+        if (aborted) {
+            progressMonitor.status = TaskStatus.PAUSED
+            return false
+        }
+        if (item.status isNot TaskContentStatus.PENDING
+            && item.status isNot TaskContentStatus.REPLACE
+            && item.status isNot TaskContentStatus.CONFLICT
+        ) {
+            return true
+        }
+        updateProgress(index, item.content.displayName)
+        if (item.status == TaskContentStatus.CONFLICT && !handleConflict(item)) {
+            return false
+        }
+        return true
     }
 }

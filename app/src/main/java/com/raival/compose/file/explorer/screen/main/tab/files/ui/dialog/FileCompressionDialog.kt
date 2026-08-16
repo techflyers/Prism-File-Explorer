@@ -48,6 +48,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.isValidAsFileName
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTaskParameters
@@ -205,7 +206,9 @@ fun FileCompressionDialog(
 
                     // ── Archive name ──────────────────────────────────────────
                     TextField(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .autoShowKeyboard(),
                         value = newNameInput,
                         onValueChange = { newNameInput = it },
                         label = { Text(text = stringResource(R.string.name)) },

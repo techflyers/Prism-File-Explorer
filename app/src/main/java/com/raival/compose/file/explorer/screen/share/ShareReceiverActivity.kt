@@ -1,5 +1,7 @@
 package com.raival.compose.file.explorer.screen.share
 
+import android.content.ClipData
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -39,6 +41,9 @@ import com.raival.compose.file.explorer.base.BaseActivity
 import com.raival.compose.file.explorer.common.getUriInfo
 import com.raival.compose.file.explorer.common.showMsg
 import com.raival.compose.file.explorer.common.ui.SafeSurface
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
+import com.raival.compose.file.explorer.screen.main.MainActivity
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.theme.FileExplorerTheme
@@ -204,6 +209,12 @@ class ShareReceiverActivity : BaseActivity() {
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        IconButton(onClick = { openFullExplorer() }) {
+                            Icon(
+                                imageVector = Icons.Rounded.FolderOpen,
+                                contentDescription = getString(R.string.browse_in_explorer)
+                            )
+                        }
                         IconButton(onClick = { finish() }) {
                             Icon(Icons.Rounded.Close, contentDescription = "Close")
                         }
@@ -327,7 +338,13 @@ class ShareReceiverActivity : BaseActivity() {
 
                     // ── Directory browser + existing files list ──────────
                     Box(modifier = Modifier.weight(1f)) {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        val listState = rememberLazyListState()
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .fastScrollbar(listState)
+                        ) {
                             // Navigable sub-folders
                             if (folders.isEmpty() && existingFiles.isEmpty()) {
                                 item {
@@ -504,7 +521,9 @@ class ShareReceiverActivity : BaseActivity() {
                         onValueChange = { newFolderName = it },
                         label = { Text(getString(R.string.share_folder_name)) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .autoShowKeyboard()
                     )
                 },
                 confirmButton = {
@@ -557,7 +576,9 @@ class ShareReceiverActivity : BaseActivity() {
             } else null,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .autoShowKeyboard()
         )
     }
 
@@ -668,6 +689,25 @@ class ShareReceiverActivity : BaseActivity() {
                 showMsg(getString(R.string.share_failed_to_save))
             }
         }
+    }
+
+    private fun openFullExplorer() {
+        globalClass.isShareMode = true
+        globalClass.shareUris = sharedUris.toList()
+        globalClass.shareText = sharedText
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+        }
+        if (sharedUris.isNotEmpty()) {
+            intent.clipData = ClipData.newUri(contentResolver, "shared", sharedUris[0]).also { clip ->
+                sharedUris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+            }
+        }
+        startActivity(intent)
+        finish()
     }
 
     private fun getUniqueFile(parentDir: File, name: String): File {

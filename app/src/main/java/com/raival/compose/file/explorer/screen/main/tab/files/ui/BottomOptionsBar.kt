@@ -27,21 +27,32 @@ import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.RestoreFromTrash
+import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.raival.compose.file.explorer.App.Companion.globalClass
@@ -52,10 +63,19 @@ import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.raival.compose.file.explorer.screen.share.getSharedFileName
+import com.raival.compose.file.explorer.screen.share.saveSharedFilesToFolder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun BottomOptionsBar(tab: FilesTab) {
     val state = tab.bottomOptionsBarState.collectAsState().value
+
+    if (globalClass.isShareMode && (globalClass.shareUris.isNotEmpty() || !globalClass.shareText.isNullOrEmpty())) {
+        ShareModeSaveBar(tab)
+    }
 
     AnimatedVisibility(
         visible = state.showQuickOptions && tab.selectedFiles.isNotEmpty(),
@@ -288,5 +308,90 @@ fun RowScope.BottomOptionsBarButton(
         }
 
         view()
+    }
+}
+
+@Composable
+private fun ShareModeSaveBar(tab: FilesTab) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
+    val fileLabel = when {
+        globalClass.shareUris.size == 1 ->
+            getSharedFileName(context, globalClass.shareUris[0])
+                ?: stringResource(R.string.unknown_file)
+        globalClass.shareUris.size > 1 ->
+            stringResource(R.string.shared_files_count, globalClass.shareUris.size)
+        else -> stringResource(R.string.share_saving_file).format("text")
+    }
+
+    HorizontalDivider()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = fileLabel,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = { globalClass.clearShareMode() }
+            ) {
+                Text(text = stringResource(R.string.cancel))
+            }
+            Button(
+                modifier = Modifier.weight(1f),
+                enabled = !isSaving && tab.activeFolder.canWrite,
+                onClick = {
+                    coroutineScope.launch {
+                        isSaving = true
+                        val ok = withContext(Dispatchers.IO) {
+                            saveSharedFilesToFolder(
+                                context,
+                                globalClass.shareUris,
+                                tab,
+                                globalClass.shareText
+                            )
+                        }
+                        isSaving = false
+                        if (ok) {
+                            globalClass.clearShareMode()
+                            globalClass.showMsg(R.string.share_files_saved)
+                            tab.reloadFiles()
+                        } else {
+                            globalClass.showMsg(R.string.share_failed_to_save)
+                        }
+                    }
+                }
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Space(size = 8.dp)
+                    Text(text = stringResource(R.string.saving))
+                } else {
+                    Icon(
+                        modifier = Modifier.size(16.dp),
+                        imageVector = Icons.Rounded.SaveAlt,
+                        contentDescription = null
+                    )
+                    Space(size = 8.dp)
+                    Text(text = stringResource(R.string.share_button_save_here))
+                }
+            }
+        }
     }
 }

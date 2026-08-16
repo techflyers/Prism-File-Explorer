@@ -38,5 +38,6 @@ object NetworkConnectionsService {
         current.removeAll { it.id == id }
         val str = Gson().toJson(current)
         prefs.edit().putString(KEY_CONNECTIONS, str).apply()
+        RemoteConnectionPool.release(id)
     }
 }

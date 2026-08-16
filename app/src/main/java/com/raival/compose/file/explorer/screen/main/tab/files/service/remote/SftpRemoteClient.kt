@@ -1,11 +1,13 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.service.remote
 
 import net.schmizz.sshj.SSHClient
-import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.FileMode
+import net.schmizz.sshj.sftp.OpenMode
+import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier
 import java.io.File
 import java.util.Date
+import java.util.EnumSet
 
 class SftpRemoteClient(
     private val conn: NetworkConnectionModel
@@ -77,5 +79,25 @@ class SftpRemoteClient(
         val client = sftp ?: throw Exception("SFTP not connected")
         client.put(localPath, remotePath)
         onProgress(1.0)
+    }
+
+    override fun createFile(path: String) {
+        val client = sftp ?: throw Exception("SFTP not connected")
+        client.open(path, EnumSet.of(OpenMode.CREAT, OpenMode.WRITE, OpenMode.TRUNC)).close()
+    }
+
+    override fun rename(fromPath: String, toPath: String) {
+        val client = sftp ?: throw Exception("SFTP not connected")
+        client.rename(fromPath, toPath)
+    }
+
+    override fun exists(path: String): Boolean {
+        val client = sftp ?: throw Exception("SFTP not connected")
+        return try {
+            client.stat(path)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

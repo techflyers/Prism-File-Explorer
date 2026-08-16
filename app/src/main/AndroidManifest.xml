@@ -230,6 +230,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".screen.viewer.html.HtmlLivePreviewActivity"
+            android:exported="false"
+            android:label="HTML Preview"
+            android:theme="@style/Theme.FileExplorer" />
+
         <!-- Office Document Viewer -->
         <activity
             android:name=".screen.viewer.document.DocumentViewerActivity"

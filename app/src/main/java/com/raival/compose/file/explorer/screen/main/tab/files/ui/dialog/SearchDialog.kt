@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -85,6 +86,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.block
 import com.raival.compose.file.explorer.common.copyToClipboard
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchManager
@@ -612,8 +614,12 @@ private fun SearchResultsSection(
         }
 
         // Results List
+        val resultsListState = rememberLazyListState()
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            state = resultsListState,
+            modifier = Modifier
+                .fillMaxSize()
+                .fastScrollbar(resultsListState),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(

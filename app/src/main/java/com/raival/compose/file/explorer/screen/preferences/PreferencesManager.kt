@@ -79,7 +79,7 @@ class PreferencesManager {
 
     var showFolderContentCount by prefMutableState(
         keyName = "showFolderContentCount",
-        defaultValue = false,
+        defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -122,7 +122,7 @@ class PreferencesManager {
 
     var disableSpringEffect by prefMutableState(
         keyName = "disableSpringEffect",
-        defaultValue = false,
+        defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -356,6 +356,18 @@ class PreferencesManager {
         keyName = "aiModelDownloaded",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var disableMagikaExtOverride by prefMutableState(
+        keyName = "disableMagikaExtOverride",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var customCodeRunners by prefMutableState(
+        keyName = "customCodeRunners",
+        defaultValue = "{}",
+        getPreferencesKey = { stringPreferencesKey(it) }
     )
 
     // //---------- File Sorting -------------//

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.base.BaseActivity
 import com.raival.compose.file.explorer.common.ui.SafeSurface
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.preferences.ui.AppInfoContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.AppearanceContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.BehaviorContainer
@@ -37,6 +38,7 @@ import com.raival.compose.file.explorer.screen.preferences.ui.FileOperationConta
 import com.raival.compose.file.explorer.screen.preferences.ui.RecentFilesContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.ShizukuContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.SingleChoiceDialog
+import com.raival.compose.file.explorer.screen.preferences.ui.TerminalContainer
 import com.raival.compose.file.explorer.screen.preferences.ui.TextEditorContainer
 import com.raival.compose.file.explorer.theme.FileExplorerTheme
 
@@ -52,6 +54,7 @@ class PreferencesActivity : BaseActivity() {
         setContent {
             FileExplorerTheme {
                 SafeSurface {
+                    val prefsScroll = rememberScrollState()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -84,7 +87,8 @@ class PreferencesActivity : BaseActivity() {
                     Column(
                         Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(prefsScroll)
+                            .fastScrollbar(prefsScroll),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         AppearanceContainer()
@@ -94,6 +98,7 @@ class PreferencesActivity : BaseActivity() {
                         ShizukuContainer()
                         RecentFilesContainer()
                         TextEditorContainer()
+                        TerminalContainer()
                         AppInfoContainer()
                     }
                 }

@@ -63,6 +63,7 @@ import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.App.Companion.logger
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.MainActivityManager
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
@@ -179,10 +180,12 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         }
     }
 
+    val homeScroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(homeScroll)
+            .fastScrollbar(homeScroll),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         enabledSections.forEach { section ->

@@ -473,4 +473,34 @@
     <string name="hide_root_storage">Hide root storage</string>
     <string name="hide_root_storage_desc">Hide the root storage directory from the storage devices list</string>
     <string name="reorder_pinned_files">Reorder Pinned Files</string>
+
+    <string name="browse_in_explorer">Browse in explorer</string>
+    <string name="unknown_file">Unknown file</string>
+    <string name="shared_files_count">%d shared files</string>
+    <string name="run">Run</string>
+    <string name="cannot_run_file">This file type cannot be run</string>
+    <string name="terminal">Terminal</string>
+    <string name="terminal_status">Installation status</string>
+    <string name="terminal_installed">Ubuntu environment is installed</string>
+    <string name="terminal_not_installed">Not installed. Opening Terminal will download it.</string>
+    <string name="reset_terminal">Reset terminal</string>
+    <string name="reset_terminal_desc">Restore the terminal to its initial state. Installed packages and home files will be removed.</string>
+    <string name="reset_terminal_warning">This deletes the Ubuntu environment, home directory, and terminal configuration. The next time you open Terminal it will be set up from scratch. This cannot be undone.</string>
+    <string name="uninstall_terminal">Uninstall terminal</string>
+    <string name="uninstall_terminal_desc">Remove the terminal environment and all associated files from this device.</string>
+    <string name="uninstall_terminal_warning">This permanently removes the Ubuntu rootfs, home directory, binaries, and cached downloads. Open Terminal later to install it again. This cannot be undone.</string>
+    <string name="uninstall">Uninstall</string>
+    <string name="terminal_reset_done">Terminal was reset</string>
+    <string name="terminal_uninstalled">Terminal was uninstalled</string>
+
+    <string name="disable_magika_ext_override">Disable Magika extension override</string>
+    <string name="disable_magika_ext_override_desc">Files with an extension always use extension-based routing. Magika content detection only applies to extensionless or unrecognized files.</string>
+    <string name="custom_code_runners">Custom code runners</string>
+    <string name="custom_code_runners_desc">Define custom commands for running code files by extension</string>
+    <string name="add_runner">Add runner</string>
+    <string name="extension_label">Extension (e.g. dart)</string>
+    <string name="command_template_label">Command (use {file} for path)</string>
+    <string name="no_custom_runners">No custom runners configured</string>
+    <string name="delete_runner">Delete runner</string>
+    <string name="terminal_rootfs_missing">Terminal environment is corrupted. Please reinstall from Settings → Terminal.</string>
 </resources>

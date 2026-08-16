@@ -19,6 +19,8 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +34,9 @@ import com.raival.compose.file.explorer.common.icons.Pdf
 import com.raival.compose.file.explorer.common.icons.PrismIcons
 import com.raival.compose.file.explorer.common.icons.Sql
 import com.raival.compose.file.explorer.common.icons.Vector
+import com.raival.compose.file.explorer.common.magika.MagikaFileTypeDetector
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.archiveFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.audioFileType
@@ -52,12 +56,45 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.sqlFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.vectorFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class FileContentIcon(
     val icon: Any,
     val backgroundColor: Color? = Color(0xFF1C439B),
     val iconColor: Color? = Color.White,
 )
+
+/**
+ * Maps a Magika label to the corresponding [FileContentIcon].
+ * Returns null if the label doesn't map to a known icon.
+ */
+private fun magikaIconForLabel(label: String): FileContentIcon? = when (label) {
+    "java" -> FileContentIcon(PrismIcons.Java)
+    "kotlin" -> FileContentIcon(PrismIcons.Kotlin)
+    "markdown" -> FileContentIcon(PrismIcons.Markdown)
+    "iso" -> FileContentIcon(PrismIcons.Iso)
+    "sql" -> FileContentIcon(PrismIcons.Sql)
+    "pdf" -> FileContentIcon(PrismIcons.Pdf)
+    "apk" -> FileContentIcon(Icons.Default.Android)
+    "mp4", "mkv", "webm", "flv", "3gp" -> FileContentIcon(Icons.Default.Videocam)
+    "png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "psd" -> FileContentIcon(Icons.Default.Image)
+    "svg" -> FileContentIcon(PrismIcons.Vector)
+    "doc", "docx" -> FileContentIcon(Icons.Default.Description)
+    "xls", "xlsx" -> FileContentIcon(Icons.Default.TableChart)
+    "ppt", "pptx" -> FileContentIcon(Icons.Default.Slideshow)
+    "ttf", "otf" -> FileContentIcon(Icons.Default.TextFields)
+    "mp3", "wav", "ogg", "flac", "midi" -> FileContentIcon(Icons.Default.Audiotrack)
+    "zip", "jar", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "cab", "dmg" ->
+        FileContentIcon(Icons.Default.Archive)
+    "python", "javascript", "typescript", "c", "cpp", "go", "rust", "ruby", "php",
+    "perl", "shell", "css", "scss", "html", "xml", "json", "yaml", "latex",
+    "swift", "scala", "lua", "r", "dart" ->
+        FileContentIcon(PrismIcons.Code)
+    "txt", "csv", "tsv", "ini", "toml", "rst", "diff", "rtf" ->
+        FileContentIcon(Icons.Default.Description)
+    else -> null
+}
 
 @Composable
 private fun getContentIcon(content: ContentHolder): FileContentIcon {
@@ -95,7 +132,28 @@ private fun getContentIcon(content: ContentHolder): FileContentIcon {
 
 @Composable
 fun FileContentIcon(item: ContentHolder) {
-    val fileContentIcon = getContentIcon(item)
+    // Start with extension-based icon
+    val extensionIcon = getContentIcon(item)
+
+    // If extension-based icon is unknown and item is a local file, try Magika detection
+    val fileContentIcon = if (
+        extensionIcon.icon == Icons.Default.QuestionMark &&
+        item is LocalFileHolder &&
+        !item.isFolder
+    ) {
+        val magikaIcon by produceState<FileContentIcon?>(initialValue = null, item.uniquePath) {
+            value = withContext(Dispatchers.IO) {
+                try {
+                    val result = MagikaFileTypeDetector.detect(item.file)
+                    result?.let { magikaIconForLabel(it.label) }
+                } catch (_: Exception) { null }
+            }
+        }
+        magikaIcon ?: extensionIcon
+    } else {
+        extensionIcon
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()

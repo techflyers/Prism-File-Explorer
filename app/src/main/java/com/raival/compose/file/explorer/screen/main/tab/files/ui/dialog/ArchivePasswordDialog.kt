@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.R
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 
 @Composable
@@ -75,7 +76,9 @@ fun ArchivePasswordDialog(
                             Icon(imageVector = image, contentDescription = "Toggle password visibility")
                         }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .autoShowKeyboard()
                 )
             }
         },

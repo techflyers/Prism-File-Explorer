@@ -150,4 +150,39 @@ class LanRemoteClient(
         saveStructure()
         onProgress(1.0)
     }
+
+    override fun createFile(path: String) {
+        val name = path.substringAfterLast("/")
+        virtualItems.removeAll { it.path == path }
+        virtualItems.add(
+            RemoteFileItem(
+                name = name,
+                path = path,
+                isDirectory = false,
+                size = 0,
+                modified = Date()
+            )
+        )
+        saveStructure()
+    }
+
+    override fun rename(fromPath: String, toPath: String) {
+        val name = toPath.substringAfterLast("/")
+        val updated = virtualItems.map { item ->
+            when {
+                item.path == fromPath -> item.copy(name = name, path = toPath, modified = Date())
+                item.path.startsWith("$fromPath/") ->
+                    item.copy(path = toPath + item.path.removePrefix(fromPath))
+                else -> item
+            }
+        }
+        virtualItems.clear()
+        virtualItems.addAll(updated)
+        saveStructure()
+    }
+
+    override fun exists(path: String): Boolean {
+        val normalized = if (path == "/") "" else path
+        return virtualItems.any { it.path == path || it.path == normalized }
+    }
 }

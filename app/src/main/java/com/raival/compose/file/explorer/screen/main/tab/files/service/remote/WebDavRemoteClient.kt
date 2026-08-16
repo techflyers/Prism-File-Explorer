@@ -167,6 +167,54 @@ class WebDavRemoteClient(
         }
     }
 
+    override fun createFile(path: String) {
+        val url = getFullUrl(path)
+        val builder = Request.Builder()
+            .url(url)
+            .put(ByteArray(0).toRequestBody("application/octet-stream".toMediaType()))
+
+        authHeader()?.let { builder.addHeader("Authorization", it) }
+
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("WebDAV PUT failed: ${response.code} ${response.message}")
+            }
+        }
+    }
+
+    override fun rename(fromPath: String, toPath: String) {
+        val builder = Request.Builder()
+            .url(getFullUrl(fromPath))
+            .method("MOVE", "".toRequestBody(null))
+            .addHeader("Destination", getFullUrl(toPath))
+            .addHeader("Overwrite", "T")
+
+        authHeader()?.let { builder.addHeader("Authorization", it) }
+
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("WebDAV MOVE failed: ${response.code} ${response.message}")
+            }
+        }
+    }
+
+    override fun exists(path: String): Boolean {
+        val builder = Request.Builder()
+            .url(getFullUrl(path))
+            .method("PROPFIND", "".toRequestBody("text/xml".toMediaType()))
+            .addHeader("Depth", "0")
+
+        authHeader()?.let { builder.addHeader("Authorization", it) }
+
+        client.newCall(builder.build()).execute().use { response ->
+            return response.isSuccessful
+        }
+    }
+
+    override fun deleteRecursive(path: String, isDir: Boolean) {
+        delete(path, isDir)
+    }
+
     private fun getElementsByLocalName(element: Element, localName: String): List<Element> {
         val list = mutableListOf<Element>()
         val nodes = element.getElementsByTagName("*")

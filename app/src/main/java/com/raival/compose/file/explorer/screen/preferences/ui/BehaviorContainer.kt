@@ -2,6 +2,7 @@ package com.raival.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Animation
+import androidx.compose.material.icons.rounded.FindReplace
 import androidx.compose.material.icons.rounded.FlipToBack
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Home
@@ -158,6 +159,19 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.OpenInBrowser,
             switchState = prefs.useBuiltInViewer,
             onSwitchChange = { prefs.useBuiltInViewer = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.disable_magika_ext_override),
+            supportingText = stringResource(R.string.disable_magika_ext_override_desc),
+            icon = Icons.Rounded.FindReplace,
+            switchState = prefs.disableMagikaExtOverride,
+            onSwitchChange = { prefs.disableMagikaExtOverride = it }
         )
 
         HorizontalDivider(

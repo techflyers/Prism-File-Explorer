@@ -24,6 +24,7 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionModel
 import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
@@ -177,7 +178,7 @@ fun NFileDrawerContent(
                         .padding(horizontal = 12.dp, vertical = 2.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            manager.replaceCurrentTabWith(RemoteExplorerTab(conn))
+                            manager.replaceCurrentTabWith(FilesTab(RemoteFileHolder.rootHolder(conn)))
                             onNavigate()
                         }
                         .padding(vertical = 10.dp, horizontal = 12.dp),

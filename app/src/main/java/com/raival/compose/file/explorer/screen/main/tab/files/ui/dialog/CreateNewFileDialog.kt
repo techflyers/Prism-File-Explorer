@@ -33,6 +33,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.isValidAsFileName
 import com.raival.compose.file.explorer.common.ui.CheckableText
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import kotlinx.coroutines.launch
 
@@ -94,7 +95,9 @@ fun CreateNewFileDialog(
                     }
 
                     TextField(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .autoShowKeyboard(),
                         value = newNameInput,
                         onValueChange = {
                             newNameInput = it

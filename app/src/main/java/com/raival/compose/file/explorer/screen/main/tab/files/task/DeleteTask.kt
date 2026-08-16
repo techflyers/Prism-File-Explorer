@@ -7,6 +7,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedDate
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.reandroid.archive.ZipAlign
@@ -114,6 +115,7 @@ class DeleteTask(
         when (sampleContent) {
             is LocalFileHolder -> handleLocalFileDeletion()
             is ZipFileHolder -> handleZipFileDeletion()
+            is RemoteFileHolder -> handleRemoteFileDeletion()
             else -> {
                 markAsFailed(globalClass.getString(R.string.unsupported_source_type))
                 return
@@ -341,6 +343,40 @@ class DeleteTask(
         } finally {
             // Clean up temp file if it still exists
             tempFile?.delete()
+        }
+    }
+
+    private suspend fun handleRemoteFileDeletion() {
+        pendingContent.forEachIndexed { index, itemToDelete ->
+            if (aborted) {
+                markAsAborted()
+                return
+            }
+
+            if (itemToDelete.status == TaskContentStatus.PENDING) {
+                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+
+                progressMonitor.apply {
+                    contentName = itemToDelete.source.displayName
+                    remainingContent = pendingContent.size - (index + 1)
+                    progress = progressPercent
+                }
+
+                try {
+                    val remote = itemToDelete.source as RemoteFileHolder
+                    remote.client.deleteRecursive(remote.remotePath, remote.isFolder)
+                    itemToDelete.status = TaskContentStatus.SUCCESS
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    markAsFailed(
+                        globalClass.resources.getString(
+                            R.string.task_summary_failed,
+                            e.message ?: emptyString
+                        )
+                    )
+                    return
+                }
+            }
         }
     }
 

@@ -2,10 +2,14 @@ package com.raival.compose.file.explorer
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
 import android.os.Process
 import android.widget.Toast
 import androidx.annotation.StringRes
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.bitmapFactoryMaxParallelism
@@ -59,6 +63,17 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
     }
 
     private val applicationScope = CoroutineScope(SupervisorJob() + IO)
+
+    // Share-to-folder mode (opened on demand from Save to Prism)
+    var isShareMode: Boolean by mutableStateOf(false)
+    var shareUris: List<Uri> by mutableStateOf(emptyList())
+    var shareText: String? by mutableStateOf(null)
+
+    fun clearShareMode() {
+        isShareMode = false
+        shareUris = emptyList()
+        shareText = null
+    }
 
     lateinit var logger: FileExplorerLogger
         private set

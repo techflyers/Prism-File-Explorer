@@ -13,6 +13,7 @@ import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.RootFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
@@ -22,7 +23,9 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_TYPE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.EXTERNAL_STORAGE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.REMOTE_STORAGE
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.ROOT
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
 import com.raival.compose.file.explorer.screen.main.tab.home.holder.RecentFile
 import java.io.File
 
@@ -58,6 +61,18 @@ object StorageProvider {
 
         if (!globalClass.preferencesManager.hideRootStorage) {
             storageDevices.add(getRoot(context))
+        }
+
+        NetworkConnectionsService.getConnections(context).forEach { connection ->
+            storageDevices.add(
+                StorageDevice(
+                    RemoteFileHolder.rootHolder(connection),
+                    connection.name,
+                    0L,
+                    0L,
+                    REMOTE_STORAGE
+                )
+            )
         }
 
         return storageDevices
