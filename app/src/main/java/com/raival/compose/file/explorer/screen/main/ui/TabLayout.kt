@@ -245,13 +245,13 @@ fun OptionsMenu(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        // get startup tabs
+        val startupTabsObj = remember {
+            (fromJson<StartupTabs>(globalClass.preferencesManager.startupTabs)
+                ?: StartupTabs.default())
+        }
         val startupTabs = remember {
             arrayListOf<StartupTab>().apply {
-                addAll(
-                    (fromJson(globalClass.preferencesManager.startupTabs)
-                        ?: StartupTabs.default()).tabs
-                )
+                addAll(startupTabsObj.tabs)
             }
         }
 
@@ -268,7 +268,7 @@ fun OptionsMenu(
                     onClick = {
                         startupTabs.add(StartupTab(tabType, extra))
                         globalClass.preferencesManager.startupTabs =
-                            StartupTabs(startupTabs).toJson()
+                            startupTabsObj.copy(tabs = startupTabs).toJson()
                         onDismiss()
                         showMsg(globalClass.getString(R.string.added_as_startup_tab))
                     }
@@ -283,7 +283,7 @@ fun OptionsMenu(
                             it.type == tabType && (extra == emptyString || it.extra == extra)
                         }
                         globalClass.preferencesManager.startupTabs =
-                            StartupTabs(startupTabs).toJson()
+                            startupTabsObj.copy(tabs = startupTabs).toJson()
                         onDismiss()
                         showMsg(globalClass.getString(R.string.removed_from_startup_tabs))
                     }

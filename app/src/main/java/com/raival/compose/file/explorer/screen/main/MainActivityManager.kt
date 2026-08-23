@@ -291,6 +291,14 @@ class MainActivityManager {
             PlusButtonOverride.HOME -> HomeTab()
             PlusButtonOverride.APPS -> AppsTab()
             PlusButtonOverride.FILES -> FilesTab(LocalFileHolder(File("/storage/emulated/0")))
+            PlusButtonOverride.CUSTOM_FOLDER -> {
+                val path = if (!startupTabsObj.plusButtonCustomPath.isNullOrEmpty()) {
+                    startupTabsObj.plusButtonCustomPath
+                } else {
+                    "/storage/emulated/0"
+                }
+                FilesTab(LocalFileHolder(File(path)))
+            }
             PlusButtonOverride.DEFAULT -> {
                 val firstTab = startupTabsObj.tabs.firstOrNull()
                 if (firstTab != null) {

@@ -7,12 +7,14 @@ enum class PlusButtonOverride {
     DEFAULT, // First startup tab in order
     HOME,
     APPS,
-    FILES
+    FILES,
+    CUSTOM_FOLDER
 }
 
 data class StartupTabs(
     val tabs: List<StartupTab>,
-    val plusButtonOverride: PlusButtonOverride = PlusButtonOverride.DEFAULT
+    val plusButtonOverride: PlusButtonOverride = PlusButtonOverride.DEFAULT,
+    val plusButtonCustomPath: String = emptyString
 ) {
     companion object {
         fun default() = StartupTabs(arrayListOf(StartupTab(StartupTabType.HOME)))

@@ -281,7 +281,7 @@ class MainActivity : BaseActivity() {
                         if (!gesturesEnabled) return Velocity.Zero
                         val isLastPage = pagerState.currentPage == pagerState.pageCount - 1
                         if (isLastPage && overscrollAmount > 0 && !isAnimatingBack) {
-                            if (overscrollAmount > threshold) manager.addTabAndSelect(HomeTab())
+                            if (overscrollAmount > threshold) manager.addDefaultOrOverriddenNewTab()
                             isAnimatingBack = true
                             animationScope.launch {
                                 animate(
