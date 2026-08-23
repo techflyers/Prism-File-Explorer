@@ -1,6 +1,7 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.shizuku
 
 import android.content.pm.PackageManager
+import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -8,19 +9,11 @@ import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.App.Companion.logger
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 
 /**
  * Manages Shizuku and root (su) access for privileged file operations.
- *
- * Architecture follows nfile's root_shizuku_service.dart pattern:
- * - Shizuku path: uses Shizuku.newProcess() via reflection to spawn a privileged shell
- * - Root path: uses Runtime.getRuntime().exec(["su", "-c", command])
- *
- * Usage:
- *   ShizukuManager.checkStatus()
- *   if (ShizukuManager.isShizukuReady) { ... }
- *   ShizukuManager.runCommand("ls /data") { output -> ... }
  */
 object ShizukuManager {
 
@@ -124,30 +117,44 @@ object ShizukuManager {
         accessMode = mode
     }
 
+    // ─── Shell Utility ────────────────────────────────────────────────────────
+
+    fun escapeShellArg(arg: String): String {
+        return "'" + arg.replace("'", "'\\''") + "'"
+    }
+
+    data class CommandResult(
+        val exitCode: Int,
+        val stdout: String,
+        val stderr: String
+    ) {
+        val isSuccess: Boolean get() = exitCode == 0
+    }
+
     // ─── Command execution ────────────────────────────────────────────────────
 
     /**
-     * Runs a shell command with the current privileged access mode.
-     * Shizuku path uses Shizuku.newProcess() via reflection (mirrors nfile).
-     * Root path uses `su -c`.
-     *
-     * @return stdout output, or null on failure
+     * Executes a command in privileged shell and returns exitCode, stdout, and stderr.
      */
-    fun runCommand(command: String): String? {
+    fun executeCommand(command: String): CommandResult? {
         return when (accessMode) {
-            AccessMode.SHIZUKU -> runViaShizuku(command)
-            AccessMode.ROOT -> runViaRoot(command)
+            AccessMode.SHIZUKU -> executeViaShizuku(command)
+            AccessMode.ROOT -> executeViaRoot(command)
             AccessMode.NONE -> null
         }
     }
 
     /**
-     * Runs command via Shizuku using reflection to call Shizuku.newProcess().
-     * Mirrors nfile's root_shizuku_service.dart approach.
+     * Runs a shell command with the current privileged access mode.
+     * @return stdout output, or null on failure
      */
-    private fun runViaShizuku(command: String): String? {
+    fun runCommand(command: String): String? {
+        val result = executeCommand(command) ?: return null
+        return result.stdout
+    }
+
+    private fun executeViaShizuku(command: String): CommandResult? {
         return try {
-            // Reflect Shizuku.newProcess(String[] cmd, String[] env, String dir)
             val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
                 "newProcess",
                 Array<String>::class.java,
@@ -155,7 +162,6 @@ object ShizukuManager {
                 String::class.java
             )
             newProcessMethod.isAccessible = true
-
             val process = newProcessMethod.invoke(
                 null,
                 arrayOf("sh", "-c", command),
@@ -163,28 +169,41 @@ object ShizukuManager {
                 null
             ) as Process
 
-            val output = BufferedReader(InputStreamReader(process.inputStream))
+            val stdout = BufferedReader(InputStreamReader(process.inputStream))
                 .readLines()
                 .joinToString("\n")
-            process.waitFor()
-            output
+            val stderr = BufferedReader(InputStreamReader(process.errorStream))
+                .readLines()
+                .joinToString("\n")
+            val exitCode = process.waitFor()
+
+            if (exitCode != 0 && stderr.isNotBlank()) {
+                logger.logWarning("Shizuku command exited with $exitCode: $command\nStderr: $stderr")
+            }
+
+            CommandResult(exitCode, stdout, stderr)
         } catch (e: Exception) {
             logger.logError(e)
             null
         }
     }
 
-    /**
-     * Runs command via root su shell.
-     */
-    private fun runViaRoot(command: String): String? {
+    private fun executeViaRoot(command: String): CommandResult? {
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            val output = BufferedReader(InputStreamReader(process.inputStream))
+            val stdout = BufferedReader(InputStreamReader(process.inputStream))
                 .readLines()
                 .joinToString("\n")
-            process.waitFor()
-            output
+            val stderr = BufferedReader(InputStreamReader(process.errorStream))
+                .readLines()
+                .joinToString("\n")
+            val exitCode = process.waitFor()
+
+            if (exitCode != 0 && stderr.isNotBlank()) {
+                logger.logWarning("Root command exited with $exitCode: $command\nStderr: $stderr")
+            }
+
+            CommandResult(exitCode, stdout, stderr)
         } catch (e: Exception) {
             logger.logError(e)
             null
@@ -204,15 +223,129 @@ object ShizukuManager {
         }
     }
 
+    // ─── Privileged File Operations ───────────────────────────────────────────
+
+    fun createFile(path: String): Boolean {
+        val cmd = "touch " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun createDirectory(path: String): Boolean {
+        val cmd = "mkdir -p " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun delete(path: String): Boolean {
+        val cmd = "rm -rf " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun rename(src: String, dst: String): Boolean {
+        val cmd = "mv " + escapeShellArg(src) + " " + escapeShellArg(dst)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun copy(src: String, dst: String): Boolean {
+        val cmd = "cp -a " + escapeShellArg(src) + " " + escapeShellArg(dst) +
+                " || cp -r " + escapeShellArg(src) + " " + escapeShellArg(dst)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun exists(path: String): Boolean {
+        val cmd = "[ -e " + escapeShellArg(path) + " ]"
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun isDirectory(path: String): Boolean {
+        val cmd = "[ -d " + escapeShellArg(path) + " ]"
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun readText(path: String): String? {
+        val cmd = "cat " + escapeShellArg(path)
+        val res = executeCommand(cmd)
+        return if (res?.isSuccess == true) res.stdout else null
+    }
+
+    fun writeText(path: String, content: String): Boolean {
+        val encoded = Base64.encodeToString(content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val cmd = "echo " + escapeShellArg(encoded) + " | base64 -d > " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun readBytes(path: String): ByteArray? {
+        val cmd = "base64 " + escapeShellArg(path)
+        val res = executeCommand(cmd)
+        if (res?.isSuccess == true && res.stdout.isNotEmpty()) {
+            return try {
+                Base64.decode(res.stdout, Base64.DEFAULT)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return null
+    }
+
+    fun writeBytes(path: String, bytes: ByteArray): Boolean {
+        val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        val cmd = "echo " + escapeShellArg(encoded) + " | base64 -d > " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun copyToLocal(privilegedSrc: String, localDst: File): Boolean {
+        localDst.parentFile?.mkdirs()
+        // Try direct cp first (if target directory is accessible to shell user)
+        val cpCmd = "cp -a " + escapeShellArg(privilegedSrc) + " " + escapeShellArg(localDst.absolutePath)
+        val cpRes = executeCommand(cpCmd)
+        if (cpRes?.isSuccess == true && localDst.exists() && localDst.canRead()) {
+            return true
+        }
+        // Fallback: pipe bytes
+        val bytes = readBytes(privilegedSrc)
+        if (bytes != null) {
+            return try {
+                localDst.writeBytes(bytes)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return false
+    }
+
+    fun copyFromLocal(localSrc: File, privilegedDst: String): Boolean {
+        val cpCmd = "cp -a " + escapeShellArg(localSrc.absolutePath) + " " + escapeShellArg(privilegedDst)
+        val cpRes = executeCommand(cpCmd)
+        if (cpRes?.isSuccess == true && exists(privilegedDst)) {
+            return true
+        }
+        return try {
+            val bytes = localSrc.readBytes()
+            writeBytes(privilegedDst, bytes)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // ─── File listing ─────────────────────────────────────────────────────────
 
     /**
      * Lists files in the given directory path using privileged shell.
-     * Uses `stat -L -c "%F|%s|%Y|%n"` — same format as nfile's listFiles().
-     * Returns list of (name, isDir, size, modTime) tuples.
+     * Uses `find <dir> -mindepth 1 -maxdepth 1 -exec stat -L -c "%F|%s|%Y|%n" {} +`
+     * to safely include hidden files and avoid wildcard expansion issues.
      */
     fun listFiles(dirPath: String): List<ShizukuFileEntry> {
-        val command = "stat -L -c \"%F|%s|%Y|%n\" \"$dirPath\"/*  2>/dev/null || ls -la \"$dirPath\""
+        val cleanPath = if (dirPath.length > 1 && dirPath.endsWith("/")) {
+            dirPath.removeSuffix("/")
+        } else {
+            dirPath
+        }
+        val safePath = escapeShellArg(cleanPath)
+
+        val command = "find $safePath -mindepth 1 -maxdepth 1 -exec stat -L -c \"%F|%s|%Y|%n\" {} + 2>/dev/null || " +
+                "find $safePath -mindepth 1 -maxdepth 1 -exec stat -c \"%F|%s|%Y|%n\" {} + 2>/dev/null || " +
+                "stat -L -c \"%F|%s|%Y|%n\" $safePath/* 2>/dev/null"
+
         val output = runCommand(command) ?: return emptyList()
 
         return output.lines()

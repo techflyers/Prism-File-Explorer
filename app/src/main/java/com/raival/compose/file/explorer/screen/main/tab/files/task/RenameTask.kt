@@ -11,6 +11,9 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileH
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemotePaths
+import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
+import com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import com.reandroid.archive.ZipAlign
 import java.io.File
 import java.io.FileOutputStream
@@ -141,6 +144,7 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
         when (sampleContent) {
             is ZipFileHolder -> handleZipFileRenaming()
             is LocalFileHolder -> handleLocalFileRenaming()
+            is ShizukuFileHolder -> handleShizukuFileRenaming()
             is RemoteFileHolder -> handleRemoteFileRenaming()
             else -> {
                 markAsFailed(globalClass.getString(R.string.unsupported_source_type))
@@ -203,7 +207,49 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
                     val localFile = itemToRename.source as LocalFileHolder
                     val newFile = File(itemToRename.newPath)
 
-                    if (localFile.file.renameTo(newFile)) {
+                    var renamed = localFile.file.renameTo(newFile)
+                    if (!renamed && ShizukuManager.isPrivileged) {
+                        renamed = ShizukuManager.rename(localFile.uniquePath, itemToRename.newPath)
+                    }
+
+                    if (renamed) {
+                        itemToRename.status = TaskContentStatus.SUCCESS
+                    } else {
+                        throw Exception(globalClass.getString(R.string.failed_to_rename_file))
+                    }
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    markAsFailed(
+                        globalClass.resources.getString(
+                            R.string.task_summary_failed,
+                            e.message ?: emptyString
+                        )
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    private suspend fun handleShizukuFileRenaming() {
+        pendingContent.forEachIndexed { index, itemToRename ->
+            if (aborted) {
+                markAsAborted()
+                return
+            }
+
+            if (itemToRename.status == TaskContentStatus.PENDING) {
+                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+
+                progressMonitor.apply {
+                    contentName = itemToRename.source.displayName
+                    remainingContent = pendingContent.size - (index + 1)
+                    progress = progressPercent
+                }
+
+                try {
+                    val shizukuFile = itemToRename.source as ShizukuFileHolder
+                    if (ShizukuManager.rename(shizukuFile.uniquePath, itemToRename.newPath)) {
                         itemToRename.status = TaskContentStatus.SUCCESS
                     } else {
                         throw Exception(globalClass.getString(R.string.failed_to_rename_file))
@@ -227,10 +273,44 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
         val sourceZipFile = zipFileHolder.zipTree.source.file
         var tempFile: File? = null
 
+        val isNative = ArchiveManager.isNativeArchivePath(sourceZipFile.name) ||
+                ArchiveManager.isNativeArchive(sourceZipFile.extension)
+
         try {
             // Check abortion before processing
             if (aborted) {
                 markAsAborted()
+                return
+            }
+
+            if (isNative) {
+                if (!ArchiveManager.isModifiableArchive(sourceZipFile.name)) {
+                    throw Exception(globalClass.getString(R.string.unsupported_source_type))
+                }
+
+                progressMonitor.apply {
+                    processName = globalClass.getString(R.string.updating)
+                    progress = 0.3f
+                }
+
+                val renameMap = mutableMapOf<String, String>()
+                pendingContent.filter { it.status == TaskContentStatus.PENDING }.forEach { item ->
+                    val zipHolder = item.source as ZipFileHolder
+                    renameMap[zipHolder.uniquePath] = item.newPath
+                }
+
+                if (renameMap.isNotEmpty()) {
+                    ArchiveManager.renameMembers(
+                        archivePath = zipFileHolder.zipTree.archivePathForNative,
+                        renameMap = renameMap,
+                        password = zipFileHolder.zipTree.password
+                    )
+                }
+
+                pendingContent.filter { it.status == TaskContentStatus.PENDING }.forEach { item ->
+                    item.status = TaskContentStatus.SUCCESS
+                }
+                zipFileHolder.zipTree.invalidate()
                 return
             }
 

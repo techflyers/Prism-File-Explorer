@@ -204,6 +204,8 @@ object MagikaFileTypeDetector {
                 LabelMapping("application/zip", false, label)
             "gzip" -> LabelMapping("application/gzip", false, "gz")
             "bzip" -> LabelMapping("application/x-bzip2", false, "bz2")
+            "zstd", "zstandard" -> LabelMapping("application/zstd", false, "zst")
+            "lz4" -> LabelMapping("application/x-lz4", false, "lz4")
             "sevenzip" -> LabelMapping("application/x-7z-compressed", false, "7z")
             "rar" -> LabelMapping("application/x-rar-compressed", false, "rar")
             "tar" -> LabelMapping("application/x-tar", false, "tar")

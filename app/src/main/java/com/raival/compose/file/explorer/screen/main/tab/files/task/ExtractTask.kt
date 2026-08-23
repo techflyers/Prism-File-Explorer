@@ -85,36 +85,33 @@ class ExtractTask(
                     processName = "Extracting ${archive.displayName}"
                 }
 
-                if (archive is LocalFileHolder) {
-                    val archiveFile = archive.file
-                    val destDirName = archiveFile.nameWithoutExtension
-                    val destDir = File(archiveFile.parentFile, destDirName)
-                    destDir.mkdirs()
-
-                    // All formats are routed through lib7za native binary.
-                    // Under Scoped Storage we copy the source first to the sandbox cache so
-                    // lib7za can read it via a plain filesystem path.
-                    val ext = archiveFile.extension.lowercase()
-                    val tempArchive = File(
-                        globalClass.cacheDir,
-                        "temp_extract_${System.currentTimeMillis()}.$ext"
-                    )
-                    try {
-                        archiveFile.inputStream().use { input ->
-                            tempArchive.outputStream().use { output ->
-                                input.copyTo(output)
-                            }
-                        }
-                        val pwd = parameters?.password
-                        android.util.Log.d(
-                            "ExtractTask",
-                            "Native extract (lib7za): ${archiveFile.name}, " +
-                                "password=${if (pwd != null) "***" else "none"}"
-                        )
-                        ArchiveManager.extractAll(tempArchive.absolutePath, destDir.absolutePath, pwd)
-                    } finally {
-                        tempArchive.delete()
+                if (archive is LocalFileHolder || archive is com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder) {
+                    val archiveName = archive.displayName
+                    val archivePath = archive.uniquePath
+                    // Prefer name without compound suffixes for dest folder
+                    val destDirName = when {
+                        archiveName.lowercase().endsWith(".tar.gz") ->
+                            archiveName.removeSuffix(".tar.gz").removeSuffix(".TAR.GZ")
+                        archiveName.lowercase().endsWith(".tar.bz2") ->
+                            archiveName.removeSuffix(".tar.bz2").removeSuffix(".TAR.BZ2")
+                        archiveName.lowercase().endsWith(".tar.xz") ->
+                            archiveName.removeSuffix(".tar.xz").removeSuffix(".TAR.XZ")
+                        archiveName.lowercase().endsWith(".tar.zst") ->
+                            archiveName.removeSuffix(".tar.zst").removeSuffix(".TAR.ZST")
+                        else -> archiveName.substringBeforeLast(".")
                     }
+                    val parentPath = archivePath.substringBeforeLast("/")
+                    val destDirPath = if (parentPath.isEmpty() || parentPath == "/") "/$destDirName" else "$parentPath/$destDirName"
+                    File(destDirPath).mkdirs()
+
+                    val pwd = parameters?.password
+                    android.util.Log.d(
+                        "ExtractTask",
+                        "Native extract (lib7za): $archiveName, " +
+                            "password=${if (pwd != null) "***" else "none"}"
+                    )
+                    // ArchiveManager.resolveAccessibleArchivePath handles native vs fallback copy
+                    ArchiveManager.extractAll(archivePath, destDirPath, pwd)
                 }
             }
 

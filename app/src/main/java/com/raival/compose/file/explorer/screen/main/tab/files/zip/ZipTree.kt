@@ -24,7 +24,21 @@ class ZipTree(
         }
     )
     val extractedFiles = hashMapOf<String, LocalFileHolder>()
-    val tempArchiveFile = File(cleanOnExitDir.file, "source_archive.${source.extension}")
+
+    /**
+     * Path that 7za / zip4j should open. Prefer the original filesystem path;
+     * [ArchiveManager.resolveAccessibleArchivePath] only creates a cache copy
+     * when the native binary cannot open the original.
+     *
+     * Kept as a [File] for callers that previously used [tempArchiveFile].
+     */
+    val tempArchiveFile: File
+        get() = File(archivePathForNative)
+
+    /** Absolute path passed to lib7za / zip4j. Updated by [prepare]. */
+    var archivePathForNative: String = source.file.absolutePath
+        private set
+
     private val nodes = hashMapOf<String, ZipNode>()
 
     private val root = ZipNode(
@@ -77,65 +91,52 @@ class ZipTree(
         timeStamp = source.lastModified
     }
 
+    /**
+     * Resolve a path that lib7za can open, then build the in-memory tree.
+     * No mandatory full-file copy: [ArchiveManager.resolveAccessibleArchivePath]
+     * uses the original path when possible and only falls back to a cache copy
+     * on access failure.
+     */
     fun prepare() {
-        if (!tempArchiveFile.exists() || tempArchiveFile.length() != source.file.length()) {
-            var copied = false
-            try {
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    globalClass,
-                    "com.raival.compose.file.explorer.provider",
-                    source.file
-                )
-                globalClass.contentResolver.openInputStream(uri)?.use { input ->
-                    tempArchiveFile.outputStream().use { output ->
-                        input.copyTo(output)
-                        copied = true
-                    }
-                }
-            } catch (_: Exception) {}
-
-            if (!copied) {
-                try {
-                    source.file.inputStream().use { input ->
-                        tempArchiveFile.outputStream().use { output ->
-                            input.copyTo(output)
-                            copied = true
-                        }
-                    }
-                } catch (e: Exception) {
-                    logger.logError(e)
-                }
-            }
+        archivePathForNative = runBlocking {
+            ArchiveManager.resolveAccessibleArchivePath(source.file.absolutePath)
         }
+        android.util.Log.d(
+            "PrismArchive",
+            "ZipTree: prepare() archivePathForNative=$archivePathForNative (original=${source.file.absolutePath})"
+        )
         build()
     }
 
     private fun build() {
-        android.util.Log.d("PrismArchive", "ZipTree: build() started for archive=${source.displayName}, extension=${source.extension}, hasPassword=${!password.isNullOrEmpty()}")
+        android.util.Log.d(
+            "PrismArchive",
+            "ZipTree: build() started for archive=${source.displayName}, extension=${source.extension}, hasPassword=${!password.isNullOrEmpty()}"
+        )
         isReady = false
 
-        // All formats are routed through lib7za (ArchiveManager.listArchive).
-        // This covers zip, jar, apk, 7z, rar, iso, tar, gz, bz2, xz, wim, cab, dmg, and all other
-        // lib7za-supported formats uniformly.
         try {
             android.util.Log.d("PrismArchive", "ZipTree: Listing archive entries via lib7za...")
-            val entries = runBlocking { ArchiveManager.listArchive(tempArchiveFile.absolutePath, password) }
+            val entries = runBlocking {
+                ArchiveManager.listArchive(archivePathForNative, password)
+            }
             android.util.Log.d("PrismArchive", "ZipTree: Native listing succeeded. Found ${entries.size} entries.")
 
-            // If any entry is encrypted, verify password
             val hasEncryptedEntries = entries.any { it.encrypted }
-            android.util.Log.d("PrismArchive", "ZipTree: hasEncryptedEntries=$hasEncryptedEntries, hasPassword=${!password.isNullOrEmpty()}")
+            android.util.Log.d(
+                "PrismArchive",
+                "ZipTree: hasEncryptedEntries=$hasEncryptedEntries, hasPassword=${!password.isNullOrEmpty()}"
+            )
             if (hasEncryptedEntries) {
                 if (password.isNullOrEmpty()) {
-                    android.util.Log.d("PrismArchive", "ZipTree: Archive contains encrypted entries but no password was provided. Throwing ArchivePasswordRequiredException.")
                     throw ArchivePasswordRequiredException(source.displayName)
                 }
 
-                // Verify password by testing the first encrypted file entry
                 val firstEncryptedFile = entries.firstOrNull { it.encrypted && !it.isDirectory }
                 if (firstEncryptedFile != null) {
-                    val testArgs = listOf("t", tempArchiveFile.absolutePath, "-p$password", "-y", firstEncryptedFile.path)
-                    android.util.Log.d("PrismArchive", "ZipTree: Testing password verification: 7z ${testArgs.joinToString(" ")}")
+                    val testArgs = listOf(
+                        "t", archivePathForNative, "-p$password", "-y", firstEncryptedFile.path
+                    )
                     val testResult = runBlocking {
                         NativeBinaryExecutor.run(
                             context = globalClass,
@@ -143,9 +144,7 @@ class ZipTree(
                             arguments = testArgs
                         )
                     }
-                    android.util.Log.d("PrismArchive", "ZipTree: Password test result exitCode=${testResult.exitCode}, success=${testResult.success}")
                     if (!testResult.success) {
-                        android.util.Log.w("PrismArchive", "ZipTree: Password verification failed. Throwing ArchivePasswordRequiredException.")
                         throw ArchivePasswordRequiredException(source.displayName)
                     }
                 }
@@ -164,7 +163,6 @@ class ZipTree(
                     msg.contains("cannot open encrypted") ||
                     msg.contains("incorrect password")
             if (needsPassword) {
-                android.util.Log.d("PrismArchive", "ZipTree: Archive password required or incorrect. Throwing ArchivePasswordRequiredException.")
                 throw ArchivePasswordRequiredException(source.displayName)
             }
             logger.logError(e)
@@ -175,7 +173,6 @@ class ZipTree(
         android.util.Log.d("PrismArchive", "ZipTree: build() completed successfully.")
     }
 
-    /** Thrown by [build] when the archive requires a password but none was provided (or was wrong). */
     class ArchivePasswordRequiredException(val archiveName: String) :
         Exception("Archive '$archiveName' is encrypted and requires a password")
 

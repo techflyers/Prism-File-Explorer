@@ -234,27 +234,40 @@ class TextEditorManager {
     private fun save(fileInstance: FileInstance, onSaved: () -> Unit) {
         isSaving = true
         scope.launch {
-            fileInstance.apply {
-                file.writeText(fileInstance.content.toString())
-                lastModified = fileInstance.file.lastModified
-                requireSave = false
-                requireSaveCurrentFile = false
+            try {
+                fileInstance.apply {
+                    file.writeText(fileInstance.content.toString())
+                    lastModified = fileInstance.file.lastModified
+                    requireSave = false
+                    requireSaveCurrentFile = false
+                }
+                withContext(Dispatchers.Main) { onSaved() }
+            } catch (e: Exception) {
+                logger.logError(e)
+                withContext(Dispatchers.Main) {
+                    globalClass.showMsg(R.string.failed_to_save)
+                }
+            } finally {
+                isSaving = false
             }
-            withContext(Dispatchers.Main) { onSaved() }
-            isSaving = false
         }
     }
 
     fun save(onSaved: () -> Unit, onFailed: () -> Unit) {
         isSaving = true
         scope.launch {
-            getFileInstance()?.let { instance ->
-                activeFile.writeText(instance.content.toString())
-                instance.lastModified = activeFile.lastModified
-                instance.requireSave = false
-                requireSaveCurrentFile = false
-                withContext(Dispatchers.Main) { onSaved().also { isSaving = false } }
-            } ?: withContext(Dispatchers.Main) { onFailed().also { isSaving = false } }
+            try {
+                getFileInstance()?.let { instance ->
+                    activeFile.writeText(instance.content.toString())
+                    instance.lastModified = activeFile.lastModified
+                    instance.requireSave = false
+                    requireSaveCurrentFile = false
+                    withContext(Dispatchers.Main) { onSaved().also { isSaving = false } }
+                } ?: withContext(Dispatchers.Main) { onFailed().also { isSaving = false } }
+            } catch (e: Exception) {
+                logger.logError(e)
+                withContext(Dispatchers.Main) { onFailed().also { isSaving = false } }
+            }
         }
     }
 
@@ -437,11 +450,17 @@ class TextEditorManager {
         scope.launch {
             isReading = true
 
-            val text = activeFile.file.inputStream().use {
-                it.bufferedReader().use { reader ->
-                    reader.readText()
+            val text = try {
+                activeFile.readText()
+            } catch (e: Exception) {
+                logger.logError(e)
+                withContext(Dispatchers.Main) {
+                    globalClass.showMsg(R.string.failed_to_open_this_file)
                 }
+                isReading = false
+                return@launch
             }
+
             val fileInstance = getFileInstance(bringToTop = true)
 
             if (fileInstance isNot null) {

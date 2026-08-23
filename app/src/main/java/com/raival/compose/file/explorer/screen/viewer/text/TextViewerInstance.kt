@@ -100,11 +100,20 @@ class TextViewerInstance(
 
     private suspend fun readSourceFile(scope: CoroutineScope): String {
         return withContext(scope.coroutineContext) {
-            globalClass.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                    reader.readText()
+            try {
+                globalClass.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                        reader.readText()
+                    }
+                } ?: emptyString
+            } catch (_: Exception) {
+                val path = uri.path
+                if (path != null && com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                    com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.readText(path) ?: emptyString
+                } else {
+                    emptyString
                 }
-            } ?: emptyString
+            }
         }
     }
 

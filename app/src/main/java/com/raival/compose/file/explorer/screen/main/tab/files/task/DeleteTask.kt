@@ -10,6 +10,9 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHo
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
+import com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import com.reandroid.archive.ZipAlign
 import java.io.File
 import java.io.FileOutputStream
@@ -114,6 +117,7 @@ class DeleteTask(
         val sampleContent = sourceContent.first()
         when (sampleContent) {
             is LocalFileHolder -> handleLocalFileDeletion()
+            is ShizukuFileHolder -> handleShizukuFileDeletion()
             is ZipFileHolder -> handleZipFileDeletion()
             is RemoteFileHolder -> handleRemoteFileDeletion()
             else -> {
@@ -176,7 +180,48 @@ class DeleteTask(
 
                 try {
                     val localFile = itemToDelete.source as LocalFileHolder
-                    if (localFile.file.deleteRecursively()) {
+                    var deleted = localFile.file.deleteRecursively()
+                    if (!deleted && ShizukuManager.isPrivileged) {
+                        deleted = ShizukuManager.delete(localFile.uniquePath)
+                    }
+                    if (deleted) {
+                        itemToDelete.status = TaskContentStatus.SUCCESS
+                    } else {
+                        throw Exception(globalClass.getString(R.string.failed_to_delete_file))
+                    }
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    markAsFailed(
+                        globalClass.resources.getString(
+                            R.string.task_summary_failed,
+                            e.message ?: emptyString
+                        )
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    private suspend fun handleShizukuFileDeletion() {
+        pendingContent.forEachIndexed { index, itemToDelete ->
+            if (aborted) {
+                markAsAborted()
+                return
+            }
+
+            if (itemToDelete.status == TaskContentStatus.PENDING) {
+                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+
+                progressMonitor.apply {
+                    contentName = itemToDelete.source.displayName
+                    remainingContent = pendingContent.size - (index + 1)
+                    progress = progressPercent
+                }
+
+                try {
+                    val shizukuFile = itemToDelete.source as ShizukuFileHolder
+                    if (ShizukuManager.delete(shizukuFile.uniquePath)) {
                         itemToDelete.status = TaskContentStatus.SUCCESS
                     } else {
                         throw Exception(globalClass.getString(R.string.failed_to_delete_file))
@@ -200,10 +245,43 @@ class DeleteTask(
         val sourceZipFile = zipFileHolder.zipTree.source.file
         var tempFile: File? = null
 
+        val isNative = ArchiveManager.isNativeArchivePath(sourceZipFile.name) ||
+                ArchiveManager.isNativeArchive(sourceZipFile.extension)
+
         try {
             // Check abortion before processing
             if (aborted) {
                 markAsAborted()
+                return
+            }
+
+            if (isNative) {
+                if (!ArchiveManager.isModifiableArchive(sourceZipFile.name)) {
+                    throw Exception(globalClass.getString(R.string.unsupported_source_type))
+                }
+
+                progressMonitor.apply {
+                    processName = globalClass.getString(R.string.updating)
+                    progress = 0.3f
+                }
+
+                val pathsToDelete = pendingContent
+                    .filter { it.status == TaskContentStatus.PENDING }
+                    .map { (it.source as ZipFileHolder).uniquePath }
+                    .toList()
+
+                if (pathsToDelete.isNotEmpty()) {
+                    ArchiveManager.deleteMembers(
+                        archivePath = zipFileHolder.zipTree.archivePathForNative,
+                        internalPaths = pathsToDelete,
+                        password = zipFileHolder.zipTree.password
+                    )
+                }
+
+                pendingContent.filter { it.status == TaskContentStatus.PENDING }.forEach { item ->
+                    item.status = TaskContentStatus.SUCCESS
+                }
+                zipFileHolder.zipTree.invalidate()
                 return
             }
 

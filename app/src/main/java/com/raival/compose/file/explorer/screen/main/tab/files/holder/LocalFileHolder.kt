@@ -137,7 +137,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
         return "$leftSide\t$rightSide".also { details = it }
     }
 
-    private val archiveExtensions = setOf("zip", "jar", "apk", "xapk", "rar", "7z", "tar", "gz", "bz2")
+    private val archiveExtensions by lazy { FileMimeType.archiveFileType.toSet() }
 
     private fun getPdfPageCount(): Int {
         return try {
@@ -169,7 +169,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override suspend fun isValid(): Boolean {
         if (file.exists()) return true
         if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
-            return true
+            return com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.exists(file.absolutePath)
         }
         return false
     }
@@ -322,6 +322,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 onCreated(LocalFileHolder(newFile))
                 return
             }
+            if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createFile(newFile.absolutePath)) {
+                    onCreated(LocalFileHolder(newFile))
+                    return
+                }
+            }
         }
         onCreated(null)
     }
@@ -331,6 +337,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
             if (newFolder.exists() || newFolder.mkdir()) {
                 onCreated(LocalFileHolder(newFolder))
                 return
+            }
+            if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createDirectory(newFolder.absolutePath)) {
+                    onCreated(LocalFileHolder(newFolder))
+                    return
+                }
             }
         }
         onCreated(null)
@@ -412,10 +424,30 @@ class LocalFileHolder(file: File) : ContentHolder() {
     }
 
     fun writeText(text: String) {
-        file.writeText(text)
+        try {
+            file.writeText(text)
+        } catch (e: Exception) {
+            if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                if (!com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.writeText(file.absolutePath, text)) {
+                    throw e
+                }
+            } else {
+                throw e
+            }
+        }
     }
 
-    fun readText() = file.readText()
+    fun readText(): String {
+        return try {
+            file.readText()
+        } catch (e: Exception) {
+            if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.readText(file.absolutePath) ?: throw e
+            } else {
+                throw e
+            }
+        }
+    }
 
     private fun handleSupportedFiles(skipSupportedExtensions: Boolean, context: Context): Boolean {
         if (prismPrefsFileType == extension) {
@@ -595,7 +627,8 @@ class LocalFileHolder(file: File) : ContentHolder() {
             mime.contains("zip") || mime.contains("archive") || mime.contains("7z") ||
                 mime.contains("rar") || mime.contains("tar") || mime.contains("gzip") ||
                 mime.contains("bzip") || mime.contains("xz") || mime.contains("iso") ||
-                label in setOf("zip", "jar", "apk", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "iso", "dmg", "cab") -> {
+                mime.contains("zstd") || mime.contains("lz4") ||
+                label in setOf("zip", "jar", "apk", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "iso", "dmg", "cab", "zst", "zstd", "lz4") -> {
                 globalClass.zipManager.openArchive(this)
                 return true
             }
@@ -623,9 +656,14 @@ class LocalFileHolder(file: File) : ContentHolder() {
      * These are detected by checking the second-to-last extension.
      */
     fun isTarCompressed(): Boolean {
-        val name = file.name
+        val name = file.name.lowercase()
         return name.endsWith(".tar.gz") || name.endsWith(".tar.bz2") ||
-               name.endsWith(".tar.xz") || name.endsWith(".tar.zst")
+               name.endsWith(".tar.bzip2") || name.endsWith(".tar.xz") ||
+               name.endsWith(".tar.zst") || name.endsWith(".tar.zstd") ||
+               name.endsWith(".tar.lz4") || name.endsWith(".tar.lz") ||
+               name.endsWith(".tgz") || name.endsWith(".tbz2") ||
+               name.endsWith(".tbz") || name.endsWith(".txz") ||
+               name.endsWith(".tzst") || name.endsWith(".tpz")
     }
 
     /**

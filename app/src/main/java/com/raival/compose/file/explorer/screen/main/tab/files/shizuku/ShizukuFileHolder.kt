@@ -1,10 +1,17 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.shizuku
 
+import android.content.Context
 import com.raival.compose.file.explorer.App.Companion.globalClass
+import com.raival.compose.file.explorer.App.Companion.logger
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.toFormattedSize
+import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ContentCount
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.codeFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.editableFileType
+import java.io.File
 
 /**
  * ContentHolder backed by privileged shell access (Shizuku or root).
@@ -79,7 +86,7 @@ class ShizukuFileHolder(
         return getFormattedFileCount(filesCount, foldersCount)
     }
 
-    override suspend fun isValid(): Boolean = true
+    override suspend fun isValid(): Boolean = ShizukuManager.exists(uniquePath)
 
     override suspend fun getParent(): ContentHolder? {
         if (parentHolder != null) return parentHolder
@@ -107,4 +114,96 @@ class ShizukuFileHolder(
             .find { it.name == name }
             ?.let { ShizukuFileHolder(it, parentHolder = this) }
     }
+
+    override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
+        val targetPath = if (uniquePath == "/") "/$name" else "$uniquePath/$name"
+        val success = ShizukuManager.createFile(targetPath)
+        if (success) {
+            val newHolder = ShizukuFileHolder(
+                ShizukuFileEntry(
+                    name = name,
+                    path = targetPath,
+                    isDirectory = false,
+                    size = 0L,
+                    lastModified = System.currentTimeMillis()
+                ),
+                parentHolder = this
+            )
+            onCreated(newHolder)
+        } else {
+            onCreated(null)
+        }
+    }
+
+    override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
+        val targetPath = if (uniquePath == "/") "/$name" else "$uniquePath/$name"
+        val success = ShizukuManager.createDirectory(targetPath)
+        if (success) {
+            val newHolder = ShizukuFileHolder(
+                ShizukuFileEntry(
+                    name = name,
+                    path = targetPath,
+                    isDirectory = true,
+                    size = 0L,
+                    lastModified = System.currentTimeMillis()
+                ),
+                parentHolder = this
+            )
+            onCreated(newHolder)
+        } else {
+            onCreated(null)
+        }
+    }
+
+    fun readText(): String {
+        return ShizukuManager.readText(uniquePath) ?: ""
+    }
+
+    fun writeText(text: String) {
+        if (!ShizukuManager.writeText(uniquePath, text)) {
+            throw java.io.IOException("Failed to write to $uniquePath via privileged shell")
+        }
+    }
+
+    override fun open(
+        context: Context,
+        anonymous: Boolean,
+        skipSupportedExtensions: Boolean,
+        customMimeType: String?
+    ) {
+        val directFile = File(uniquePath)
+        if (directFile.exists() && directFile.canRead()) {
+            LocalFileHolder(directFile).open(context, anonymous, skipSupportedExtensions, customMimeType)
+            return
+        }
+
+        // Handle text editing directly
+        val ext = extension.lowercase()
+        if (codeFileType.contains(ext) || editableFileType.contains(ext) || ext == "txt" || ext == "log" || ext == "json" || ext == "xml") {
+            globalClass.textEditorManager.openTextEditor(LocalFileHolder(directFile), context)
+            return
+        }
+
+        // For files that need local access (images, media, APKs, archives), copy to cleanOnExitDir
+        try {
+            val tempFile = File(globalClass.cleanOnExitDir.file, "${System.currentTimeMillis()}_$displayName")
+            if (ShizukuManager.copyToLocal(uniquePath, tempFile)) {
+                val localHolder = LocalFileHolder(tempFile)
+                if (isApk() || isApkBundle()) {
+                    val activeTab = globalClass.mainActivityManager.getActiveTab()
+                    if (activeTab is FilesTab) {
+                        activeTab.toggleApkDialog(localHolder)
+                        return
+                    }
+                }
+                localHolder.open(context, anonymous, skipSupportedExtensions, customMimeType)
+            } else {
+                LocalFileHolder(directFile).open(context, anonymous, skipSupportedExtensions, customMimeType)
+            }
+        } catch (e: Exception) {
+            logger.logError(e)
+            LocalFileHolder(directFile).open(context, anonymous, skipSupportedExtensions, customMimeType)
+        }
+    }
 }
+

@@ -8,7 +8,6 @@ grid = "2.4.0"
 kotlin = "2.2.0"
 coreKtx = "1.16.0"
 appcompat = "1.7.1"
-lazycolumnscrollbar = "2.2.0"
 material = "1.12.0"
 androidxComposeBom = "2025.07.00"
 media3Exoplayer = "1.8.0"
@@ -41,6 +40,7 @@ onnxruntime = "1.22.0"
 pdfbox-android = "2.0.27.0"
 sshj = "0.39.0"
 mlkit-text-recognition = "16.0.1"
+commonsCompress = "1.26.2"
 
 [libraries]
 accompanist-systemuicontroller = { module = "com.google.accompanist:accompanist-systemuicontroller", version.ref = "accompanistSystemuicontroller" }
@@ -57,7 +57,6 @@ coil-video = { module = "io.coil-kt.coil3:coil-video", version.ref = "coilCompos
 commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
 desugar_jdk_libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugar_jdk_libs" }
 grid = { module = "com.cheonjaeung.compose.grid:grid", version.ref = "grid" }
-lazycolumnscrollbar = { module = "com.github.nanihadesuka:LazyColumnScrollbar", version.ref = "lazycolumnscrollbar" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 markwon-core = { module = "io.noties.markwon:core", version.ref = "markwon" }
 markwon-tables = { module = "io.noties.markwon:ext-tables", version.ref = "markwon" }
@@ -96,6 +95,7 @@ androidx-ui-tooling-preview-android = { group = "androidx.compose.ui", name = "u
 zoomable-image-coil3 = { module = "me.saket.telephoto:zoomable-image-coil3", version.ref = "zoomableImageCoil3" }
 sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit-text-recognition" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

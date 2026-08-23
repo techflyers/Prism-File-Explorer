@@ -148,7 +148,6 @@ dependencies {
     implementation(libs.cascade.compose)
     implementation(libs.compose.swipebox)
     implementation(libs.grid)
-    implementation(libs.lazycolumnscrollbar)
     implementation(libs.reorderable)
     implementation(libs.zoomable)
 
@@ -158,6 +157,7 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.storage)
     implementation(libs.zip4j)
+    implementation(libs.commons.compress)
 
     // Markdown Rendering
     implementation(libs.markwon.core)

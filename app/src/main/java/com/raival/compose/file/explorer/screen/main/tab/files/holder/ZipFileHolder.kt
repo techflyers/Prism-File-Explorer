@@ -33,8 +33,10 @@ class ZipFileHolder(
     override val size = node.size
     override val extension = node.extension
     override val canRead = true
-    override val canWrite = true
-    override val canAddNewContent = true
+    override val canWrite: Boolean
+        get() = ArchiveManager.isModifiableArchive(zipTree.source.displayName)
+    override val canAddNewContent: Boolean
+        get() = canWrite
 
     private var filesCount = 0
     private var foldersCount = 0
@@ -138,13 +140,30 @@ class ZipFileHolder(
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
         val path = "${if (uniquePath.isEmpty()) emptyString else "$uniquePath/"}$name"
-        val params = ZipParameters().apply {
-            fileNameInZip = path
-            isOverrideExistingFilesInZip = false
-        }
+        val sourceFile = zipTree.source.file
+        val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
+                ArchiveManager.isNativeArchive(sourceFile.extension)
 
-        ZipFile(zipTree.source.file).use { zipFile ->
-            zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+        if (isNative) {
+            try {
+                ArchiveManager.createEmptyEntry(
+                    archivePath = zipTree.archivePathForNative,
+                    internalPath = path,
+                    isDirectory = false,
+                    password = zipTree.password
+                )
+            } catch (e: Exception) {
+                logger.logError(e)
+            }
+        } else {
+            val params = ZipParameters().apply {
+                fileNameInZip = path
+                isOverrideExistingFilesInZip = false
+            }
+
+            ZipFile(zipTree.source.file).use { zipFile ->
+                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+            }
         }
 
         zipTree.prepare()
@@ -155,14 +174,31 @@ class ZipFileHolder(
     }
 
     override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
-        val path = "${if (uniquePath.isEmpty()) emptyString else "$uniquePath/"}$name/"
-        val params = ZipParameters().apply {
-            fileNameInZip = path
-            isOverrideExistingFilesInZip = false
-        }
+        val path = "${if (uniquePath.isEmpty()) emptyString else "$uniquePath/"}$name"
+        val sourceFile = zipTree.source.file
+        val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
+                ArchiveManager.isNativeArchive(sourceFile.extension)
 
-        ZipFile(zipTree.source.file).use { zipFile ->
-            zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+        if (isNative) {
+            try {
+                ArchiveManager.createEmptyEntry(
+                    archivePath = zipTree.archivePathForNative,
+                    internalPath = path,
+                    isDirectory = true,
+                    password = zipTree.password
+                )
+            } catch (e: Exception) {
+                logger.logError(e)
+            }
+        } else {
+            val params = ZipParameters().apply {
+                fileNameInZip = "$path/"
+                isOverrideExistingFilesInZip = false
+            }
+
+            ZipFile(zipTree.source.file).use { zipFile ->
+                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+            }
         }
 
         zipTree.prepare()
@@ -217,12 +253,13 @@ class ZipFileHolder(
         val destDir = zipTree.createExtractionDestinationDirFor(node).absolutePath
         android.util.Log.d("PrismArchive", "ZipFileHolder: extractForPreview() started for node='${node.path}', destDir='$destDir'")
         try {
+            val sourceName = zipTree.source.file.name
             val ext = zipTree.source.extension.lowercase()
-            if (ArchiveManager.isNativeArchive(ext)) {
+            // Prefer lib7za for everything it supports (including compound tar.* and pure xz/bz2/zst)
+            if (ArchiveManager.isNativeArchivePath(sourceName) || ArchiveManager.isNativeArchive(ext)) {
                 android.util.Log.d("PrismArchive", "ZipFileHolder: Native archive type detected. Extracting via 7za...")
-                // Use 7za to extract just this single file
                 ArchiveManager.extractSingleFile(
-                    archivePath = zipTree.tempArchiveFile.absolutePath,
+                    archivePath = zipTree.archivePathForNative,
                     internalPath = node.path,
                     destinationDir = zipTree.cleanOnExitDir.uniquePath,
                     password = zipTree.password

@@ -27,7 +27,13 @@ class TerminalSessionService : Service() {
         fun getService(): TerminalSessionService = this@TerminalSessionService
 
         fun createSession(id: SessionId, client: TerminalSessionClient, activity: TerminalActivity): SessionInfo {
-            val isExtraction = activity.installNextStage == NEXT_STAGE.EXTRACTION
+            val isExtraction = !isTerminalInstalled(activity) &&
+                activity.installNextStage == NEXT_STAGE.EXTRACTION
+
+            if (activity.installNextStage == NEXT_STAGE.EXTRACTION) {
+                activity.installNextStage = NEXT_STAGE.NONE
+            }
+
             val (session, pwd) = MkSession.createSession(activity, client, id, isExtraction)
             sessions[id] = session
             sessionWorkDirs[id] = pwd

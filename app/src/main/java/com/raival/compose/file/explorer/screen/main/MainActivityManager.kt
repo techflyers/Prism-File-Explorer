@@ -238,6 +238,16 @@ class MainActivityManager {
         getActiveTab()?.onTabResumed()
     }
 
+    fun refreshAllTabs() {
+        _state.value.tabs.forEach { tab ->
+            if (tab is com.raival.compose.file.explorer.screen.main.tab.files.FilesTab) {
+                tab.reloadFiles()
+            } else {
+                tab.onTabResumed()
+            }
+        }
+    }
+
     fun onResume() {
         resumeActiveTab()
     }

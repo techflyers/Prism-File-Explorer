@@ -157,6 +157,7 @@ class TaskManager {
                 runningTasks.removeIf { it.id == task.id }
                 completedTasks.add(task)
                 showMsg(R.string.task_completed)
+                globalClass.mainActivityManager.refreshAllTabs()
             }
 
             TaskStatus.FAILED -> {

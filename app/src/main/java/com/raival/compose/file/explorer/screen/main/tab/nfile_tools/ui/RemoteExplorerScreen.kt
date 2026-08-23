@@ -34,30 +34,28 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
     val scope = rememberCoroutineScope()
     val conn = tab.connection
 
-    var currentPath by remember { mutableStateOf(conn.rootPath) }
+    var currentPath by remember { mutableStateOf(conn.rootPath.ifEmpty { "/" }) }
     var fileItems by remember { mutableStateOf<List<RemoteFileItem>>(emptyList()) }
     var isConnected by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var isBusy by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var progressText by remember { mutableStateOf("") }
+    var reloadTrigger by remember { mutableStateOf(0) }
 
     var showCreateDirDialog by remember { mutableStateOf(false) }
     var showLocalFilePicker by remember { mutableStateOf(false) }
     var newDirName by remember { mutableStateOf("") }
 
-    // Remote client instance
-    val client = remember {
-        when (conn.type) {
-            "FTP" -> FtpRemoteClient(conn)
-            "SFTP" -> SftpRemoteClient(conn)
-            "WebDav" -> WebDavRemoteClient(conn)
-            else -> LanRemoteClient(context, conn)
-        }
+    // Use pooled client for connection reuse & auto-reconnection
+    val client = remember(conn.id) {
+        RemoteConnectionPool.clientFor(conn)
     }
 
     // Connect & Load listing
-    LaunchedEffect(currentPath) {
+    LaunchedEffect(currentPath, reloadTrigger) {
         isLoading = true
+        errorMessage = null
         scope.launch {
             try {
                 if (!isConnected) {
@@ -72,31 +70,21 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                 withContext(Dispatchers.Main) {
                     fileItems = items
                     isLoading = false
+                    errorMessage = null
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     isLoading = false
-                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                    errorMessage = e.message ?: "Failed to load directory"
                 }
-            }
-        }
-    }
-
-    // Disconnect when leaving tab
-    DisposableEffect(Unit) {
-        onDispose {
-            scope.launch(Dispatchers.IO) {
-                try {
-                    client.disconnect()
-                } catch (_: Exception) {}
             }
         }
     }
 
     Scaffold(
         floatingActionButton = {
-            if (isConnected) {
+            if (isConnected && errorMessage == null) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -127,16 +115,17 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                     .padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentPath != conn.rootPath && currentPath != "/") {
+                val parent = RemotePaths.parent(currentPath)
+                val canGoBack = parent != null && currentPath != conn.rootPath && currentPath != "/"
+                if (canGoBack) {
                     IconButton(onClick = {
-                        val parent = currentPath.substringBeforeLast("/", "")
-                        currentPath = if (parent.isEmpty()) "/" else parent
+                        currentPath = parent ?: "/"
                     }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = conn.name,
                         style = MaterialTheme.typography.titleMedium,
@@ -150,6 +139,9 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                IconButton(onClick = { reloadTrigger++ }) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                }
             }
 
             HorizontalDivider()
@@ -160,6 +152,32 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator()
+                }
+            } else if (errorMessage != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = errorMessage ?: "Connection error",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = { reloadTrigger++ }) {
+                            Text("Retry")
+                        }
+                    }
                 }
             } else if (fileItems.isEmpty() && isConnected) {
                 Box(
@@ -256,7 +274,7 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                                             }
                                             withContext(Dispatchers.Main) {
                                                 isBusy = false
-                                                Toast.makeText(context, "Saved to Downloads: ${item.name}", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Saved to Downloads: ${item.name}", Toast.LENGTH_SHORT).show()
                                             }
                                         } catch (e: Exception) {
                                             withContext(Dispatchers.Main) {
@@ -349,7 +367,7 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                             progressText = "Creating directory..."
                             scope.launch {
                                 try {
-                                    val fullPath = if (currentPath.endsWith("/")) "$currentPath$name" else "$currentPath/$name"
+                                    val fullPath = RemotePaths.join(currentPath, name)
                                     withContext(Dispatchers.IO) {
                                         client.createDirectory(fullPath)
                                     }
@@ -394,7 +412,7 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                     try {
                         withContext(Dispatchers.IO) {
                             for (file in selected) {
-                                val remoteFile = if (currentPath.endsWith("/")) "$currentPath${file.name}" else "$currentPath/${file.name}"
+                                val remoteFile = RemotePaths.join(currentPath, file.name)
                                 client.uploadFile(file.absolutePath, remoteFile) {}
                             }
                         }

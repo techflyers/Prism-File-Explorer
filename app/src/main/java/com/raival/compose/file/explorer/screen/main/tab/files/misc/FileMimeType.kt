@@ -54,8 +54,10 @@ object FileMimeType {
         "ext", "fat", "gpt", "hfs", "ihex", "iso", "lzh", "lzma",
         "mbr", "msi", "nsis", "ntfs", "qcow2", "rar", "rpm", "squashfs",
         "udf", "uefi", "vdi", "vhd", "vhdx", "vmdk", "xar", "z",
+        // ZSTD / LZ4
+        "zst", "zstd", "tzst", "lz4",
         // Common aliases / wrappers
-        "jar", "war", "ear", "tgz", "tbz2", "txz", "lz", "obb"
+        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz", "obb"
     )
 
     /**
@@ -71,8 +73,10 @@ object FileMimeType {
         "ext", "fat", "gpt", "hfs", "ihex", "iso", "lzh", "lzma",
         "mbr", "msi", "nsis", "ntfs", "qcow2", "rar", "rpm", "squashfs",
         "udf", "uefi", "vdi", "vhd", "vhdx", "vmdk", "xar", "z",
+        // ZSTD / LZ4
+        "zst", "zstd", "tzst", "lz4",
         // Common aliases / wrappers
-        "jar", "war", "ear", "tgz", "tbz2", "txz", "lz",
+        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz",
         // APK/APKS handled separately via ApkDialog but also zip-browsable
         "apk", "apks"
     )
@@ -82,7 +86,7 @@ object FileMimeType {
      * The string is the output file extension.
      */
     @JvmField
-    val nativeCompressFormats = setOf("7z", "zip", "tar", "gz", "bz2", "xz", "wim")
+    val nativeCompressFormats = setOf("7z", "zip", "tar", "gz", "bz2", "xz", "wim", "tgz", "tbz2", "txz")
 
     @JvmField
     val videoFileType = arrayOf(

@@ -39,6 +39,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.state.DialogsState
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
+import com.raival.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -423,25 +424,42 @@ class FilesTab(
                 return true
             }
             // Check each file to see if the source has changed
-            if (activeFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
+            if (activeFolderContent.any { (it as? LocalFileHolder)?.hasSourceChanged() == true }) {
                 reloadFiles()
                 return true
             }
         } else if (activeFolder is LocalFileHolder) {
-            val newContent =
-                (activeFolder as LocalFileHolder).file.listFiles()?.toCollection(arrayListOf())
-                    ?.apply {
-                        if (!globalClass.preferencesManager.showHiddenFiles) {
-                            removeIf { it.name.startsWith(".") }
-                        }
+            val list = (activeFolder as LocalFileHolder).file.listFiles()
+            if (list != null) {
+                val filtered = list.filter {
+                    val isHidden = it.name.startsWith(".")
+                    it.name != "metadata.json" && (globalClass.preferencesManager.showHiddenFiles || !isHidden)
+                }
+                if (filtered.size != activeFolderContent.size ||
+                    activeFolderContent.any { (it as? LocalFileHolder)?.hasSourceChanged() == true }) {
+                    reloadFiles()
+                    return true
+                }
+            } else if (com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+                val shizukuList = com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.listFiles(activeFolder.uniquePath)
+                    .filter {
+                        val isHidden = it.name.startsWith(".")
+                        it.name != "metadata.json" && (globalClass.preferencesManager.showHiddenFiles || !isHidden)
                     }
-            // Check if the content size has changed
-            if (newContent != null && newContent.size != activeFolderContent.size) {
-                reloadFiles()
-                return true
+                if (shizukuList.size != activeFolderContent.size ||
+                    activeFolderContent.map { it.displayName }.toSet() != shizukuList.map { it.name }.toSet()) {
+                    reloadFiles()
+                    return true
+                }
             }
-            // Check each file to see if the source has changed
-            if (activeFolderContent.any { (it as LocalFileHolder).hasSourceChanged() }) {
+        } else if (activeFolder is com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder) {
+            val shizukuList = com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.listFiles(activeFolder.uniquePath)
+                .filter {
+                    val isHidden = it.name.startsWith(".")
+                    it.name != "metadata.json" && (globalClass.preferencesManager.showHiddenFiles || !isHidden)
+                }
+            if (shizukuList.size != activeFolderContent.size ||
+                activeFolderContent.map { it.displayName }.toSet() != shizukuList.map { it.name }.toSet()) {
                 reloadFiles()
                 return true
             }
@@ -455,18 +473,42 @@ class FilesTab(
                 val changedFiles = zipTree.checkExtractedFiles()
                 if (changedFiles.isNotEmpty()) {
                     isLoading = true
-                    ZipFile(zipTree.source.file).use { zipFile ->
-                        changedFiles.forEach { changedFile ->
-                            zipTree.getRelatedNode(changedFile)?.let { node ->
-                                zipFile.addFile(
-                                    changedFile.file,
-                                    ZipParameters().apply {
-                                        fileNameInZip = node.path
-                                        isOverrideExistingFilesInZip = true
+                    val sourceFile = zipTree.source.file
+                    val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
+                            ArchiveManager.isNativeArchive(sourceFile.extension)
+
+                    if (isNative) {
+                        try {
+                            changedFiles.forEach { changedFile ->
+                                zipTree.getRelatedNode(changedFile)?.let { node ->
+                                    runBlocking {
+                                        ArchiveManager.addOrUpdateMember(
+                                            archivePath = zipTree.archivePathForNative,
+                                            localFile = changedFile.file,
+                                            internalPath = node.path,
+                                            password = zipTree.password
+                                        )
                                     }
-                                )
+                                }
+                                changedFile.resetCachedTimestamp()
                             }
-                            changedFile.resetCachedTimestamp()
+                        } catch (e: Exception) {
+                            logger.logError(e)
+                        }
+                    } else {
+                        ZipFile(zipTree.source.file).use { zipFile ->
+                            changedFiles.forEach { changedFile ->
+                                zipTree.getRelatedNode(changedFile)?.let { node ->
+                                    zipFile.addFile(
+                                        changedFile.file,
+                                        ZipParameters().apply {
+                                            fileNameInZip = node.path
+                                            isOverrideExistingFilesInZip = true
+                                        }
+                                    )
+                                }
+                                changedFile.resetCachedTimestamp()
+                            }
                         }
                     }
                     if (zipTree.source.extension == apkFileType) {

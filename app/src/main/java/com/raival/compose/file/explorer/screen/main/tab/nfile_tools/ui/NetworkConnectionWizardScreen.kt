@@ -209,6 +209,7 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                             else -> LanRemoteClient(context, connectionModel)
                         }
 
+                        var testError: String? = null
                         val success = withContext(Dispatchers.IO) {
                             try {
                                 client.connect()
@@ -216,6 +217,7 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                                 true
                             } catch (e: Exception) {
                                 e.printStackTrace()
+                                testError = e.message ?: e.javaClass.simpleName
                                 false
                             }
                         }
@@ -225,7 +227,7 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                             if (success) {
                                 Toast.makeText(context, "Connection Successful!", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "Failed to connect to server.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Connection Failed: ${testError ?: "Server unreachable"}", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
