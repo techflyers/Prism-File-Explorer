@@ -1,7 +1,6 @@
 > [!NOTE]  
 > **This repository is a feature-rich fork of the original [Prism File Explorer](https://github.com/Raival-e/Prism-File-Explorer) project.** 
-> It integrates premium companion features from [`NFile`](https://github.com/Senzme/NFile) (including a Private Wallet, Local FTP Server, and Web Sharing with port-forwarding), replaces the PDF viewer with Jetpack's native `androidx.pdf:pdf-viewer-fragment`, introduces a custom Compose Excel spreadsheet viewer, integrates the office document layout engine from [`all-documents-reader`](https://github.com/ahmadullahpk/all-documents-reader), implements split APK bundle installation, and adds support for Shizuku/root privileged file access.
-
+> It integrates premium companion features from [`NFile`](https://github.com/Senzme/NFile) (including a Private Wallet, Local FTP Server, and Web Sharing with port-forwarding), replaces the PDF viewer with Jetpack's native `androidx.pdf:pdf-viewer-fragment`, introduces a custom Compose Excel spreadsheet viewer, integrates the office document layout engine from [`all-documents-reader`](https://github.com/ahmadullahpk/all-documents-reader), implements split APK bundle installation, a built-in terminal emulator inspired by [`Xed-Editor`](https://github.com/Xed-Editor/Xed-Editor), and adds support for Shizuku/root privileged file access.
 
 <div align="center">
 
@@ -15,7 +14,6 @@
 [![APK Downloads](https://img.shields.io/github/downloads/techflyers/Prism-File-Explorer/total.svg?label=APK%20Downloads)](https://github.com/techflyers/Prism-File-Explorer/releases)
 [![Stars](https://img.shields.io/github/stars/techflyers/Prism-File-Explorer?style=flat&logo=github)](https://github.com/techflyers/Prism-File-Explorer/stargazers)
 [![Forks](https://img.shields.io/github/forks/techflyers/Prism-File-Explorer?style=flat&logo=github)](https://github.com/techflyers/Prism-File-Explorer/network/members)
-[<img src="https://shields.rbtlog.dev/simple/com.raival.compose.file.explorer" alt="RB shield">](https://shields.rbtlog.dev/com.raival.compose.file.explorer)
 
 **A modern, feature-rich, and lightweight file manager for Android, built entirely with Kotlin and Jetpack Compose.**
 
@@ -65,9 +63,8 @@
 ### 🌐 **Servers & Remote Connections**
 *   **Local FTP Server**: Run a background FTP server via a persistent `FtpForegroundService` with notification-area status controls.
 *   **Web Sharing Portal**: Host an offline directory listing server, support chunked/range media streaming for browser viewing, accept remote POST file uploads, and establish secure public tunnels via SSH client port-forwarding to `localhost.run`.
-*   **Local QR Code Generation**: Swapped online sharing APIs for the **ZXing** library to render secure, local QR codes for Web Sharing URLs without transmitting data.
-*   **Remote Connection Wizard**: Configure and save connections for **FTP**, **SFTP** (via `sshj`), **WebDAV**, and simulated **SMB/LAN** servers.
-*   **Remote Explorer**: Manage remote archives directly, download, upload, create folders, and delete remote files.
+*   **Remote Connection Wizard**: Configure and save connections for **FTP**, **SFTP** (via `sshj`), **WebDAV**, and **SMB/LAN** servers.
+*   **Remote Explorer**: Manage remote storages natively, download, upload, create folders, and delete remote files.
 
 ### 🗜️ **Archive Management**
 *   **Quick Context Actions**: Right-click context menus enable rapid extraction of `.zip`, `.7z`, and `.rar` archives.
@@ -83,12 +80,19 @@
 *   **Markdown Viewer**: Render markdown syntax, block/inline equations (`flutter_math_fork`), and search highlights in raw text.
 *   **HTML Viewer**: Switch between styled WebView previews and monospace code editing with search highlights.
 *   **Enhanced Audio Player**: Scan directories, auto-queue tracks, navigate next/prev, and queue tracks interactively using a sliding bottom sheet.
-*   **Video Player Speed Control**: Toggle playback speeds directly from the video interface.
+*   **Video Player Speed Control**: Toggle playback speeds directly from the video interface, implemented brightness and volume gestures.
 *   **Image Merger**: Multi-select images and stitch them vertically or horizontally into a single output JPEG.
 
 ### 🔍 **Smart Search & AI Integrations**
 *   **Auto-Trigger Search**: Debounced search-on-type execution immediately fires when query lengths hit 2+ characters.
-*   **AI Semantic Search**: Integrates semantic matching with similarity scores (e.g. `Semantic match score: 92%`) shown in search results.
+*   **AI Semantic Search**: Integrates semantic matching with OCR support and provides similarity scores (e.g. `Semantic match score: 92%`) shown in search results.
+
+### 📦 **Terminal & PRoot Integrations**
+*   **Modular Terminal Stack**: Composes `terminal-emulator`, `terminal-view`, and `link2symlink` into a unified codebase.
+*   **Ubuntu/PRoot Environment**: Provisions an isolated Ubuntu container using PRoot with customizable setup scripts.
+*   **Session Management**: Keeps track of active terminal sessions with persistence and quick-reset settings.
+*   **Editor Workflow Run-Program Flow**: Hooks directly into the built-in text editor to execute scripts and programs instantly.
+
 
 ### 📦 **System Integrations**
 *   **Split APK Installation**: Support for `.apks`, `.xapk`, and `.apkm` split bundles with session install progress indicators.
