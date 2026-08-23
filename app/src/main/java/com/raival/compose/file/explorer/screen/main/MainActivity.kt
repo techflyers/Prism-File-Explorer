@@ -175,29 +175,63 @@ class MainActivity : BaseActivity() {
                         }
                     ) {
                         Column(Modifier.fillMaxSize()) {
-                            if (!globalClass.preferencesManager.hideToolbar) {
-                                Toolbar(
-                                    title = mainActivityState.title,
-                                    subtitle = mainActivityState.subtitle,
-                                    hasNewUpdate = mainActivityState.hasNewUpdate,
-                                    onToggleAppInfoDialog = {
-                                        drawerScope.launch { drawerState.open() }
-                                    }
+                            val moveToolbarAndTabsToBottom =
+                                globalClass.preferencesManager.moveToolbarAndTabsToBottom
+
+                            if (!moveToolbarAndTabsToBottom) {
+                                MainToolbar(
+                                    state = mainActivityState,
+                                    drawerScope = drawerScope,
+                                    drawerState = drawerState,
+                                    mainActivityManager = mainActivityManager,
+                                    isAtBottom = false
                                 )
                             }
-                            TabLayout(
-                                tabLayoutState = mainActivityState.tabLayoutState,
-                                tabs = mainActivityState.tabs,
-                                selectedTabIndex = mainActivityState.selectedTabIndex,
-                                onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-                                onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() },
-                            )
+
                             TabsPager(mainActivityState)
+
+                            if (moveToolbarAndTabsToBottom) {
+                                MainToolbar(
+                                    state = mainActivityState,
+                                    drawerScope = drawerScope,
+                                    drawerState = drawerState,
+                                    mainActivityManager = mainActivityManager,
+                                    isAtBottom = true
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    @Composable
+    private fun MainToolbar(
+        state: MainActivityState,
+        drawerScope: kotlinx.coroutines.CoroutineScope,
+        drawerState: androidx.compose.material3.DrawerState,
+        mainActivityManager: MainActivityManager,
+        isAtBottom: Boolean
+    ) {
+        if (!globalClass.preferencesManager.hideToolbar) {
+            Toolbar(
+                title = state.title,
+                subtitle = state.subtitle,
+                hasNewUpdate = state.hasNewUpdate,
+                onToggleAppInfoDialog = {
+                    drawerScope.launch { drawerState.open() }
+                }
+            )
+        }
+        TabLayout(
+            tabLayoutState = state.tabLayoutState,
+            tabs = state.tabs,
+            selectedTabIndex = state.selectedTabIndex,
+            onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+            onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() },
+            isAtBottom = isAtBottom
+        )
     }
 
     @Composable

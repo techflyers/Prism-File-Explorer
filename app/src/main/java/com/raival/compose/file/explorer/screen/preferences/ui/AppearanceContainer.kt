@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Nightlight
+import androidx.compose.material.icons.rounded.VerticalAlignBottom
 import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -112,6 +113,19 @@ fun AppearanceContainer() {
             icon = Icons.Rounded.VerticalAlignTop,
             switchState = prefs.hideToolbar,
             onSwitchChange = { prefs.hideToolbar = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.move_toolbar_and_tabs_to_bottom),
+            supportingText = emptyString,
+            icon = Icons.Rounded.VerticalAlignBottom,
+            switchState = prefs.moveToolbarAndTabsToBottom,
+            onSwitchChange = { prefs.moveToolbarAndTabsToBottom = it }
         )
     }
 }

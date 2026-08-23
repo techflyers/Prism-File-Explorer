@@ -67,7 +67,8 @@ fun TabLayout(
     tabs: List<Tab>,
     selectedTabIndex: Int,
     onReorder: (Int, Int) -> Unit,
-    onAddNewTab: () -> Unit
+    onAddNewTab: () -> Unit,
+    isAtBottom: Boolean = false
 ) {
     val selectedTabBackgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
     val unselectedTabBackgroundColor =
@@ -75,6 +76,11 @@ fun TabLayout(
     val draggedTabBackgroundColor = MaterialTheme.colorScheme.primary
     val draggedTabTextColor = MaterialTheme.colorScheme.surfaceContainerLowest
     val hideToolbar = globalClass.preferencesManager.hideToolbar
+    val tabShape = if (isAtBottom) {
+        RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+    } else {
+        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    }
 
     val mainActivityManager = globalClass.mainActivityManager
 
@@ -177,9 +183,9 @@ fun TabLayout(
                                 .padding(end = 4.dp)
                                 .background(
                                     color = backgroundColorAnim.value,
-                                    shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+                                    shape = tabShape
                                 )
-                                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                                .clip(tabShape)
                                 .combinedClickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },

@@ -63,6 +63,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var moveToolbarAndTabsToBottom by prefMutableState(
+        keyName = "moveToolbarAndTabsToBottom",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var use12HourFormat by prefMutableState(
         keyName = "use12HourFormat",
         defaultValue = false,
