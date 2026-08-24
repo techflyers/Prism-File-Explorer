@@ -13,7 +13,8 @@ enum class PlusButtonOverride {
 
 data class StartupTabs(
     val tabs: List<StartupTab>,
-    val plusButtonOverride: PlusButtonOverride = PlusButtonOverride.DEFAULT,
+    // Nullable for backward compatibility with legacy JSON that may contain null.
+    val plusButtonOverride: PlusButtonOverride? = PlusButtonOverride.DEFAULT,
     val plusButtonCustomPath: String = emptyString
 ) {
     companion object {

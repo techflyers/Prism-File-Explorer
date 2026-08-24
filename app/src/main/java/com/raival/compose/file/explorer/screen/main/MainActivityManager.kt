@@ -287,7 +287,7 @@ class MainActivityManager {
             StartupTabs.default()
         }
 
-        val tabToCreate: Tab = when (startupTabsObj.plusButtonOverride) {
+        val tabToCreate: Tab = when (startupTabsObj.plusButtonOverride ?: PlusButtonOverride.DEFAULT) {
             PlusButtonOverride.HOME -> HomeTab()
             PlusButtonOverride.APPS -> AppsTab()
             PlusButtonOverride.FILES -> FilesTab(LocalFileHolder(File("/storage/emulated/0")))

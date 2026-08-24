@@ -125,7 +125,7 @@ fun StartupTabsSettingsScreen(
                     StartupTabs.default()
                 }
 
-                plusButtonOverride = startupTabsObj.plusButtonOverride
+                plusButtonOverride = startupTabsObj.plusButtonOverride ?: PlusButtonOverride.DEFAULT
                 plusButtonCustomPath = startupTabsObj.plusButtonCustomPath ?: emptyString
                 val config = startupTabsObj.tabs
 
