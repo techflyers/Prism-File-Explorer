@@ -31,6 +31,7 @@ import com.raival.compose.file.explorer.screen.main.MainActivityManager
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.DocumentFileMapper
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchManager
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.SftpRemoteClient
 import com.raival.compose.file.explorer.screen.main.tab.files.task.TaskManager
 import com.raival.compose.file.explorer.screen.main.tab.files.zip.ZipManager
 import com.raival.compose.file.explorer.screen.preferences.PreferencesManager
@@ -125,6 +126,7 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
 
         logger = FileExplorerLogger(this, applicationScope)
         setupGlobalExceptionHandler()
+        SftpRemoteClient.ensureBouncyCastle()
 
         appContext = this
 

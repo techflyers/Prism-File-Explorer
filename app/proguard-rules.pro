@@ -37,3 +37,21 @@
 -dontwarn com.gemalto.jp2.JP2Decoder
 -dontwarn com.gemalto.jp2.JP2Encoder
 -dontwarn sun.security.x509.X509Key
+
+# BouncyCastle Cryptographic Provider (required for SSHJ KeyPairGenerator and Ciphers)
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
+# SSHJ & Crypto Dependencies
+-keep class net.schmizz.sshj.** { *; }
+-dontwarn net.schmizz.sshj.**
+-keep class com.hierynomus.** { *; }
+-dontwarn com.hierynomus.**
+-keep class net.i2p.crypto.eddsa.** { *; }
+-dontwarn net.i2p.crypto.eddsa.**
+-keep class com.jcraft.jzlib.** { *; }
+-dontwarn com.jcraft.jzlib.**
+-dontwarn org.slf4j.**
+-dontwarn javax.security.auth.kerberos.**
+
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod

@@ -1,14 +1,17 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.service.remote
 
 import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.common.SecurityUtils
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
+import java.security.Security
 import java.util.Date
 import java.util.EnumSet
 
@@ -31,11 +34,10 @@ class SftpRemoteClient(
                 synchronized(this) {
                     if (!bcInitialized) {
                         try {
-                            java.security.Security.removeProvider("BC")
-                            java.security.Security.insertProviderAt(
-                                org.bouncycastle.jce.provider.BouncyCastleProvider(),
-                                1
-                            )
+                            Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
+                            Security.insertProviderAt(BouncyCastleProvider(), 1)
+                            SecurityUtils.setRegisterBouncyCastle(false)
+                            SecurityUtils.setSecurityProvider(BouncyCastleProvider.PROVIDER_NAME)
                             bcInitialized = true
                         } catch (_: Exception) {
                         }

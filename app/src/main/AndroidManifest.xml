@@ -91,11 +91,18 @@
             android:autoRemoveFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:mimeType="text/*" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/javascript" />
+                <data android:mimeType="application/x-javascript" />
+                <data android:mimeType="application/x-sh" />
+                <data android:mimeType="application/x-shellscript" />
+                <data android:mimeType="application/x-yaml" />
+                <data android:mimeType="application/x-sql" />
+                <data android:mimeType="application/sql" />
                 <data android:scheme="file" />
                 <data android:scheme="content" />
             </intent-filter>
@@ -255,8 +262,94 @@
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
                 <data android:mimeType="application/vnd.ms-powerpoint"/>
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"/>
+                <data android:mimeType="application/vnd.oasis.opendocument.text"/>
+                <data android:mimeType="application/vnd.oasis.opendocument.spreadsheet"/>
+                <data android:mimeType="application/vnd.oasis.opendocument.presentation"/>
                 <data android:scheme="file"/>
                 <data android:scheme="content"/>
+            </intent-filter>
+        </activity>
+
+        <!-- SAF File & Folder Picker Activity -->
+        <activity
+            android:name=".screen.picker.FilePickerActivity"
+            android:exported="true"
+            android:label="@string/file_picker_title"
+            android:theme="@style/Theme.FileExplorer"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PICK" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.OPEN_DOCUMENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Open With Prism Dispatcher for All Supported Extensions -->
+        <activity
+            android:name=".screen.openwith.OpenWithDispatchActivity"
+            android:exported="true"
+            android:label="@string/open_with_prism"
+            android:theme="@style/Theme.FileExplorer.Transparent"
+            android:windowSoftInputMode="adjustResize"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <!-- Archives -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-7z-compressed" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/x-tar" />
+                <data android:mimeType="application/gzip" />
+                <data android:mimeType="application/x-gzip" />
+                <data android:mimeType="application/x-bzip2" />
+                <data android:mimeType="application/x-xz" />
+                <data android:mimeType="application/x-iso9660-image" />
+                <data android:mimeType="application/x-compressed" />
+                <data android:mimeType="application/x-archive" />
+                <data android:mimeType="application/zstd" />
+                <data android:mimeType="application/x-lz4" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <!-- APK and APK Bundles -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/vnd.android.package-archive" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <!-- Generic and all extensions -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="*/*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
             </intent-filter>
         </activity>
 
@@ -329,6 +422,18 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
+        </provider>
+
+        <!-- Storage Access Framework (SAF) DocumentsProvider -->
+        <provider
+            android:name=".saf.PrismDocumentsProvider"
+            android:authorities="${applicationId}.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
         </provider>
 
         <!-- Shizuku Provider (must be registered for Shizuku binding) -->

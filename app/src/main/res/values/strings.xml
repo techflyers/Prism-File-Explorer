@@ -505,4 +505,19 @@
     <string name="no_custom_runners">No custom runners configured</string>
     <string name="delete_runner">Delete runner</string>
     <string name="terminal_rootfs_missing">Terminal environment is corrupted. Please reinstall from Settings → Terminal.</string>
+
+    <!-- File Picker & Open With Strings -->
+    <string name="file_picker_title">Prism File Picker</string>
+    <string name="select_file">Select File</string>
+    <string name="select_files">Select Files</string>
+    <string name="select_folder">Select Folder</string>
+    <string name="select_this_folder">Select This Folder</string>
+    <string name="select_items_count">Select (%1$d)</string>
+    <string name="all_files">All Files</string>
+    <string name="filter_files">Filter: %1$s</string>
+    <string name="open_with_prism">Open with Prism</string>
+    <string name="opening_file">Opening file…</string>
+    <string name="downloading_remote_files">Downloading selected file(s)…</string>
+    <string name="remote_connection_error">Failed to connect to remote server</string>
+    <string name="loading">Loading…</string>
 </resources>

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -32,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -400,10 +398,18 @@ private fun ColumnFileItem(
         tab.onSelectionChange()
     }
 
-    Row(
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
+            .background(
+                color = if (isSelected) {
+                    selectionHighlightColor
+                } else if (tab.highlightedFiles.contains(currentItemPath)) {
+                    highlightColor
+                } else {
+                    Color.Unspecified
+                }
+            )
             .combinedClickable(
                 onClick = {
                     if (tab.selectedFiles.isNotEmpty()) {
@@ -420,69 +426,60 @@ private fun ColumnFileItem(
                     handleLongClick(tab, currentItemPath, item, index)
                 }
             )
-            .background(
-                color = if (isSelected) {
-                    selectionHighlightColor
-                } else if (tab.highlightedFiles.contains(currentItemPath)) {
-                    highlightColor
-                } else {
-                    Color.Unspecified
-                }
-            )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        val showCheckbox = tab.selectedFiles.isNotEmpty()
-        if (showCheckbox) {
-            Checkbox(
-                checked = isSelected,
-                onCheckedChange = { toggleSelection() }
-            )
-            Space(size = 4.dp)
-        }
+        Space(size = getFileListSpace(tab.activeFolder).dp)
 
-        Box(contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             FileIcon(
                 item = item,
                 size = getFileListIconSize(tab.activeFolder).dp,
-                onClick = {
-                    if (tab.selectedFiles.isNotEmpty()) {
-                        toggleSelection()
-                    } else {
-                        if (item.isFile()) {
-                            tab.openFile(context, item)
-                        } else {
-                            tab.openFolder(item, false)
-                        }
-                    }
-                },
                 viewConfigs = viewConfigs,
-                onLongClick = {
-                    handleLongClick(tab, currentItemPath, item, index)
-                }
+                onClick = { toggleSelection() },
+                onLongClick = { handleLongClick(tab, currentItemPath, item, index) }
             )
-            if (isSelected && !showCheckbox) {
-                Box(
-                    modifier = Modifier
-                        .size(getFileListIconSize(tab.activeFolder).dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(color = colorScheme.surface.copy(alpha = 0.5f))
-                ) {
-                    Icon(
-                        modifier = Modifier.align(Alignment.Center),
-                        imageVector = Icons.Rounded.CheckCircle,
-                        tint = colorScheme.primary,
-                        contentDescription = null
-                    )
+
+            Space(size = 8.dp)
+
+            Column(Modifier.weight(1f)) {
+                val fontSize = getFileListFontSize(tab.activeFolder)
+                // Hide extension from display name if setting is enabled
+                val prefs = globalClass.preferencesManager
+                val displayText = if (prefs.hideFileExtensions && item.isFile() && item.extension.isNotEmpty()) {
+                    item.displayName.substringBeforeLast(".")
+                } else {
+                    item.displayName
                 }
+
+                Text(
+                    text = displayText,
+                    fontSize = fontSize.sp,
+                    maxLines = 1,
+                    lineHeight = (fontSize + 2).sp,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (isSelected || tab.highlightedFiles.contains(currentItemPath)) {
+                        colorScheme.primary
+                    } else {
+                        Color.Unspecified
+                    }
+                )
+
+                FileDetails(
+                    item = item,
+                    currentItemPath = currentItemPath,
+                    fontSize = fontSize,
+                    isHighlighted = isSelected || tab.highlightedFiles.contains(currentItemPath)
+                )
             }
         }
-        Space(size = 12.dp)
-        FileName(
-            item = item,
-            fontSize = getFileListFontSize(tab.activeFolder),
-            isHighlighted = isSelected,
-            currentItemPath = currentItemPath
+
+        Space(size = getFileListSpace(tab.activeFolder).dp)
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 56.dp),
+            thickness = 0.5.dp
         )
     }
 }
@@ -644,45 +641,6 @@ private fun GridFileItem(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun FileName(
-    item: ContentHolder,
-    fontSize: Int,
-    isHighlighted: Boolean,
-    currentItemPath: String
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.Center
-    ) {
-        val preferencesManager = globalClass.preferencesManager
-        val displayName = if (preferencesManager.hideFileExtensions && !item.isFolder && item.extension.isNotEmpty()) {
-            item.displayName.substringBeforeLast(".${item.extension}")
-        } else {
-            item.displayName
-        }
-
-        Text(
-            text = displayName,
-            fontSize = fontSize.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (isHighlighted) {
-                colorScheme.primary
-            } else {
-                colorScheme.onSurface
-            }
-        )
-        Space(size = 2.dp)
-        FileDetails(
-            item = item,
-            currentItemPath = currentItemPath,
-            fontSize = fontSize,
-            isHighlighted = isHighlighted
-        )
     }
 }
 

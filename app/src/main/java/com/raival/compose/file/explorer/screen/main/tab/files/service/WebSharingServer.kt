@@ -79,12 +79,7 @@ AAAEBbu6hQHydFb0ZGHuYq+gCui5fFtXW1X2e3Ok3UKTfXMhY3eZl04qtec/5UVUNLrK49
 
         thread {
             try {
-                try {
-                    Security.removeProvider("BC")
-                    Security.insertProviderAt(BouncyCastleProvider(), 1)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+                com.raival.compose.file.explorer.screen.main.tab.files.service.remote.SftpRemoteClient.ensureBouncyCastle()
 
                 sshClient = SSHClient()
                 sshClient!!.addHostKeyVerifier(PromiscuousVerifier())

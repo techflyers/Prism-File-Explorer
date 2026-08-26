@@ -30,6 +30,7 @@ object NetworkConnectionsService {
         }
         val str = Gson().toJson(current)
         prefs.edit().putString(KEY_CONNECTIONS, str).apply()
+        notifyRootsChanged(context)
     }
 
     fun deleteConnection(context: Context, id: String) {
@@ -39,5 +40,14 @@ object NetworkConnectionsService {
         val str = Gson().toJson(current)
         prefs.edit().putString(KEY_CONNECTIONS, str).apply()
         RemoteConnectionPool.release(id)
+        notifyRootsChanged(context)
+    }
+
+    fun notifyRootsChanged(context: Context) {
+        try {
+            val rootsUri = android.provider.DocumentsContract.buildRootsUri("com.raival.compose.file.explorer.documents")
+            context.contentResolver.notifyChange(rootsUri, null)
+        } catch (_: Exception) {
+        }
     }
 }

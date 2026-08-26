@@ -1,6 +1,8 @@
 package com.raival.compose.file.explorer.screen.main
 
+import android.content.Intent
 import android.os.Bundle
+import android.os.Environment
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -412,6 +414,17 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        com.raival.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService.notifyRootsChanged(this)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         ShizukuManager.cleanup()
@@ -419,16 +432,58 @@ class MainActivity : BaseActivity() {
     }
 
     private fun hasIntent(): Boolean {
-        return intent isNot null && intent!!.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)
+        val i = intent ?: return false
+        return i.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY) ||
+                i.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_ARCHIVE) ||
+                i.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_APK) ||
+                i.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_PREFS)
     }
 
     private fun handleIntent() {
-        intent?.let {
-            if (it.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)) {
-                globalClass.mainActivityManager.jumpToFile(
-                    file = LocalFileHolder(File(it.getStringExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)!!)),
-                    context = this
-                )
+        val currentIntent = intent ?: return
+        when {
+            currentIntent.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY) -> {
+                val path = currentIntent.getStringExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)
+                if (!path.isNullOrEmpty()) {
+                    globalClass.mainActivityManager.jumpToFile(
+                        file = LocalFileHolder(File(path)),
+                        context = this
+                    )
+                }
+                intent = null
+            }
+            currentIntent.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_ARCHIVE) -> {
+                val path = currentIntent.getStringExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_ARCHIVE)
+                if (!path.isNullOrEmpty()) {
+                    val archiveFile = LocalFileHolder(File(path))
+                    if (globalClass.mainActivityManager.getActiveTab() == null) {
+                        val parentFolder = archiveFile.file.parentFile?.let { LocalFileHolder(it) } ?: LocalFileHolder(Environment.getExternalStorageDirectory())
+                        globalClass.mainActivityManager.addTabAndSelect(FilesTab(parentFolder))
+                    }
+                    globalClass.zipManager.openArchive(archiveFile)
+                }
+                intent = null
+            }
+            currentIntent.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_APK) -> {
+                val path = currentIntent.getStringExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_APK)
+                if (!path.isNullOrEmpty()) {
+                    val apkFile = LocalFileHolder(File(path))
+                    val parentFolder = apkFile.file.parentFile?.let { LocalFileHolder(it) } ?: LocalFileHolder(Environment.getExternalStorageDirectory())
+                    val filesTab = FilesTab(parentFolder)
+                    globalClass.mainActivityManager.addTabAndSelect(filesTab)
+                    filesTab.toggleApkDialog(apkFile)
+                }
+                intent = null
+            }
+            currentIntent.hasExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_PREFS) -> {
+                val path = currentIntent.getStringExtra(com.raival.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_PREFS)
+                if (!path.isNullOrEmpty()) {
+                    val prefsFile = LocalFileHolder(File(path))
+                    val parentFolder = prefsFile.file.parentFile?.let { LocalFileHolder(it) } ?: LocalFileHolder(Environment.getExternalStorageDirectory())
+                    val filesTab = FilesTab(parentFolder)
+                    globalClass.mainActivityManager.addTabAndSelect(filesTab)
+                    filesTab.toggleImportPrefsDialog(prefsFile)
+                }
                 intent = null
             }
         }
