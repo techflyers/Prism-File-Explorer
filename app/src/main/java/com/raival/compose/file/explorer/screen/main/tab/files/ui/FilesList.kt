@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -45,9 +47,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.rounded.ContentPaste
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,7 +86,6 @@ import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
-import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
@@ -89,11 +94,9 @@ import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSize
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListIconSize
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListSpace
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -303,7 +306,7 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
 
         itemsIndexed(
             tab.activeFolderContent,
-            key = { _, item -> item.uid }
+            key = { _, item -> item.uniquePath }
         ) { index, item ->
             val currentItemPath = item.uniquePath
             val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
@@ -346,7 +349,7 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
 
         itemsIndexed(
             tab.activeFolderContent,
-            key = { _, item -> item.uid }
+            key = { _, item -> item.uniquePath }
         ) { index, item ->
             val currentItemPath = item.uniquePath
             val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
@@ -361,6 +364,7 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
                 highlightColor = highlightColor,
                 context = context,
                 viewConfigs = tab.viewConfig,
+                isSelectedItem = isSelectedItem,
                 onSelection = { isSelectedItem = it }
             )
         }
@@ -376,13 +380,15 @@ private fun ColumnFileItem(
     selectionHighlightColor: Color,
     highlightColor: Color,
     context: Context,
-    currentItemPath: String = item.uniquePath,
+    viewConfigs: ViewConfigs,
     isSelectedItem: Boolean,
-    onSelection: (Boolean) -> Unit,
-    viewConfigs: ViewConfigs
+    onSelection: (Boolean) -> Unit
 ) {
+    val currentItemPath = item.uniquePath
+    val isSelected = isSelectedItem || tab.selectedFiles.containsKey(currentItemPath)
+
     fun toggleSelection() {
-        if (tab.selectedFiles.containsKey(currentItemPath)) {
+        if (isSelected) {
             tab.selectedFiles.remove(currentItemPath)
             tab.lastSelectedFileIndex = -1
             onSelection(false)
@@ -394,18 +400,10 @@ private fun ColumnFileItem(
         tab.onSelectionChange()
     }
 
-    Column(
-        Modifier
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = if (isSelectedItem) {
-                    selectionHighlightColor
-                } else if (tab.highlightedFiles.contains(currentItemPath)) {
-                    highlightColor
-                } else {
-                    Color.Unspecified
-                }
-            )
+            .height(IntrinsicSize.Min)
             .combinedClickable(
                 onClick = {
                     if (tab.selectedFiles.isNotEmpty()) {
@@ -422,60 +420,69 @@ private fun ColumnFileItem(
                     handleLongClick(tab, currentItemPath, item, index)
                 }
             )
+            .background(
+                color = if (isSelected) {
+                    selectionHighlightColor
+                } else if (tab.highlightedFiles.contains(currentItemPath)) {
+                    highlightColor
+                } else {
+                    Color.Unspecified
+                }
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Space(size = getFileListSpace(tab.activeFolder).dp)
+        val showCheckbox = tab.selectedFiles.isNotEmpty()
+        if (showCheckbox) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { toggleSelection() }
+            )
+            Space(size = 4.dp)
+        }
 
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Box(contentAlignment = Alignment.Center) {
             FileIcon(
                 item = item,
                 size = getFileListIconSize(tab.activeFolder).dp,
-                viewConfigs = viewConfigs,
-                onClick = { toggleSelection() },
-                onLongClick = { handleLongClick(tab, currentItemPath, item, index) }
-            )
-
-            Space(size = 8.dp)
-
-            Column(Modifier.weight(1f)) {
-                val fontSize = getFileListFontSize(tab.activeFolder)
-                // Hide extension from display name if setting is enabled
-                val prefs = globalClass.preferencesManager
-                val displayText = if (prefs.hideFileExtensions && item.isFile() && item.extension.isNotEmpty()) {
-                    item.displayName.substringBeforeLast(".")
-                } else {
-                    item.displayName
-                }
-
-                Text(
-                    text = displayText,
-                    fontSize = fontSize.sp,
-                    maxLines = 1,
-                    lineHeight = (fontSize + 2).sp,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (tab.highlightedFiles.contains(currentItemPath)) {
-                        colorScheme.primary
+                onClick = {
+                    if (tab.selectedFiles.isNotEmpty()) {
+                        toggleSelection()
                     } else {
-                        Color.Unspecified
+                        if (item.isFile()) {
+                            tab.openFile(context, item)
+                        } else {
+                            tab.openFolder(item, false)
+                        }
                     }
-                )
-
-                FileDetails(
-                    item = item,
-                    currentItemPath = currentItemPath,
-                    fontSize = fontSize,
-                    isHighlighted = tab.highlightedFiles.contains(currentItemPath)
-                )
+                },
+                viewConfigs = viewConfigs,
+                onLongClick = {
+                    handleLongClick(tab, currentItemPath, item, index)
+                }
+            )
+            if (isSelected && !showCheckbox) {
+                Box(
+                    modifier = Modifier
+                        .size(getFileListIconSize(tab.activeFolder).dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(color = colorScheme.surface.copy(alpha = 0.5f))
+                ) {
+                    Icon(
+                        modifier = Modifier.align(Alignment.Center),
+                        imageVector = Icons.Rounded.CheckCircle,
+                        tint = colorScheme.primary,
+                        contentDescription = null
+                    )
+                }
             }
         }
-
-        Space(size = getFileListSpace(tab.activeFolder).dp)
-
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 56.dp),
-            thickness = 0.5.dp
+        Space(size = 12.dp)
+        FileName(
+            item = item,
+            fontSize = getFileListFontSize(tab.activeFolder),
+            isHighlighted = isSelected,
+            currentItemPath = currentItemPath
         )
     }
 }
@@ -483,19 +490,20 @@ private fun ColumnFileItem(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GridFileItem(
+    itemPath: String,
+    isSelected: Boolean,
     item: ContentHolder,
     index: Int,
     tab: FilesTab,
     selectionHighlightColor: Color,
     highlightColor: Color,
     context: Context,
-    itemPath: String,
-    isSelected: Boolean,
-    onSelection: (Boolean) -> Unit,
-    viewConfigs: ViewConfigs
+    viewConfigs: ViewConfigs,
+    isSelectedItem: Boolean,
+    onSelection: (Boolean) -> Unit
 ) {
     fun toggleSelection() {
-        if (tab.selectedFiles.containsKey(itemPath)) {
+        if (isSelected) {
             tab.selectedFiles.remove(itemPath)
             tab.lastSelectedFileIndex = -1
             onSelection(false)
@@ -615,25 +623,66 @@ private fun GridFileItem(
                 }
             }
             if (!viewConfigs.galleryMode) {
-                Spacer(modifier = Modifier.height(4.dp))
-                val fontSize = getFileListFontSize(tab.activeFolder) * 0.8
+                Space(size = 4.dp)
                 Text(
                     text = item.displayName,
-                    fontSize = fontSize.sp,
-                    fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                    fontSize = (getFileListFontSize(tab.activeFolder) - 3).sp,
                     maxLines = 2,
-                    lineHeight = (fontSize + 2).sp,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    color = if (tab.highlightedFiles.contains(itemPath)) {
+                    color = if (isSelected) {
                         colorScheme.primary
                     } else {
-                        colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                        colorScheme.onSurface
+                    }
+                )
+                Space(size = 2.dp)
+                FileDetailsCompact(
+                    item = item,
+                    currentItemPath = itemPath,
+                    isHighlighted = isSelected
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun FileName(
+    item: ContentHolder,
+    fontSize: Int,
+    isHighlighted: Boolean,
+    currentItemPath: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.Center
+    ) {
+        val preferencesManager = globalClass.preferencesManager
+        val displayName = if (preferencesManager.hideFileExtensions && !item.isFolder && item.extension.isNotEmpty()) {
+            item.displayName.substringBeforeLast(".${item.extension}")
+        } else {
+            item.displayName
+        }
+
+        Text(
+            text = displayName,
+            fontSize = fontSize.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (isHighlighted) {
+                colorScheme.primary
+            } else {
+                colorScheme.onSurface
+            }
+        )
+        Space(size = 2.dp)
+        FileDetails(
+            item = item,
+            currentItemPath = currentItemPath,
+            fontSize = fontSize,
+            isHighlighted = isHighlighted
+        )
     }
 }
 
@@ -662,7 +711,7 @@ private fun FileIcon(
                 )
                 .graphicsLayer { alpha = if (item.isHidden()) 0.4f else 1f },
         ) {
-            var useCoil by remember(item.uid) {
+            var useCoil by remember(item.uniquePath) {
                 mutableStateOf(canUseCoil(item))
             }
 
@@ -704,14 +753,22 @@ private fun FileDetails(
     fontSize: Int,
     isHighlighted: Boolean
 ) {
+    val initialDetails = remember(currentItemPath) {
+        if (item is LocalFileHolder && item.details.isNotEmpty()) {
+            item.details
+        } else if (item is LocalFileHolder) {
+            LocalFileHolder.getCachedDetails(item.file, item.lastModified).orEmpty()
+        } else {
+            emptyString
+        }
+    }
+
     var details by remember(
-        key1 = currentItemPath,
-        key2 = item.lastModified
-    ) { mutableStateOf(emptyString) }
+        key1 = currentItemPath
+    ) { mutableStateOf(initialDetails) }
 
     LaunchedEffect(
-        key1 = currentItemPath,
-        key2 = item.lastModified
+        key1 = currentItemPath
     ) {
         if (details.isEmpty()) {
             val det = withContext(IO) {
@@ -790,18 +847,28 @@ private fun FileDetailsCompact(
     isHighlighted: Boolean
 ) {
     Isolate {
+        val initialDetails = remember(currentItemPath) {
+            if (item is LocalFileHolder && item.details.isNotEmpty()) {
+                item.details
+            } else if (item is LocalFileHolder) {
+                LocalFileHolder.getCachedDetails(item.file, item.lastModified).orEmpty()
+            } else {
+                emptyString
+            }
+        }
+
         var details by remember(
-            key1 = currentItemPath,
-            key2 = item.lastModified
-        ) { mutableStateOf(emptyString) }
+            key1 = currentItemPath
+        ) { mutableStateOf(initialDetails) }
 
         LaunchedEffect(
-            key1 = currentItemPath,
-            key2 = item.lastModified
+            key1 = currentItemPath
         ) {
             if (details.isEmpty()) {
-                val det = item.getDetails()
-                withContext(Dispatchers.Main) { details = det }
+                val det = withContext(IO) {
+                    item.getDetails()
+                }
+                details = det
             }
         }
 

@@ -56,8 +56,12 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.sqlFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.vectorFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
+import android.util.LruCache
+import androidx.compose.runtime.remember
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private val iconCache = LruCache<String, FileContentIcon>(1000)
 
 data class FileContentIcon(
     val icon: Any,
@@ -135,21 +139,39 @@ fun FileContentIcon(item: ContentHolder) {
     // Start with extension-based icon
     val extensionIcon = getContentIcon(item)
 
-    // If extension-based icon is unknown and item is a local file, try Magika detection
+    // If extension-based icon is unknown and item is a local file, try Magika detection with caching
     val fileContentIcon = if (
         extensionIcon.icon == Icons.Default.QuestionMark &&
         item is LocalFileHolder &&
         !item.isFolder
     ) {
-        val magikaIcon by produceState<FileContentIcon?>(initialValue = null, item.uniquePath) {
-            value = withContext(Dispatchers.IO) {
-                try {
-                    val result = MagikaFileTypeDetector.detect(item.file)
-                    result?.let { magikaIconForLabel(it.label) }
-                } catch (_: Exception) { null }
+        val cacheKey = item.uniquePath
+        val cachedIcon = iconCache.get(cacheKey)
+
+        if (cachedIcon != null) {
+            cachedIcon
+        } else {
+            val fromDetector = MagikaFileTypeDetector.getCachedResult(item.file)?.let { magikaIconForLabel(it.label) }
+            if (fromDetector != null) {
+                iconCache.put(cacheKey, fromDetector)
+                fromDetector
+            } else {
+                val magikaIcon by produceState(initialValue = extensionIcon, cacheKey) {
+                    value = withContext(Dispatchers.IO) {
+                        try {
+                            val result = MagikaFileTypeDetector.detect(item.file)
+                            val resolved = result?.let { magikaIconForLabel(it.label) } ?: extensionIcon
+                            iconCache.put(cacheKey, resolved)
+                            resolved
+                        } catch (_: Exception) {
+                            iconCache.put(cacheKey, extensionIcon)
+                            extensionIcon
+                        }
+                    }
+                }
+                magikaIcon
             }
         }
-        magikaIcon ?: extensionIcon
     } else {
         extensionIcon
     }

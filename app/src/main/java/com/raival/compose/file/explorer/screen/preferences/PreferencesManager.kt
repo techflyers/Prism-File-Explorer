@@ -63,8 +63,14 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
-    var moveToolbarAndTabsToBottom by prefMutableState(
-        keyName = "moveToolbarAndTabsToBottom",
+    var moveToolbarToBottom by prefMutableState(
+        keyName = "moveToolbarToBottom",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var moveTabsToBottom by prefMutableState(
+        keyName = "moveTabsToBottom",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )

@@ -76,11 +76,7 @@ fun TabLayout(
     val draggedTabBackgroundColor = MaterialTheme.colorScheme.primary
     val draggedTabTextColor = MaterialTheme.colorScheme.surfaceContainerLowest
     val hideToolbar = globalClass.preferencesManager.hideToolbar
-    val tabShape = if (isAtBottom) {
-        RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
-    } else {
-        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
-    }
+    val tabShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
 
     val mainActivityManager = globalClass.mainActivityManager
 

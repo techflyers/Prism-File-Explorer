@@ -130,7 +130,7 @@ fun FileIcon(
             .then(if (onClickListener != null) Modifier.clickable { onClickListener() } else Modifier)
             .graphicsLayer { alpha = if (contentHolder.isHidden()) 0.4f else 1f },
     ) {
-        var useCoil by remember(contentHolder.uid) {
+        var useCoil by remember(contentHolder.uniquePath) {
             mutableStateOf(canUseCoil(contentHolder))
         }
 

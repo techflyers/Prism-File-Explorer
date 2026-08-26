@@ -77,14 +77,15 @@ class TerminalSessionService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PrismTerminal::SessionService")
+        wakeLock = (getSystemService(POWER_SERVICE) as? PowerManager)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PrismTerminal::SessionService")
+            ?.apply { setReferenceCounted(false) }
         StatUpdater.start(this)
     }
 
     override fun onDestroy() {
         sessions.forEach { it.value.finishIfRunning() }
-        if (wakeLock?.isHeld == true) wakeLock?.release()
+        runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
         StatUpdater.stop()
         super.onDestroy()
     }
@@ -94,7 +95,9 @@ class TerminalSessionService : Service() {
         when (intent?.action) {
             ACTION_EXIT -> actionExit()
             ACTION_WAKE_LOCK -> {
-                if (wakeLock?.isHeld == true) wakeLock?.release() else wakeLock?.acquire()
+                runCatching {
+                    if (wakeLock?.isHeld == true) wakeLock?.release() else wakeLock?.acquire()
+                }.onFailure { it.printStackTrace() }
                 updateNotification()
             }
         }

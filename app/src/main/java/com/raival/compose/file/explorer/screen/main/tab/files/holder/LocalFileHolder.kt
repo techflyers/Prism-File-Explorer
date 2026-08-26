@@ -63,8 +63,9 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override val isFolder: Boolean by lazy { file.isDirectory }
 
     override val lastModified: Long
-        get() = file.lastModified().also {
-            if (timestamp == -1L) timestamp = it
+        get() {
+            if (timestamp == -1L) timestamp = file.lastModified()
+            return timestamp
         }
 
     override val size: Long by lazy { file.length() }
@@ -83,8 +84,27 @@ class LocalFileHolder(file: File) : ContentHolder() {
 
     val basePath by lazy { file.getBasePath(globalClass) }
 
+    companion object {
+        private val detailsCache = android.util.LruCache<String, String>(2000)
+        private val pdfPageCache = android.util.LruCache<String, Int>(500)
+        private val archiveRatioCache = android.util.LruCache<String, String>(500)
+        private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
+
+        fun getCachedDetails(file: File, lastModified: Long): String? {
+            val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+            return detailsCache.get(cacheKey)
+        }
+    }
+
     override suspend fun getDetails(): String {
         if (details.isNotEmpty()) return details
+
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        val cached = detailsCache.get(cacheKey)
+        if (cached != null) {
+            details = cached
+            return cached
+        }
 
         // Right side: date formatted as DD/MM/YY • HH:MM
         val rightSide = lastModified.toFormattedDate(
@@ -134,22 +154,35 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
         }
 
-        return "$leftSide\t$rightSide".also { details = it }
+        return "$leftSide\t$rightSide".also {
+            details = it
+            detailsCache.put(cacheKey, it)
+        }
     }
 
-    private val archiveExtensions by lazy { FileMimeType.archiveFileType.toSet() }
+    private val archiveExtensions by lazy { FileMimeType.archiveFileType }
 
     private fun getPdfPageCount(): Int {
-        return try {
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        val cached = pdfPageCache.get(cacheKey)
+        if (cached != null) return cached
+
+        val pages = try {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
                 PdfRenderer(pfd).use { renderer -> renderer.pageCount }
             }
         } catch (_: Exception) { 0 }
+        pdfPageCache.put(cacheKey, pages)
+        return pages
     }
 
     private fun getArchiveCompressionRatio(): String? {
         if (!file.exists() || file.extension.lowercase() !in setOf("zip", "jar", "apk", "xapk")) return null
-        return try {
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        val cached = archiveRatioCache.get(cacheKey)
+        if (cached != null) return cached.ifEmpty { null }
+
+        val ratioStr = try {
             val zip = java.util.zip.ZipFile(file)
             var compressedTotal = 0L
             var uncompressedTotal = 0L
@@ -160,10 +193,14 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 uncompressedTotal += entry.size.coerceAtLeast(0)
             }
             zip.close()
-            if (uncompressedTotal <= 0) return null
-            val ratio = (compressedTotal.toDouble() / uncompressedTotal.toDouble()) * 100.0
-            "${ratio.toInt()}% ratio"
-        } catch (_: Exception) { null }
+            if (uncompressedTotal <= 0) ""
+            else {
+                val ratio = (compressedTotal.toDouble() / uncompressedTotal.toDouble()) * 100.0
+                "${ratio.toInt()}% ratio"
+            }
+        } catch (_: Exception) { "" }
+        archiveRatioCache.put(cacheKey, ratioStr)
+        return ratioStr.ifEmpty { null }
     }
 
     override suspend fun isValid(): Boolean {
@@ -279,6 +316,10 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override suspend fun getContentCount(): ContentCount = getContentCount(globalClass.preferencesManager.showHiddenFiles)
 
     suspend fun getContentCount(showHidden: Boolean): ContentCount {
+        val cacheKey = "${file.absolutePath}:$lastModified:$showHidden"
+        val cached = contentCountCache.get(cacheKey)
+        if (cached != null) return cached
+
         if (file.absolutePath == globalClass.recycleBinDir.file.absolutePath) {
             var files = 0
             var folders = 0
@@ -296,10 +337,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
             fileCount = files
             folderCount = folders
-            return ContentCount(fileCount, folderCount)
+            val count = ContentCount(fileCount, folderCount)
+            contentCountCache.put(cacheKey, count)
+            return count
         }
 
-        // Always recount with the current showHidden value
+        // Count with the current showHidden value
         fileCount = 0
         folderCount = 0
         file.listFiles()?.let { list ->
@@ -313,7 +356,9 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
         }
 
-        return ContentCount(fileCount, folderCount)
+        val count = ContentCount(fileCount, folderCount)
+        contentCountCache.put(cacheKey, count)
+        return count
     }
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {

@@ -22,6 +22,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Shizuku binder permission -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />

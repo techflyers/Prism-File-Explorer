@@ -70,9 +70,9 @@ class HomeTab : Tab() {
         }
     }
 
-    fun getMainCategories() = arrayListOf<HomeCategory>().apply {
+    private val _mainCategories by lazy {
         val mainActivityManager = globalClass.mainActivityManager
-        add(
+        listOf(
             HomeCategory(
                 name = globalClass.getString(R.string.images),
                 icon = Icons.Rounded.Image,
@@ -81,10 +81,7 @@ class HomeTab : Tab() {
                         FilesTab(VirtualFileHolder(IMAGE))
                     )
                 }
-            )
-        )
-
-        add(
+            ),
             HomeCategory(
                 name = globalClass.getString(R.string.videos),
                 icon = Icons.Rounded.VideoFile,
@@ -93,10 +90,7 @@ class HomeTab : Tab() {
                         FilesTab(VirtualFileHolder(VIDEO))
                     )
                 }
-            )
-        )
-
-        add(
+            ),
             HomeCategory(
                 name = globalClass.getString(R.string.audios),
                 icon = Icons.Rounded.AudioFile,
@@ -105,10 +99,7 @@ class HomeTab : Tab() {
                         FilesTab(VirtualFileHolder(AUDIO))
                     )
                 }
-            )
-        )
-
-        add(
+            ),
             HomeCategory(
                 name = globalClass.getString(R.string.documents),
                 icon = Icons.AutoMirrored.Rounded.InsertDriveFile,
@@ -117,10 +108,7 @@ class HomeTab : Tab() {
                         FilesTab(VirtualFileHolder(DOCUMENT))
                     )
                 }
-            )
-        )
-
-        add(
+            ),
             HomeCategory(
                 name = globalClass.getString(R.string.archives),
                 icon = Icons.Rounded.Archive,
@@ -129,10 +117,7 @@ class HomeTab : Tab() {
                         FilesTab(VirtualFileHolder(ARCHIVE))
                     )
                 }
-            )
-        )
-
-        add(
+            ),
             HomeCategory(
                 name = globalClass.getString(R.string.apps),
                 icon = Icons.Rounded.Android,
@@ -144,6 +129,8 @@ class HomeTab : Tab() {
             )
         )
     }
+
+    fun getMainCategories(): List<HomeCategory> = _mainCategories
 
     private fun getRecentFiles(): ArrayList<RecentFile> {
         return arrayListOf<RecentFile>().apply {

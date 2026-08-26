@@ -90,32 +90,34 @@ abstract class ContentHolder {
 
     open suspend fun listSortedContent(): ArrayList<out ContentHolder> {
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
+        val list = listContent()
 
-        return listContent().apply {
-            when (sortingPrefs.sortMethod) {
-                SORT_BY_NAME -> {
-                    sortWith(if (sortingPrefs.reverseSorting) sortNameRev else sortName)
-                }
-
-                SORT_BY_DATE -> {
-                    sortWith(if (sortingPrefs.reverseSorting) sortOlderFirst else sortNewerFirst)
-                }
-
-                SORT_BY_SIZE -> {
-                    sortWith(if (sortingPrefs.reverseSorting) sortLargerFirst else sortSmallerFirst)
-                }
-
-                SORT_BY_TYPE -> {
-                    sortWith(if (sortingPrefs.reverseSorting) sortTypeRev else sortType)
-                }
-            }
-
-            if (sortingPrefs.showFoldersFirst) sortWith(sortFoldersFirst)
-
-            if (!globalClass.preferencesManager.showHiddenFiles) {
-                removeIf { it.isHidden() }
-            }
+        if (!globalClass.preferencesManager.showHiddenFiles) {
+            list.removeIf { it.isHidden() }
         }
+
+        val primaryComparator = when (sortingPrefs.sortMethod) {
+            SORT_BY_NAME -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
+            SORT_BY_DATE -> if (sortingPrefs.reverseSorting) sortOlderFirst else sortNewerFirst
+            SORT_BY_SIZE -> if (sortingPrefs.reverseSorting) sortLargerFirst else sortSmallerFirst
+            SORT_BY_TYPE -> if (sortingPrefs.reverseSorting) sortTypeRev else sortType
+            else -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
+        }
+
+        val compositeComparator = if (sortingPrefs.showFoldersFirst) {
+            Comparator { f1: ContentHolder, f2: ContentHolder ->
+                if (f1.isFolder != f2.isFolder) {
+                    if (f1.isFolder) -1 else 1
+                } else {
+                    primaryComparator.compare(f1, f2)
+                }
+            }
+        } else {
+            primaryComparator
+        }
+
+        list.sortWith(compositeComparator)
+        return list
     }
 
     fun isApk(): Boolean = extension == apkFileType

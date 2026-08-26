@@ -138,7 +138,8 @@
     <string name="extra_large">Extra large</string>
     <string name="file_list_size_desc">Select a suitable size for the file list</string>
     <string name="show_bottom_bar_labels">Show bottom options bar labels</string>
-    <string name="move_toolbar_and_tabs_to_bottom">Move toolbar and tabs to bottom</string>
+    <string name="move_toolbar_to_bottom">Move toolbar to bottom</string>
+    <string name="move_tabs_to_bottom">Move tabs to bottom</string>
     <string name="general">General</string>
     <string name="search_in_files_limit">Files search limit</string>
     <string name="maximum_number_of_files_search_desc">Limit the number of results shown when search</string>

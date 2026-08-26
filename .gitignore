@@ -16,3 +16,4 @@ local.properties
 
 # Logs & Debug Artifacts
 *.log
+perf_sandbox

@@ -15,28 +15,28 @@ object FileMimeType {
     const val anyFileType = "*/*"
 
     @JvmField
-    val latexFileType = arrayOf("tex", "latex")
+    val latexFileType = setOf("tex", "latex")
 
     @JvmField
-    val officeFileType = arrayOf("doc", "docx", "xls", "xlsx", "ppt", "pptx")
+    val officeFileType = setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx")
 
     @JvmField
-    val htmlFileType = arrayOf("html", "htm")
+    val htmlFileType = setOf("html", "htm")
 
     @JvmField
-    val docFileType = arrayOf("doc", "docx")
+    val docFileType = setOf("doc", "docx")
 
     @JvmField
-    val excelFileType = arrayOf("xls", "xlsx")
+    val excelFileType = setOf("xls", "xlsx")
 
     @JvmField
-    val pptFileType = arrayOf("ppt", "pptx")
+    val pptFileType = setOf("ppt", "pptx")
 
     @JvmField
-    val fontFileType = arrayOf("ttf", "otf")
+    val fontFileType = setOf("ttf", "otf")
 
     @JvmField
-    val vectorFileType = arrayOf(
+    val vectorFileType = setOf(
         "svg", "ai", "eps", "pdf", "dxf",
         "wmf", "emf", "cdr", "odg", "swf"
     )
@@ -46,7 +46,7 @@ object FileMimeType {
      * Covers lib7za pack+unpack formats, unpack-only formats, and common aliases.
      */
     @JvmField
-    val archiveFileType = arrayOf(
+    val archiveFileType = setOf(
         // lib7za Pack + Unpack
         "7z", "xz", "bz2", "bzip2", "gz", "gzip", "tar", "zip", "wim",
         // lib7za Unpack Only
@@ -65,7 +65,7 @@ object FileMimeType {
      * All are routed through lib7za native binary.
      */
     @JvmField
-    val supportedArchiveFileType = arrayOf(
+    val supportedArchiveFileType = setOf(
         // lib7za Pack + Unpack
         "7z", "xz", "bz2", "bzip2", "gz", "gzip", "tar", "zip", "wim",
         // lib7za Unpack Only
@@ -89,36 +89,36 @@ object FileMimeType {
     val nativeCompressFormats = setOf("7z", "zip", "tar", "gz", "bz2", "xz", "wim", "tgz", "tbz2", "txz")
 
     @JvmField
-    val videoFileType = arrayOf(
+    val videoFileType = setOf(
         "mp4", "mov", "avi", "mkv", "wmv", "m4v", "3gp",
         "webm", "flv", "mpeg", "mpg", "ogv", "mxf", "vob", "ts"
     )
 
     @JvmField
-    val codeFileType = arrayOf(
+    val codeFileType = setOf(
         javaFileType, "xml", "py", "css", kotlinFileType, "cs", "xml", jsonFileType,
         "js", "ts", "php", "rb", "pl", "sh", "cpp", "c", "h", "swift", "go", "rs",
         "scala", "sql", "r", "ini", "yaml", "yml"
     )
 
     @JvmField
-    val editableFileType = arrayOf(
+    val editableFileType = setOf(
         "txt", "text", "log", "dsc", "apt", "rtf", "rtx",
         "csv", "tsv", "ini", "conf", "cfg", "nfo", "json", "xml"
     )
 
     @JvmField
-    val imageFileType = arrayOf(
+    val imageFileType = setOf(
         "png", "jpeg", "jpg", "heic", "tiff", "gif", "webp", svgFileType, "bmp", "raw"
     )
 
     @JvmField
-    val audioFileType = arrayOf(
+    val audioFileType = setOf(
         "mp3", "4mp", "aup", "ogg", "3ga", "m4b", "wav", "acc",
         "m4a", "flac", "aac", "wma", "aiff", "amr", "midi", "mid", "opus"
     )
 
     @JvmField
-    val apkBundleFileType = arrayOf("apks", "xapk", "apkm")
+    val apkBundleFileType = setOf("apks", "xapk", "apkm")
 
 }

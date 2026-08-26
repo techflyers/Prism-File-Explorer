@@ -14,11 +14,45 @@ import java.util.Date
 
 suspend fun getInstalledApps(context: Context): List<AppHolder> {
     val packageManager = context.packageManager
-    val apps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+    val packages = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledPackages(
+                PackageManager.PackageInfoFlags.of(
+                    (PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA).toLong()
+                )
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstalledPackages(
+                PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA
+            )
+        }
+    } catch (_: Exception) {
+        // Fallback if bulk query encounters TransactionTooLargeException
+        packageManager.getInstalledApplications(PackageManager.GET_META_DATA).mapNotNull { appInfo ->
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    packageManager.getPackageInfo(
+                        appInfo.packageName,
+                        PackageManager.PackageInfoFlags.of(
+                            (PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA).toLong()
+                        )
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(
+                        appInfo.packageName,
+                        PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA
+                    )
+                }
+            } catch (_: Exception) { null }
+        }
+    }
 
-    return apps.mapNotNull { appInfo ->
+    return packages.mapNotNull { packageInfo ->
         try {
-            createAppHolder(packageManager, appInfo)
+            val appInfo = packageInfo.applicationInfo ?: return@mapNotNull null
+            createAppHolder(packageManager, packageInfo, appInfo)
         } catch (_: Exception) {
             null // Skip apps that can't be processed
         }
@@ -27,14 +61,10 @@ suspend fun getInstalledApps(context: Context): List<AppHolder> {
 
 private fun createAppHolder(
     packageManager: PackageManager,
+    packageInfo: android.content.pm.PackageInfo,
     appInfo: ApplicationInfo
 ): AppHolder {
-    val packageInfo = packageManager.getPackageInfo(
-        appInfo.packageName,
-        PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA
-    )
     val appFile = File(appInfo.sourceDir)
-
     val permissions = packageInfo.requestedPermissions?.toList() ?: emptyList()
     val category = getCategoryName(appInfo.category)
 
@@ -54,8 +84,7 @@ private fun createAppHolder(
         installDate = Date(packageInfo.firstInstallTime),
         lastUpdateDate = Date(packageInfo.lastUpdateTime),
         targetSdkVersion = appInfo.targetSdkVersion,
-        minSdkVersion =
-            appInfo.minSdkVersion,
+        minSdkVersion = appInfo.minSdkVersion,
         permissions = permissions,
         category = category,
         dataDir = appInfo.dataDir,

@@ -10,6 +10,7 @@ import com.google.gson.reflect.TypeToken
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.common.DetectedMimeType
 import com.raival.compose.file.explorer.common.MimeTypeDetector
+import android.util.LruCache
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.Collections
@@ -23,6 +24,9 @@ import java.util.Collections
 object MagikaFileTypeDetector {
     private const val TAG = "Magika"
     private const val MIN_CONFIDENCE = 0.50f
+
+    private val detectionCache = LruCache<String, CacheEntry>(1000)
+    private class CacheEntry(val result: Result?)
 
     @Volatile
     private var session: OrtSession? = null
@@ -46,8 +50,30 @@ object MagikaFileTypeDetector {
         fun toDetectedMimeType() = DetectedMimeType(mimeType, isText, probability)
     }
 
+    fun getCachedResult(file: File): Result? {
+        val cacheKey = "${file.absolutePath}:${file.lastModified()}:${file.length()}"
+        synchronized(detectionCache) {
+            return detectionCache.get(cacheKey)?.result
+        }
+    }
+
     fun detect(file: File): Result? {
         if (!file.exists() || !file.isFile || !file.canRead()) return null
+
+        val cacheKey = "${file.absolutePath}:${file.lastModified()}:${file.length()}"
+        synchronized(detectionCache) {
+            val cached = detectionCache.get(cacheKey)
+            if (cached != null) return cached.result
+        }
+
+        val result = performDetect(file)
+        synchronized(detectionCache) {
+            detectionCache.put(cacheKey, CacheEntry(result))
+        }
+        return result
+    }
+
+    private fun performDetect(file: File): Result? {
         val magika = detectWithMagika(file)
         if (magika != null && magika.probability >= MIN_CONFIDENCE && magika.label != "unknown") {
             return magika

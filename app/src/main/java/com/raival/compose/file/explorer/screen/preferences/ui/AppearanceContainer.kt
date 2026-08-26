@@ -121,11 +121,24 @@ fun AppearanceContainer() {
         )
 
         PreferenceItem(
-            label = stringResource(R.string.move_toolbar_and_tabs_to_bottom),
+            label = stringResource(R.string.move_toolbar_to_bottom),
             supportingText = emptyString,
             icon = Icons.Rounded.VerticalAlignBottom,
-            switchState = prefs.moveToolbarAndTabsToBottom,
-            onSwitchChange = { prefs.moveToolbarAndTabsToBottom = it }
+            switchState = prefs.moveToolbarToBottom,
+            onSwitchChange = { prefs.moveToolbarToBottom = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.move_tabs_to_bottom),
+            supportingText = emptyString,
+            icon = Icons.Rounded.VerticalAlignBottom,
+            switchState = prefs.moveTabsToBottom,
+            onSwitchChange = { prefs.moveTabsToBottom = it }
         )
     }
 }

@@ -175,14 +175,22 @@ class MainActivity : BaseActivity() {
                         }
                     ) {
                         Column(Modifier.fillMaxSize()) {
-                            val moveToolbarAndTabsToBottom =
-                                globalClass.preferencesManager.moveToolbarAndTabsToBottom
+                            val moveToolbarToBottom =
+                                globalClass.preferencesManager.moveToolbarToBottom
+                            val moveTabsToBottom =
+                                globalClass.preferencesManager.moveTabsToBottom
 
-                            if (!moveToolbarAndTabsToBottom) {
-                                MainToolbar(
+                            if (!moveToolbarToBottom) {
+                                MainToolbarView(
                                     state = mainActivityState,
                                     drawerScope = drawerScope,
-                                    drawerState = drawerState,
+                                    drawerState = drawerState
+                                )
+                            }
+
+                            if (!moveTabsToBottom) {
+                                MainTabsView(
+                                    state = mainActivityState,
                                     mainActivityManager = mainActivityManager,
                                     isAtBottom = false
                                 )
@@ -190,13 +198,19 @@ class MainActivity : BaseActivity() {
 
                             TabsPager(mainActivityState)
 
-                            if (moveToolbarAndTabsToBottom) {
-                                MainToolbar(
+                            if (moveTabsToBottom) {
+                                MainTabsView(
                                     state = mainActivityState,
-                                    drawerScope = drawerScope,
-                                    drawerState = drawerState,
                                     mainActivityManager = mainActivityManager,
                                     isAtBottom = true
+                                )
+                            }
+
+                            if (moveToolbarToBottom) {
+                                MainToolbarView(
+                                    state = mainActivityState,
+                                    drawerScope = drawerScope,
+                                    drawerState = drawerState
                                 )
                             }
                         }
@@ -207,12 +221,10 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun MainToolbar(
+    private fun MainToolbarView(
         state: MainActivityState,
         drawerScope: kotlinx.coroutines.CoroutineScope,
-        drawerState: androidx.compose.material3.DrawerState,
-        mainActivityManager: MainActivityManager,
-        isAtBottom: Boolean
+        drawerState: androidx.compose.material3.DrawerState
     ) {
         if (!globalClass.preferencesManager.hideToolbar) {
             Toolbar(
@@ -224,6 +236,14 @@ class MainActivity : BaseActivity() {
                 }
             )
         }
+    }
+
+    @Composable
+    private fun MainTabsView(
+        state: MainActivityState,
+        mainActivityManager: MainActivityManager,
+        isAtBottom: Boolean
+    ) {
         TabLayout(
             tabLayoutState = state.tabLayoutState,
             tabs = state.tabs,

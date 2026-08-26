@@ -37,31 +37,30 @@ val sortNameRev = Comparator { file1: ContentHolder, file2: ContentHolder ->
     naturalCompare(file2.displayName, file1.displayName)
 }
 
-private fun naturalCompare(str1: String, str2: String): Int {
-    val s1 = str1.lowercase(Locale.getDefault())
-    val s2 = str2.lowercase(Locale.getDefault())
-
+private fun naturalCompare(s1: String, s2: String): Int {
     var i1 = 0
     var i2 = 0
+    val len1 = s1.length
+    val len2 = s2.length
 
-    while (i1 < s1.length && i2 < s2.length) {
-        val c1 = s1[i1]
-        val c2 = s2[i2]
+    while (i1 < len1 && i2 < len2) {
+        val raw1 = s1[i1]
+        val raw2 = s2[i2]
 
-        if (c1.isDigit() && c2.isDigit()) {
+        if (raw1.isDigit() && raw2.isDigit()) {
             // Skip leading zeros so "01" and "1" compare as equal numerically
-            while (i1 < s1.length - 1 && s1[i1] == '0' && s1[i1 + 1].isDigit()) i1++
-            while (i2 < s2.length - 1 && s2[i2] == '0' && s2[i2 + 1].isDigit()) i2++
+            while (i1 < len1 - 1 && s1[i1] == '0' && s1[i1 + 1].isDigit()) i1++
+            while (i2 < len2 - 1 && s2[i2] == '0' && s2[i2 + 1].isDigit()) i2++
 
             var num1 = 0L
             var num2 = 0L
 
-            while (i1 < s1.length && s1[i1].isDigit()) {
+            while (i1 < len1 && s1[i1].isDigit()) {
                 num1 = num1 * 10 + (s1[i1] - '0')
                 i1++
             }
 
-            while (i2 < s2.length && s2[i2].isDigit()) {
+            while (i2 < len2 && s2[i2].isDigit()) {
                 num2 = num2 * 10 + (s2[i2] - '0')
                 i2++
             }
@@ -70,11 +69,13 @@ private fun naturalCompare(str1: String, str2: String): Int {
                 return num1.compareTo(num2)
             }
         } else {
-            // Direct character comparison
+            val c1 = raw1.lowercaseChar()
+            val c2 = raw2.lowercaseChar()
+
             if (c1 != c2) {
                 return when {
-                    c1.isDigit() && !c2.isDigit() -> -1
-                    !c1.isDigit() && c2.isDigit() -> 1
+                    raw1.isDigit() && !raw2.isDigit() -> -1
+                    !raw1.isDigit() && raw2.isDigit() -> 1
                     else -> c1.compareTo(c2)
                 }
             }
@@ -83,7 +84,7 @@ private fun naturalCompare(str1: String, str2: String): Int {
         }
     }
 
-    return s1.length.compareTo(s2.length)
+    return len1.compareTo(len2)
 }
 
 val sortSmallerFirst = Comparator.comparingLong { obj: ContentHolder -> obj.size }

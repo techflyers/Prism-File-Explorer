@@ -77,10 +77,14 @@ class TerminalActivity : AppCompatActivity() {
         instance = this
     }
 
-    fun handleIntent(intent: Intent) {
-        this.intent = intent
+    fun handleIntent(intent: Intent?) {
+        if (intent == null) return
         val pwd = intent.getStringExtra("cwd") ?: return
+        intent.removeExtra("cwd")
+        this.intent = intent
+
         // Keep a pending run command set by FileRunner; otherwise just cd into the folder.
+        val sessionId = pendingTerminalCommand?.id ?: File(pwd).name.ifBlank { "prism" }
         if (pendingTerminalCommand == null) {
             openFolderInTerminal(this, pwd)
         }
@@ -89,8 +93,12 @@ class TerminalActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.Main) {
             val client = TerminalBackEnd()
-            val info = binder.getSessionInfoByPwd(pwd)
-                ?: binder.createSession(File(pwd).name, client, this@TerminalActivity)
+            val existing = binder.getSession(sessionId)
+            val info = if (existing != null) {
+                SessionInfo(sessionId, pwd, existing)
+            } else {
+                binder.createSession(sessionId, client, this@TerminalActivity)
+            }
             changeSession(info.id)
         }
     }

@@ -300,7 +300,7 @@ fun PinnedFilesSection(
                 .clip(RoundedCornerShape(12.dp))
         ) {
             pinnedFiles.forEachIndexed { index, it ->
-                var showDeleteOption by remember(it.uid) { mutableStateOf(false) }
+                var showDeleteOption by remember(it.uniquePath) { mutableStateOf(false) }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -333,7 +333,7 @@ fun PinnedFilesSection(
                             .padding(end = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        var canUseCoil by remember(it.uid) {
+                        var canUseCoil by remember(it.uniquePath) {
                             mutableStateOf(canUseCoil(it))
                         }
                         if (canUseCoil) {
@@ -464,7 +464,7 @@ private fun RecentFilesSection(
                             }
                         )
                 ) {
-                    var useCoil by remember(it.file.uid) {
+                    var useCoil by remember(it.file.uniquePath) {
                         mutableStateOf(canUseCoil(it.file))
                     }
 

@@ -90,7 +90,8 @@ fun TerminalScreen(activity: TerminalActivity) {
                                 val existingSession = binder.getSession(targetSessionId)
                                 val session = if (existingSession != null) {
                                     if (pendingTerminalCommand != null) {
-                                        existingSession.write("cd '${pendingTerminalCommand!!.workingDir}'\n")
+                                        val escapedDir = pendingTerminalCommand!!.workingDir?.replace("'", "'\"'\"'") ?: ""
+                                        existingSession.write("cd '$escapedDir'\n")
                                         pendingTerminalCommand = null
                                     }
                                     existingSession
@@ -253,7 +254,8 @@ fun TerminalActivity.changeSession(sessionId: String) {
     val existingSession = binder.getSession(sessionId)
     val session = if (existingSession != null) {
         if (pendingTerminalCommand != null) {
-            existingSession.write("cd '${pendingTerminalCommand!!.workingDir}'\n")
+            val escapedDir = pendingTerminalCommand!!.workingDir?.replace("'", "'\"'\"'") ?: ""
+            existingSession.write("cd '$escapedDir'\n")
             pendingTerminalCommand = null
         }
         existingSession
