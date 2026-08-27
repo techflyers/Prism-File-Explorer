@@ -439,6 +439,20 @@ object StorageProvider {
             selectionClauses.add("${MediaStore.Files.FileColumns.DATA} NOT LIKE '%/.%'")
         }
 
+        // Exclude temporary and database cache/lock files.
+        if (globalClass.preferencesManager.hideTempAndDbFilesFromRecentFiles) {
+            listOf(
+                "%.tmp", "%.temp", "%.bak", "%.log",
+                "%.crdownload", "%.part",
+                "%-shm", "%-wal", "%-journal",
+                "%.db-shm", "%.db-wal", "%.db-journal",
+                "%/Android/data/%", "%/Android/obb/%"
+            ).forEach { pattern ->
+                selectionClauses.add("${MediaStore.Files.FileColumns.DATA} NOT LIKE ?")
+                selectionArgsList.add(pattern)
+            }
+        }
+
         // Combine all selection clauses.
         val selection = selectionClauses.joinToString(" AND ")
         val selectionArgs = selectionArgsList.toTypedArray()

@@ -235,6 +235,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var hideTempAndDbFilesFromRecentFiles by prefMutableState(
+        keyName = "hideTempAndDbFilesFromRecentFiles",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     //---------- File Operation -------------//
     var signMergedApkBundleFiles by prefMutableState(
         keyName = "signMergedApkBundleFiles",

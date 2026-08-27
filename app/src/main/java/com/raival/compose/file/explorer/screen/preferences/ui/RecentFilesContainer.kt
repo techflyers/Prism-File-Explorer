@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOff
 import androidx.compose.material3.Card
@@ -44,6 +45,7 @@ import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.ui.BottomSheetDialog
 import com.raival.compose.file.explorer.common.ui.Space
+import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 
 @Composable
 fun RecentFilesContainer() {
@@ -237,13 +239,33 @@ fun RecentFilesContainer() {
         }
     }
 
+    val refreshHomeRecentFiles = {
+        globalClass.mainActivityManager.state.value.tabs
+            .filterIsInstance<HomeTab>()
+            .forEach { it.refreshRecentFiles() }
+    }
+
     Container(title = stringResource(R.string.recent_files)) {
         PreferenceItem(
             label = stringResource(R.string.extensive_recent_files_scan),
             supportingText = stringResource(R.string.scan_hidden_files_and_folders),
             icon = Icons.AutoMirrored.Rounded.ManageSearch,
             switchState = !prefs.removeHiddenPathsFromRecentFiles,
-            onSwitchChange = { prefs.removeHiddenPathsFromRecentFiles = !it }
+            onSwitchChange = {
+                prefs.removeHiddenPathsFromRecentFiles = !it
+                refreshHomeRecentFiles()
+            }
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.hide_temp_and_db_files),
+            supportingText = stringResource(R.string.hide_temp_and_db_files_desc),
+            icon = Icons.Rounded.DeleteSweep,
+            switchState = prefs.hideTempAndDbFilesFromRecentFiles,
+            onSwitchChange = {
+                prefs.hideTempAndDbFilesFromRecentFiles = it
+                refreshHomeRecentFiles()
+            }
         )
 
         HorizontalDivider(

@@ -423,6 +423,8 @@
     <string name="pin_to_home_tab">Pin to home tab</string>
     <string name="extensive_recent_files_scan">Extensive recent files scan</string>
     <string name="scan_hidden_files_and_folders">Scan hidden files and folders</string>
+    <string name="hide_temp_and_db_files">Hide temporary and database files</string>
+    <string name="hide_temp_and_db_files_desc">Exclude cache, lock, and temporary files (.tmp, .db-shm, .db-wal, etc.) from Recent Files</string>
     <string name="manage_excluded_paths">Manage excluded paths</string>
     <string name="add_new_path">New Path</string>
     <string name="excluded_paths">Excluded paths</string>

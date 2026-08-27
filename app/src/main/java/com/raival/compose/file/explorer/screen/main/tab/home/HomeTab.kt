@@ -29,12 +29,15 @@ import com.raival.compose.file.explorer.screen.main.tab.home.holder.HomeCategory
 import com.raival.compose.file.explorer.screen.main.tab.home.holder.RecentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
 class HomeTab : Tab() {
     override val id = globalClass.generateUid()
     val scope = CoroutineScope(Dispatchers.IO)
+    private var recentFilesJob: Job? = null
     override val header = globalClass.getString(R.string.home_tab_header)
     val recentFiles = mutableStateListOf<RecentFile>()
     val pinnedFiles = arrayListOf<LocalFileHolder>()
@@ -63,11 +66,21 @@ class HomeTab : Tab() {
     }
 
     fun fetchRecentFiles() {
-        if (recentFiles.isNotEmpty()) return
+        if (recentFiles.isNotEmpty() || recentFilesJob?.isActive == true) return
 
-        scope.launch {
-            recentFiles.addAll(getRecentFiles())
+        recentFilesJob = scope.launch {
+            val files = getRecentFiles()
+            if (isActive) {
+                recentFiles.addAll(files)
+            }
         }
+    }
+
+    fun refreshRecentFiles() {
+        recentFilesJob?.cancel()
+        recentFilesJob = null
+        recentFiles.clear()
+        fetchRecentFiles()
     }
 
     private val _mainCategories by lazy {
