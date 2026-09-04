@@ -167,6 +167,8 @@ dependencies {
     implementation(libs.markwon.latex)
     implementation(libs.markwon.strikethrough)
     implementation(libs.markwon.tasklist)
+    implementation(libs.markwon.image)
+    implementation(libs.markwon.html)
 
     // Networking (Convertio API)
     implementation(libs.okhttp)

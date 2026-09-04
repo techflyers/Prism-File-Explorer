@@ -114,7 +114,7 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
 
         progressMonitor.apply {
             processName = globalClass.resources.getString(R.string.preparing)
-            progress = 0.05f
+            progress = 0f
         }
 
         if (pendingContent.isEmpty()) {
@@ -135,8 +135,8 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
 
         progressMonitor.apply {
             totalContent = pendingContent.size
-            processName = globalClass.getString(R.string.renaming)
-            progress = 0.1f
+            processName = "${globalClass.getString(R.string.renaming)} (0%)"
+            progress = 0f
         }
 
         // Check source type only once using the first item
@@ -195,12 +195,14 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
             }
 
             if (itemToRename.status == TaskContentStatus.PENDING) {
-                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+                val progressPercent = (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
+                val pct = (progressPercent * 100).toInt()
 
                 progressMonitor.apply {
                     contentName = itemToRename.source.displayName
                     remainingContent = pendingContent.size - (index + 1)
                     progress = progressPercent
+                    processName = "${globalClass.getString(R.string.renaming)} ($pct%)"
                 }
 
                 try {
@@ -239,12 +241,14 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
             }
 
             if (itemToRename.status == TaskContentStatus.PENDING) {
-                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+                val progressPercent = (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
+                val pct = (progressPercent * 100).toInt()
 
                 progressMonitor.apply {
                     contentName = itemToRename.source.displayName
                     remainingContent = pendingContent.size - (index + 1)
                     progress = progressPercent
+                    processName = "${globalClass.getString(R.string.renaming)} ($pct%)"
                 }
 
                 try {
@@ -481,12 +485,14 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
             }
 
             if (itemToRename.status == TaskContentStatus.PENDING) {
-                val progressPercent = 0.1f + (0.8f * (index.toFloat() / pendingContent.size))
+                val progressPercent = (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
+                val pct = (progressPercent * 100).toInt()
 
                 progressMonitor.apply {
                     contentName = itemToRename.source.displayName
                     remainingContent = pendingContent.size - (index + 1)
                     progress = progressPercent
+                    processName = "${globalClass.getString(R.string.renaming)} ($pct%)"
                 }
 
                 try {

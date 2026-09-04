@@ -86,7 +86,7 @@ class CompressTask(
 
         progressMonitor.apply {
             processName = globalClass.resources.getString(R.string.preparing)
-            progress = 0.05f
+            progress = 0f
         }
 
         val basePath = sourceContent[0].getParent()?.uniquePath ?: emptyString
@@ -105,8 +105,8 @@ class CompressTask(
 
         progressMonitor.apply {
             totalContent = pendingContent.size
-            processName = globalClass.getString(R.string.compressing)
-            progress = 0.1f
+            processName = "${globalClass.getString(R.string.compressing)} (0%)"
+            progress = 0f
         }
 
         // Determine the output extension to decide which engine to use
@@ -126,15 +126,35 @@ class CompressTask(
                 // Native compression via lib7za
                 val sourcePaths = pendingContent.map { it.content.uniquePath }
                 progressMonitor.apply {
-                    processName = globalClass.getString(R.string.compressing)
-                    progress = 0.2f
+                    processName = "${globalClass.getString(R.string.compressing)} (0%)"
+                    progress = 0f
                 }
                 ArchiveManager.compress(
                     sourcePaths = sourcePaths,
                     archivePath = destPath,
                     password = parameters?.password,
-                    compressionLevel = parameters?.compressionLevel ?: 5
+                    compressionLevel = parameters?.compressionLevel ?: 5,
+                    isAborted = { aborted },
+                    onProgress = { subPercent, currentFile ->
+                        if (aborted) return@compress
+                        if (subPercent >= 0f) {
+                            val pct = subPercent.coerceIn(0.01f, 0.99f)
+                            progressMonitor.apply {
+                                progress = pct
+                                if (currentFile.isNotEmpty()) {
+                                    contentName = currentFile
+                                }
+                                processName = "Compressing (${(pct * 100).toInt()}%)"
+                            }
+                        } else if (currentFile.isNotEmpty()) {
+                            progressMonitor.contentName = currentFile
+                        }
+                    }
                 )
+                if (aborted) {
+                    markAsAborted()
+                    return
+                }
             } else {
                 // ZIP creation via zip4j (supports AES-256 password encryption)
                 val pwd = parameters?.password
@@ -150,12 +170,14 @@ class CompressTask(
 
                         if (itemToCompress.status == TaskContentStatus.PENDING) {
                             val progressPercent =
-                                0.1f + (0.9f * (index.toFloat() / pendingContent.size))
+                                (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
+                            val pct = (progressPercent * 100).toInt()
 
                             progressMonitor.apply {
                                 contentName = itemToCompress.content.displayName
                                 remainingContent = pendingContent.size - (index + 1)
                                 progress = progressPercent
+                                processName = "${globalClass.getString(R.string.compressing)} ($pct%)"
                             }
 
                             try {
@@ -180,6 +202,10 @@ class CompressTask(
                 }
             }
         } catch (e: Exception) {
+            if (aborted) {
+                markAsAborted()
+                return
+            }
             logger.logError(e)
             markAsFailed(
                 globalClass.resources.getString(

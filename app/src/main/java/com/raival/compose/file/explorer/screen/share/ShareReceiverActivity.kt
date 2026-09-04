@@ -6,9 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -44,13 +41,20 @@ import com.raival.compose.file.explorer.common.ui.SafeSurface
 import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.MainActivity
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
+import com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemotePaths
+import com.raival.compose.file.explorer.screen.preferences.SaveLocationHistoryItem
 import com.raival.compose.file.explorer.theme.FileExplorerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 class ShareReceiverActivity : BaseActivity() {
 
@@ -76,13 +80,13 @@ class ShareReceiverActivity : BaseActivity() {
     private fun extractSharedData() {
         intent?.let { intent ->
             when (intent.action) {
-                android.content.Intent.ACTION_SEND -> {
-                    val uri = intent.getParcelableExtra<Uri>(android.content.Intent.EXTRA_STREAM)
+                Intent.ACTION_SEND -> {
+                    val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                     if (uri != null) sharedUris.add(uri)
-                    else sharedText = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+                    else sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                 }
-                android.content.Intent.ACTION_SEND_MULTIPLE -> {
-                    intent.getParcelableArrayListExtra<Uri>(android.content.Intent.EXTRA_STREAM)
+                Intent.ACTION_SEND_MULTIPLE -> {
+                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
                         ?.filterNotNull()
                         ?.forEach { sharedUris.add(it) }
                 }
@@ -90,41 +94,45 @@ class ShareReceiverActivity : BaseActivity() {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // Main screen
-    // ─────────────────────────────────────────────────────────
     @Composable
     fun ShareReceiverScreen() {
-        var currentDir by remember { mutableStateOf(Environment.getExternalStorageDirectory()) }
+        var currentHolder by remember {
+            mutableStateOf<ContentHolder>(LocalFileHolder(Environment.getExternalStorageDirectory()))
+        }
         val showHidden = remember { globalClass.preferencesManager.showHiddenFiles }
 
-        // Subdirectories in currentDir (for navigation)
-        val folders by remember(currentDir) {
-            derivedStateOf {
-                currentDir.listFiles()
-                    ?.filter { it.isDirectory && (showHidden || !it.name.startsWith(".")) }
-                    ?.sortedWith(compareBy { it.name.lowercase() })
-                    ?: emptyList()
+        var folders by remember { mutableStateOf<List<ContentHolder>>(emptyList()) }
+        var existingFiles by remember { mutableStateOf<List<ContentHolder>>(emptyList()) }
+        var isLoadingFolder by remember { mutableStateOf(false) }
+
+        // Refresh contents when currentHolder changes
+        LaunchedEffect(currentHolder, showHidden) {
+            isLoadingFolder = true
+            withContext(Dispatchers.IO) {
+                try {
+                    val items = currentHolder.listContent()
+                    val filtered = if (showHidden) items else items.filter { !it.displayName.startsWith(".") }
+                    folders = filtered.filter { it.isFolder }.sortedWith(compareBy { it.displayName.lowercase() })
+                    existingFiles = filtered.filter { !it.isFolder }.sortedWith(compareBy { it.displayName.lowercase() })
+                } catch (e: Exception) {
+                    folders = emptyList()
+                    existingFiles = emptyList()
+                }
             }
+            isLoadingFolder = false
         }
 
-        // Existing files in currentDir shown greyed-out for conflict context
-        val existingFiles by remember(currentDir) {
-            derivedStateOf {
-                currentDir.listFiles()
-                    ?.filter { it.isFile && (showHidden || !it.name.startsWith(".")) }
-                    ?.sortedWith(compareBy { it.name.lowercase() })
-                    ?: emptyList()
-            }
-        }
-
-        // Breadcrumb path list
-        val breadcrumbs by remember(currentDir) {
-            derivedStateOf {
-                val list = mutableListOf<File>()
-                var cur: File? = currentDir
-                while (cur != null) { list.add(0, cur); cur = cur.parentFile }
-                list
+        // Breadcrumbs path list
+        var breadcrumbs by remember { mutableStateOf<List<ContentHolder>>(emptyList()) }
+        LaunchedEffect(currentHolder) {
+            withContext(Dispatchers.IO) {
+                val list = mutableListOf<ContentHolder>()
+                var cur: ContentHolder? = currentHolder
+                while (cur != null) {
+                    list.add(0, cur)
+                    cur = cur.getParent()
+                }
+                breadcrumbs = list
             }
         }
 
@@ -133,11 +141,14 @@ class ShareReceiverActivity : BaseActivity() {
             storageDevices = StorageProvider.getStorageDevices(this@ShareReceiverActivity)
         }
 
+        val recentLocations = remember {
+            globalClass.preferencesManager.saveToPrismHistory
+        }
+
         // Per-file rename state: map from index to desired filename
         val fileNames = remember(sharedUris.size) {
             mutableStateMapOf<Int, String>()
         }
-        // Initialise names from URI info
         LaunchedEffect(sharedUris.size) {
             sharedUris.forEachIndexed { idx, uri ->
                 if (!fileNames.containsKey(idx)) {
@@ -146,7 +157,6 @@ class ShareReceiverActivity : BaseActivity() {
                 }
             }
         }
-        // For text content
         val textFileName = remember { mutableStateOf("shared_text_${System.currentTimeMillis()}.txt") }
 
         var showNewFolderDialog by remember { mutableStateOf(false) }
@@ -220,9 +230,9 @@ class ShareReceiverActivity : BaseActivity() {
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // ── Rename fields for each incoming file ─────────────
+                    // ── Rename fields for incoming content ─────────────
                     if (sharedUris.isNotEmpty() || !sharedText.isNullOrEmpty()) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -238,7 +248,6 @@ class ShareReceiverActivity : BaseActivity() {
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
                                 if (!sharedText.isNullOrEmpty()) {
-                                    // Single text file rename
                                     RenameField(
                                         value = textFileName.value,
                                         onValueChange = { textFileName.value = it },
@@ -261,26 +270,87 @@ class ShareReceiverActivity : BaseActivity() {
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
 
-                    // ── Storage Devices Switcher ─────────────────────────
+                    // ── Recent Location History (Item 4) ────────────────
+                    if (recentLocations.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.History,
+                                contentDescription = "Recent Locations",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Recent",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(recentLocations) { historyItem ->
+                                    val isCurrent = historyItem.path == currentHolder.uniquePath
+                                    SuggestionChip(
+                                        onClick = {
+                                            navigateToHistoryLocation(historyItem) { holder ->
+                                                currentHolder = holder
+                                            }
+                                        },
+                                        label = {
+                                            Text(
+                                                text = historyItem.title.ifEmpty { historyItem.path.substringAfterLast('/') },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        colors = SuggestionChipDefaults.suggestionChipColors(
+                                            containerColor = if (isCurrent)
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceContainerHighest
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    // ── Storage Devices Switcher (Item 1: Remote & Local) ─
                     if (storageDevices.isNotEmpty()) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             items(storageDevices) { device ->
-                                val rootPath = File(device.contentHolder.uniquePath)
-                                val isSelected = currentDir.absolutePath.startsWith(rootPath.absolutePath)
+                                val deviceHolder = device.contentHolder
+                                val isSelected = when {
+                                    currentHolder is RemoteFileHolder && deviceHolder is RemoteFileHolder ->
+                                        (currentHolder as RemoteFileHolder).connection.id == deviceHolder.connection.id
+                                    currentHolder is LocalFileHolder && deviceHolder is LocalFileHolder ->
+                                        currentHolder.uniquePath.startsWith(deviceHolder.uniquePath)
+                                    else -> currentHolder.uniquePath == deviceHolder.uniquePath
+                                }
+
                                 FilterChip(
                                     selected = isSelected,
-                                    onClick = { currentDir = rootPath },
+                                    onClick = { currentHolder = deviceHolder },
                                     label = { Text(device.title) },
                                     leadingIcon = {
                                         Icon(
-                                            imageVector = if (device.title.contains("SD", ignoreCase = true))
-                                                Icons.Rounded.SdCard else Icons.Rounded.Storage,
+                                            imageVector = when {
+                                                device.title.contains("SD", ignoreCase = true) -> Icons.Rounded.SdCard
+                                                deviceHolder is RemoteFileHolder -> Icons.Rounded.Cloud
+                                                else -> Icons.Rounded.Storage
+                                            },
                                             contentDescription = null,
                                             modifier = Modifier.size(18.dp)
                                         )
@@ -288,7 +358,7 @@ class ShareReceiverActivity : BaseActivity() {
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                     }
 
                     // ── Breadcrumbs + New Folder ─────────────────────────
@@ -302,17 +372,16 @@ class ShareReceiverActivity : BaseActivity() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             items(breadcrumbs) { folder ->
-                                val name = if (folder.parentFile == null) "/" else folder.name
+                                val isCurrent = folder.uniquePath == currentHolder.uniquePath
+                                val name = folder.displayName.ifEmpty { "/" }
                                 Text(
-                                    text = name.ifEmpty { "/" },
+                                    text = name,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = if (folder == currentDir)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (folder == currentDir) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.clickable { currentDir = folder }
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.clickable { currentHolder = folder }
                                 )
-                                if (folder != currentDir) {
+                                if (!isCurrent) {
                                     Icon(
                                         imageVector = Icons.Rounded.KeyboardArrowRight,
                                         contentDescription = null,
@@ -338,100 +407,104 @@ class ShareReceiverActivity : BaseActivity() {
 
                     // ── Directory browser + existing files list ──────────
                     Box(modifier = Modifier.weight(1f)) {
-                        val listState = rememberLazyListState()
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .fastScrollbar(listState)
-                        ) {
-                            // Navigable sub-folders
-                            if (folders.isEmpty() && existingFiles.isEmpty()) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 32.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = getString(R.string.empty_folder),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                        if (isLoadingFolder) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(32.dp))
                             }
-
-                            items(folders) { folder ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { currentDir = folder }
-                                        .padding(vertical = 10.dp, horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Folder,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(30.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(14.dp))
-                                    Text(
-                                        text = folder.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-
-                            // Section header + existing files (greyed-out)
-                            if (existingFiles.isNotEmpty()) {
-                                item {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { showExistingFiles = !showExistingFiles }
-                                            .padding(vertical = 6.dp, horizontal = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Description,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            val listState = rememberLazyListState()
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .fastScrollbar(listState)
+                            ) {
+                                if (folders.isEmpty() && existingFiles.isEmpty()) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 32.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
                                             Text(
-                                                text = "${existingFiles.size} existing file${if (existingFiles.size != 1) "s" else ""}",
-                                                style = MaterialTheme.typography.labelMedium,
+                                                text = getString(R.string.empty_folder),
+                                                style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        Icon(
-                                            imageVector = if (showExistingFiles) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
                                     }
-                                    HorizontalDivider(
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                                    )
                                 }
 
-                                if (showExistingFiles) {
-                                    items(existingFiles) { file ->
-                                        ExistingFileRow(
-                                            file = file,
-                                            incomingNames = buildIncomingNames(fileNames, textFileName.value, sharedText)
+                                items(folders) { folder ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { currentHolder = folder }
+                                            .padding(vertical = 10.dp, horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(30.dp)
                                         )
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        Text(
+                                            text = folder.displayName,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                if (existingFiles.isNotEmpty()) {
+                                    item {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { showExistingFiles = !showExistingFiles }
+                                                .padding(vertical = 6.dp, horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Description,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "${existingFiles.size} existing file${if (existingFiles.size != 1) "s" else ""}",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Icon(
+                                                imageVector = if (showExistingFiles) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        HorizontalDivider(
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                        )
+                                    }
+
+                                    if (showExistingFiles) {
+                                        items(existingFiles) { file ->
+                                            ExistingFileRow(
+                                                file = file,
+                                                incomingNames = buildIncomingNames(fileNames, textFileName.value, sharedText)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -454,7 +527,7 @@ class ShareReceiverActivity : BaseActivity() {
                             onClick = {
                                 isSaving = true
                                 val names = buildIncomingNames(fileNames, textFileName.value, sharedText)
-                                saveSharedContent(currentDir, names)
+                                saveSharedContent(currentHolder, names)
                             },
                             enabled = (sharedUris.isNotEmpty() || !sharedText.isNullOrEmpty()) && !isSaving,
                             colors = ButtonDefaults.buttonColors(
@@ -507,7 +580,7 @@ class ShareReceiverActivity : BaseActivity() {
             }
         }
 
-        // ── New Folder Dialog ────────────────────────────────────────
+        // ── New Folder Dialog (Item 6: quick folder creation) ─────────
         if (showNewFolderDialog) {
             AlertDialog(
                 onDismissRequest = {
@@ -520,6 +593,8 @@ class ShareReceiverActivity : BaseActivity() {
                         value = newFolderName,
                         onValueChange = { newFolderName = it },
                         label = { Text(getString(R.string.share_folder_name)) },
+                        placeholder = { Text("New Folder") },
+                        supportingText = { Text("Leave empty for auto-generated name") },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -529,15 +604,20 @@ class ShareReceiverActivity : BaseActivity() {
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (newFolderName.isNotBlank()) {
-                                val newFolder = File(currentDir, newFolderName.trim())
-                                if (newFolder.mkdir()) currentDir = newFolder
-                                else showMsg(getString(R.string.failed_to_create_folder))
+                            val baseName = newFolderName.trim().ifEmpty { "New Folder" }
+                            lifecycleScope.launch {
+                                val uniqueName = resolveUniqueFolderName(currentHolder, baseName)
+                                currentHolder.createSubFolder(uniqueName) { created ->
+                                    if (created != null) {
+                                        currentHolder = created
+                                    } else {
+                                        showMsg(getString(R.string.failed_to_create_folder))
+                                    }
+                                }
                             }
                             showNewFolderDialog = false
                             newFolderName = ""
-                        },
-                        enabled = newFolderName.isNotBlank()
+                        }
                     ) { Text(getString(R.string.create)) }
                 },
                 dismissButton = {
@@ -550,18 +630,54 @@ class ShareReceiverActivity : BaseActivity() {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // Rename text field with live conflict detection
-    // ─────────────────────────────────────────────────────────
+    private suspend fun resolveUniqueFolderName(parent: ContentHolder, baseName: String): String {
+        return withContext(Dispatchers.IO) {
+            if (parent.findFile(baseName) == null) return@withContext baseName
+            var counter = 1
+            var candidate = "$baseName ($counter)"
+            while (parent.findFile(candidate) != null) {
+                counter++
+                candidate = "$baseName ($counter)"
+            }
+            candidate
+        }
+    }
+
+    private fun navigateToHistoryLocation(
+        historyItem: SaveLocationHistoryItem,
+        onResolved: (ContentHolder) -> Unit
+    ) {
+        lifecycleScope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                if (historyItem.isRemote) {
+                    val connections = NetworkConnectionsService.getConnections(this@ShareReceiverActivity)
+                    val conn = connections.find { historyItem.path.startsWith("remote://${it.id}") }
+                    if (conn != null) {
+                        val subPath = historyItem.path.removePrefix("remote://${conn.id}").ifEmpty { conn.rootPath }
+                        RemoteFileHolder(conn, RemotePaths.normalize(subPath))
+                    } else null
+                } else {
+                    val file = File(historyItem.path)
+                    if (file.exists() && file.isDirectory) LocalFileHolder(file) else null
+                }
+            }
+            if (resolved != null) {
+                onResolved(resolved)
+            } else {
+                showMsg("Location is no longer available")
+            }
+        }
+    }
+
     @Composable
     private fun RenameField(
         value: String,
         onValueChange: (String) -> Unit,
-        existingFiles: List<File>,
+        existingFiles: List<ContentHolder>,
         label: String
     ) {
         val conflict = remember(value, existingFiles) {
-            existingFiles.any { it.name.equals(value.trim(), ignoreCase = false) }
+            existingFiles.any { it.displayName.equals(value.trim(), ignoreCase = false) }
         }
         OutlinedTextField(
             value = value,
@@ -569,10 +685,7 @@ class ShareReceiverActivity : BaseActivity() {
             label = { Text(label) },
             isError = conflict,
             supportingText = if (conflict) {
-                { Text("A file with this name already exists — it will be overwritten or auto-renamed.", color = MaterialTheme.colorScheme.error) }
-            } else null,
-            trailingIcon = if (conflict) {
-                { Icon(Icons.Rounded.Warning, contentDescription = "Conflict", tint = MaterialTheme.colorScheme.error) }
+                { Text("Name exists — will be auto-renamed.", color = MaterialTheme.colorScheme.primary) }
             } else null,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             singleLine = true,
@@ -582,16 +695,11 @@ class ShareReceiverActivity : BaseActivity() {
         )
     }
 
-    // ─────────────────────────────────────────────────────────
-    // Single greyed-out existing file row with conflict highlight
-    // ─────────────────────────────────────────────────────────
     @Composable
-    private fun ExistingFileRow(file: File, incomingNames: List<String>) {
-        val isConflict = incomingNames.any { it.trim().equals(file.name, ignoreCase = false) }
+    private fun ExistingFileRow(file: ContentHolder, incomingNames: List<String>) {
+        val isConflict = incomingNames.any { it.trim().equals(file.displayName, ignoreCase = false) }
         val rowAlpha = if (isConflict) 1f else 0.4f
-        val rowColor = if (isConflict)
-            MaterialTheme.colorScheme.errorContainer
-        else Color.Transparent
+        val rowColor = if (isConflict) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else Color.Transparent
 
         Row(
             modifier = Modifier
@@ -605,18 +713,14 @@ class ShareReceiverActivity : BaseActivity() {
             Icon(
                 imageVector = if (isConflict) Icons.Rounded.Warning else Icons.Rounded.InsertDriveFile,
                 contentDescription = null,
-                tint = if (isConflict)
-                    MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isConflict) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-                text = file.name,
+                text = file.displayName,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (isConflict)
-                    MaterialTheme.colorScheme.onErrorContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -624,18 +728,15 @@ class ShareReceiverActivity : BaseActivity() {
             if (isConflict) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "conflict",
+                    text = "auto-rename",
                     fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
                 )
             }
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────
     private fun buildIncomingNames(
         fileNames: Map<Int, String>,
         textFileName: String,
@@ -646,43 +747,104 @@ class ShareReceiverActivity : BaseActivity() {
         fileNames.values.toList()
     }
 
-    private fun saveSharedContent(destFolder: File, names: List<String>) {
+    private fun saveSharedContent(destHolder: ContentHolder, names: List<String>) {
         lifecycleScope.launch {
             val success = withContext(Dispatchers.IO) {
                 var allSuccess = true
-                if (sharedUris.isNotEmpty()) {
-                    sharedUris.forEachIndexed { idx, uri ->
-                        try {
-                            val customName = names.getOrNull(idx)?.trim()?.ifBlank { null }
-                            val fallback = uri.getUriInfo(this@ShareReceiverActivity).name
-                                ?: "shared_file_${System.currentTimeMillis()}"
-                            val targetName = customName ?: fallback
-                            val destFile = getUniqueFile(destFolder, targetName)
-                            contentResolver.openInputStream(uri)?.use { input ->
-                                destFile.outputStream().use { output -> input.copyTo(output) }
-                            } ?: run { allSuccess = false }
-                        } catch (e: Exception) {
+                when (destHolder) {
+                    is LocalFileHolder -> {
+                        val destFolder = destHolder.file
+                        if (sharedUris.isNotEmpty()) {
+                            sharedUris.forEachIndexed { idx, uri ->
+                                try {
+                                    val customName = names.getOrNull(idx)?.trim()?.ifBlank { null }
+                                    val fallback = uri.getUriInfo(this@ShareReceiverActivity).name
+                                        ?: "shared_file_${System.currentTimeMillis()}"
+                                    val targetName = customName ?: fallback
+                                    val destFile = getUniqueLocalFile(destFolder, targetName)
+                                    contentResolver.openInputStream(uri)?.use { input ->
+                                        destFile.outputStream().use { output -> input.copyTo(output) }
+                                    } ?: run { allSuccess = false }
+                                } catch (e: Exception) {
+                                    allSuccess = false
+                                    e.printStackTrace()
+                                }
+                            }
+                        } else if (!sharedText.isNullOrEmpty()) {
+                            try {
+                                val name = names.firstOrNull()?.trim()?.ifBlank { null }
+                                    ?: "shared_text_${System.currentTimeMillis()}.txt"
+                                val textFile = getUniqueLocalFile(destFolder, name)
+                                textFile.writeText(sharedText!!)
+                            } catch (e: Exception) {
+                                allSuccess = false
+                                e.printStackTrace()
+                            }
+                        } else {
                             allSuccess = false
-                            e.printStackTrace()
                         }
                     }
-                } else if (!sharedText.isNullOrEmpty()) {
-                    try {
-                        val name = names.firstOrNull()?.trim()?.ifBlank { null }
-                            ?: "shared_text_${System.currentTimeMillis()}.txt"
-                        val textFile = getUniqueFile(destFolder, name)
-                        textFile.writeText(sharedText!!)
-                    } catch (e: Exception) {
-                        allSuccess = false
-                        e.printStackTrace()
+                    is RemoteFileHolder -> {
+                        val client = destHolder.client
+                        if (sharedUris.isNotEmpty()) {
+                            sharedUris.forEachIndexed { idx, uri ->
+                                try {
+                                    val customName = names.getOrNull(idx)?.trim()?.ifBlank { null }
+                                    val fallback = uri.getUriInfo(this@ShareReceiverActivity).name
+                                        ?: "shared_file_${System.currentTimeMillis()}"
+                                    val targetName = customName ?: fallback
+                                    val remoteTarget = getUniqueRemoteFile(client, RemotePaths.join(destHolder.remotePath, targetName))
+                                    val temp = File(globalClass.cleanOnExitDir.file, "share_up_${UUID.randomUUID()}")
+                                    try {
+                                        contentResolver.openInputStream(uri)?.use { input ->
+                                            temp.outputStream().use { output -> input.copyTo(output) }
+                                        }
+                                        if (temp.exists() && temp.length() > 0) {
+                                            client.uploadFile(temp.absolutePath, remoteTarget) {}
+                                        } else {
+                                            allSuccess = false
+                                        }
+                                    } finally {
+                                        temp.delete()
+                                    }
+                                } catch (e: Exception) {
+                                    allSuccess = false
+                                    e.printStackTrace()
+                                }
+                            }
+                        } else if (!sharedText.isNullOrEmpty()) {
+                            try {
+                                val name = names.firstOrNull()?.trim()?.ifBlank { null }
+                                    ?: "shared_text_${System.currentTimeMillis()}.txt"
+                                val remoteTarget = getUniqueRemoteFile(client, RemotePaths.join(destHolder.remotePath, name))
+                                val temp = File(globalClass.cleanOnExitDir.file, "share_txt_${UUID.randomUUID()}.txt")
+                                try {
+                                    temp.writeText(sharedText!!)
+                                    client.uploadFile(temp.absolutePath, remoteTarget) {}
+                                } finally {
+                                    temp.delete()
+                                }
+                            } catch (e: Exception) {
+                                allSuccess = false
+                                e.printStackTrace()
+                            }
+                        } else {
+                            allSuccess = false
+                        }
                     }
-                } else {
-                    allSuccess = false
+                    else -> {
+                        allSuccess = false
+                    }
                 }
                 allSuccess
             }
 
             if (success) {
+                globalClass.preferencesManager.addSaveLocationToHistory(
+                    destHolder.uniquePath,
+                    destHolder.displayName,
+                    destHolder is RemoteFileHolder
+                )
                 showMsg(getString(R.string.share_files_saved))
                 finish()
             } else {
@@ -710,7 +872,7 @@ class ShareReceiverActivity : BaseActivity() {
         finish()
     }
 
-    private fun getUniqueFile(parentDir: File, name: String): File {
+    private fun getUniqueLocalFile(parentDir: File, name: String): File {
         var file = File(parentDir, name)
         if (!file.exists()) return file
         val baseName = name.substringBeforeLast(".")
@@ -722,5 +884,21 @@ class ShareReceiverActivity : BaseActivity() {
             count++
         }
         return file
+    }
+
+    private fun getUniqueRemoteFile(client: com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemoteClient, remotePath: String): String {
+        if (!client.exists(remotePath)) return remotePath
+        val parent = RemotePaths.parent(remotePath) ?: "/"
+        val name = RemotePaths.name(remotePath)
+        val baseName = name.substringBeforeLast(".")
+        val extension = name.substringAfterLast(".", "")
+        val extSuffix = if (extension.isNotEmpty() && extension != name) ".$extension" else ""
+        var count = 1
+        var candidate = RemotePaths.join(parent, "$baseName ($count)$extSuffix")
+        while (client.exists(candidate)) {
+            count++
+            candidate = RemotePaths.join(parent, "$baseName ($count)$extSuffix")
+        }
+        return candidate
     }
 }

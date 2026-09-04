@@ -44,7 +44,7 @@ fun TaskRunningDialog() {
     val showDialog = dialogInfo.showDialog
     val linkedTask = dialogInfo.linkedTask
     if (showDialog && progressMonitor != null && linkedTask != null) {
-        var isAborted by remember { mutableStateOf(false) }
+        var isAborted by remember(linkedTask.id) { mutableStateOf(false) }
         val isHidden by remember { mutableStateOf(false) }
         Dialog(
             onDismissRequest = { },
@@ -123,7 +123,7 @@ fun TaskRunningDialog() {
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // Progress Bar
-                        if (progressMonitor.progress > 0) {
+                        if (progressMonitor.progress >= 0f) {
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)

@@ -1,17 +1,11 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.*
@@ -19,19 +13,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-fun MergeImagesDialog(
+fun MergePdfDialog(
     show: Boolean,
     targetFiles: List<ContentHolder>,
     tab: FilesTab,
@@ -42,15 +39,13 @@ fun MergeImagesDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var isHorizontal by remember { mutableStateOf(false) }
-    var quality by remember { mutableFloatStateOf(90f) }
     var isProcessing by remember { mutableStateOf(false) }
     var orderedFiles by remember { mutableStateOf(targetFiles.filterIsInstance<LocalFileHolder>()) }
-    var outputName by remember { mutableStateOf("merged_${System.currentTimeMillis()}.jpg") }
+    var outputName by remember { mutableStateOf("merged_${System.currentTimeMillis()}.pdf") }
 
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        title = { Text("Merge Selected Images") },
+        title = { Text("Merge PDF Documents") },
         text = {
             Column(
                 modifier = Modifier
@@ -58,54 +53,17 @@ fun MergeImagesDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Merge orientation:",
+                    text = "Document Order (${orderedFiles.size} PDFs):",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Column(modifier = Modifier.selectableGroup()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = !isHorizontal,
-                                onClick = { isHorizontal = false },
-                                role = Role.RadioButton
-                            )
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = !isHorizontal, onClick = null)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Stitch Vertically (Stack Top-to-Bottom)")
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = isHorizontal,
-                                onClick = { isHorizontal = true },
-                                role = Role.RadioButton
-                            )
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = isHorizontal, onClick = null)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Stitch Horizontally (Stack Left-to-Right)")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
                 Text(
-                    text = "Image Order (${orderedFiles.size} images):",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    text = "Arrange documents in the order they should appear.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Column(modifier = Modifier.fillMaxWidth()) {
                     orderedFiles.forEachIndexed { index, fileHolder ->
                         Row(
@@ -124,7 +82,7 @@ fun MergeImagesDialog(
                                 text = fileHolder.displayName,
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(
@@ -153,6 +111,16 @@ fun MergeImagesDialog(
                             ) {
                                 Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
                             }
+                            IconButton(
+                                onClick = {
+                                    val list = orderedFiles.toMutableList()
+                                    list.removeAt(index)
+                                    orderedFiles = list
+                                },
+                                enabled = orderedFiles.size > 2 && !isProcessing
+                            ) {
+                                Icon(Icons.Rounded.Close, contentDescription = "Remove")
+                            }
                         }
                     }
                 }
@@ -167,20 +135,6 @@ fun MergeImagesDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Output Quality: ${quality.toInt()}%",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Slider(
-                    value = quality,
-                    onValueChange = { quality = it },
-                    valueRange = 10f..100f,
-                    steps = 9
-                )
-
                 if (isProcessing) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -190,7 +144,7 @@ fun MergeImagesDialog(
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Stitching canvas bitmaps...")
+                        Text("Merging PDF files...")
                     }
                 }
             }
@@ -203,38 +157,26 @@ fun MergeImagesDialog(
                         try {
                             val localPaths = orderedFiles.map { it.file }
                             if (localPaths.size < 2) {
-                                throw Exception("Select at least 2 local images")
+                                throw Exception("Select at least 2 PDF documents to merge")
                             }
 
                             val parentDir = localPaths.first().parentFile ?: File("/")
-                            val finalOutputName = if (outputName.isBlank()) "merged_${System.currentTimeMillis()}.jpg" else outputName.trim()
-                            val outputFile = File(parentDir, if (finalOutputName.endsWith(".jpg", ignoreCase = true) || finalOutputName.endsWith(".jpeg", ignoreCase = true)) finalOutputName else "$finalOutputName.jpg")
+                            val finalOutputName = if (outputName.isBlank()) "merged_${System.currentTimeMillis()}.pdf" else outputName.trim()
+                            val outputFile = File(parentDir, if (finalOutputName.endsWith(".pdf", ignoreCase = true)) finalOutputName else "$finalOutputName.pdf")
 
                             withContext(Dispatchers.IO) {
-                                // Load bitmaps
-                                val bitmaps = localPaths.map { file ->
-                                    BitmapFactory.decodeFile(file.absolutePath)
-                                        ?: throw Exception("Could not decode image: ${file.name}")
+                                PDFBoxResourceLoader.init(context)
+                                val merger = PDFMergerUtility()
+                                merger.destinationFileName = outputFile.absolutePath
+                                for (file in localPaths) {
+                                    merger.addSource(file)
                                 }
-
-                                // Merge them
-                                val mergedBitmap = mergeBitmaps(bitmaps, isHorizontal)
-
-                                // Save output
-                                outputFile.outputStream().use { out ->
-                                    mergedBitmap.compress(Bitmap.CompressFormat.JPEG, quality.toInt(), out)
-                                }
-
-                                // Clean up bitmaps
-                                for (bmp in bitmaps) {
-                                    bmp.recycle()
-                                }
-                                mergedBitmap.recycle()
+                                merger.mergeDocuments(MemoryUsageSetting.setupMainMemoryOnly())
                             }
 
                             withContext(Dispatchers.Main) {
                                 isProcessing = false
-                                Toast.makeText(context, "Images merged: ${outputFile.name}", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "PDFs merged successfully: ${outputFile.name}", Toast.LENGTH_LONG).show()
                                 tab.unselectAllFiles()
                                 tab.reloadFiles()
                                 onDismissRequest()
@@ -243,7 +185,7 @@ fun MergeImagesDialog(
                             e.printStackTrace()
                             withContext(Dispatchers.Main) {
                                 isProcessing = false
-                                Toast.makeText(context, "Merge failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "PDF merge failed: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
@@ -262,38 +204,4 @@ fun MergeImagesDialog(
             }
         }
     )
-}
-
-private fun mergeBitmaps(bitmaps: List<Bitmap>, horizontal: Boolean): Bitmap {
-    var totalWidth = 0
-    var totalHeight = 0
-
-    if (horizontal) {
-        totalHeight = bitmaps.maxOf { it.height }
-        totalWidth = bitmaps.sumOf { it.width }
-    } else {
-        totalWidth = bitmaps.maxOf { it.width }
-        totalHeight = bitmaps.sumOf { it.height }
-    }
-
-    val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(result)
-    canvas.drawColor(android.graphics.Color.WHITE)
-
-    var offset = 0
-    val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-    for (bitmap in bitmaps) {
-        if (horizontal) {
-            val y = (totalHeight - bitmap.height) / 2
-            canvas.drawBitmap(bitmap, offset.toFloat(), y.toFloat(), paint)
-            offset += bitmap.width
-        } else {
-            val x = (totalWidth - bitmap.width) / 2
-            canvas.drawBitmap(bitmap, x.toFloat(), offset.toFloat(), paint)
-            offset += bitmap.height
-        }
-    }
-
-    return result
 }

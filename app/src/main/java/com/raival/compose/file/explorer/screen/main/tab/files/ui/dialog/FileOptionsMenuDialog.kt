@@ -415,6 +415,77 @@ fun FileOptionsMenuDialog(
                 }
             }
 
+            val isAllPdfs = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() == "pdf"
+            }
+
+            if (isAllPdfs) {
+                var showMergePdfDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge PDFs") {
+                    showMergePdfDialog = true
+                }
+
+                if (showMergePdfDialog) {
+                    MergePdfDialog(
+                        show = showMergePdfDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergePdfDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val audioExtensions = listOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "wma")
+            val isAllAudio = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in audioExtensions
+            }
+
+            if (isAllAudio) {
+                var showMergeAudioDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Audio") {
+                    showMergeAudioDialog = true
+                }
+
+                if (showMergeAudioDialog) {
+                    MergeAudioDialog(
+                        show = showMergeAudioDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeAudioDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val videoExtensions = listOf("mp4", "mkv", "mov", "webm", "3gp", "avi", "ts")
+            val isAllVideo = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in videoExtensions
+            }
+
+            if (isAllVideo) {
+                var showMergeVideoDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Videos") {
+                    showMergeVideoDialog = true
+                }
+
+                if (showMergeVideoDialog) {
+                    MergeVideoDialog(
+                        show = showMergeVideoDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeVideoDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
             if (isSingleFile && targetContentHolder is LocalFileHolder) {
                 FileOption(
                     Icons.Rounded.OpenInNewOff,

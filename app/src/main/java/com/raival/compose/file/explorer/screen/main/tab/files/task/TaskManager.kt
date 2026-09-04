@@ -202,13 +202,27 @@ class TaskManager {
         isMonitoring = true
         runningTaskDialogInfo.show(task)
         try {
+            // Initial update so dialog shows something immediately
+            runningTaskDialogInfo.updateInfo(task.progressMonitor)
+            delay(50)
+
             while (runningTaskDialogInfo.showDialog) {
-                if (!runningTasks.contains(task)) {
+                runningTaskDialogInfo.updateInfo(task.progressMonitor)
+
+                val status = task.getCurrentStatus()
+                if (status == TaskStatus.SUCCESS ||
+                    status == TaskStatus.FAILED ||
+                    status == TaskStatus.PAUSED
+                ) {
+                    // Final update already done above, now break
                     break
                 }
 
-                runningTaskDialogInfo.updateInfo(task.progressMonitor)
-                delay(100)
+                if (!runningTasks.any { it.id == task.id }) {
+                    break
+                }
+
+                delay(80)
             }
         } finally {
             isMonitoring = false

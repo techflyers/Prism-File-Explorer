@@ -248,6 +248,35 @@ class PreferencesManager {
     )
 
     //---------- File Operation -------------//
+    var autoRenameOnConflict by prefMutableState(
+        keyName = "autoRenameOnConflict",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var saveToPrismHistoryJson by prefMutableState(
+        keyName = "saveToPrismHistoryJson",
+        defaultValue = "[]",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var saveToPrismHistory: List<SaveLocationHistoryItem>
+        get() = fromJson<List<SaveLocationHistoryItem>>(saveToPrismHistoryJson) ?: emptyList()
+        set(value) {
+            saveToPrismHistoryJson = value.toJson()
+        }
+
+    fun addSaveLocationToHistory(path: String, title: String, isRemote: Boolean) {
+        val current = saveToPrismHistory.toMutableList()
+        current.removeAll { it.path == path }
+        current.add(0, SaveLocationHistoryItem(path = path, title = title, isRemote = isRemote))
+        saveToPrismHistory = if (current.size > 8) current.take(8) else current
+    }
+
+    fun clearSaveLocationHistory() {
+        saveToPrismHistory = emptyList()
+    }
+
     var signMergedApkBundleFiles by prefMutableState(
         keyName = "signMergedApkBundleFiles",
         defaultValue = true,

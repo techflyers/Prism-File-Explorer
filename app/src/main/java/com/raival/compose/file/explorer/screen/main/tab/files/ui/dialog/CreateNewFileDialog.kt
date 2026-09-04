@@ -56,11 +56,23 @@ fun CreateNewFileDialog(
                 emptyString
             } else if (!newNameInput.isValidAsFileName()) {
                 globalClass.getString(R.string.invalid_file_name)
-            } else if (listContent.contains(newNameInput)) {
-                globalClass.getString(R.string.similar_file_exists)
             } else {
                 emptyString
             }
+        }
+
+        suspend fun resolveUniqueName(baseName: String, isFile: Boolean): String {
+            if (tab.activeFolder.findFile(baseName) == null) return baseName
+            val dot = if (isFile) baseName.lastIndexOf('.') else -1
+            val name = if (dot > 0) baseName.substring(0, dot) else baseName
+            val ext = if (dot > 0) baseName.substring(dot) else ""
+            var counter = 1
+            var candidate = "$name ($counter)$ext"
+            while (tab.activeFolder.findFile(candidate) != null) {
+                counter++
+                candidate = "$name ($counter)$ext"
+            }
+            return candidate
         }
 
         Dialog(
@@ -103,6 +115,7 @@ fun CreateNewFileDialog(
                             newNameInput = it
                         },
                         label = { Text(text = stringResource(R.string.name)) },
+                        placeholder = { Text("New Folder / New File") },
                         singleLine = true,
                         shape = RoundedCornerShape(6.dp),
                         colors = TextFieldDefaults.colors(
@@ -114,6 +127,8 @@ fun CreateNewFileDialog(
                         isError = error.isNotEmpty(),
                         supportingText = if (error.isNotEmpty()) {
                             { Text(error) }
+                        } else if (newNameInput.isBlank()) {
+                            { Text("Leave empty for auto-generated name", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         } else null
                     )
 
@@ -132,28 +147,25 @@ fun CreateNewFileDialog(
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 tab.scope.launch {
-                                    if (newNameInput.isValidAsFileName()) {
-                                        val similarFile = tab.activeFolder.findFile(newNameInput)
-                                        if (similarFile == null) {
-                                            onDismissRequest()
-                                            tab.isLoading = true
-                                            tab.activeFolder.createSubFile(newNameInput) { newFile ->
-                                                tab.isLoading = false
-                                                if (newFile == null) {
-                                                    globalClass.showMsg(R.string.failed_to_create_file)
-                                                } else {
-                                                    tab.onNewFileCreated(newFile)
-                                                }
+                                    val rawName = newNameInput.trim().ifEmpty { "New File.txt" }
+                                    if (rawName.isValidAsFileName()) {
+                                        val finalName = resolveUniqueName(rawName, isFile = true)
+                                        onDismissRequest()
+                                        tab.isLoading = true
+                                        tab.activeFolder.createSubFile(finalName) { newFile ->
+                                            tab.isLoading = false
+                                            if (newFile == null) {
+                                                globalClass.showMsg(R.string.failed_to_create_file)
+                                            } else {
+                                                tab.onNewFileCreated(newFile)
                                             }
-                                        } else {
-                                            globalClass.showMsg(R.string.similar_file_exists)
                                         }
                                     } else {
                                         globalClass.showMsg(R.string.invalid_file_name)
                                     }
                                 }
                             },
-                            enabled = error.isEmpty() && newNameInput.isNotBlank(),
+                            enabled = error.isEmpty(),
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
@@ -166,32 +178,29 @@ fun CreateNewFileDialog(
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 tab.scope.launch {
-                                    if (newNameInput.isValidAsFileName()) {
-                                        val similarFile = tab.activeFolder.findFile(newNameInput)
-                                        if (similarFile == null) {
-                                            onDismissRequest()
-                                            tab.isLoading = true
+                                    val rawName = newNameInput.trim().ifEmpty { "New Folder" }
+                                    if (rawName.isValidAsFileName()) {
+                                        val finalName = resolveUniqueName(rawName, isFile = false)
+                                        onDismissRequest()
+                                        tab.isLoading = true
 
-                                            tab.activeFolder.createSubFolder(newNameInput) { newFile ->
-                                                tab.isLoading = false
-                                                if (newFile == null) {
-                                                    globalClass.showMsg(R.string.failed_to_create_folder)
-                                                } else {
-                                                    tab.onNewFileCreated(
-                                                        newFile,
-                                                        isOpenFileDirectly
-                                                    )
-                                                }
+                                        tab.activeFolder.createSubFolder(finalName) { newFile ->
+                                            tab.isLoading = false
+                                            if (newFile == null) {
+                                                globalClass.showMsg(R.string.failed_to_create_folder)
+                                            } else {
+                                                tab.onNewFileCreated(
+                                                    newFile,
+                                                    isOpenFileDirectly
+                                                )
                                             }
-                                        } else {
-                                            globalClass.showMsg(R.string.similar_file_exists)
                                         }
                                     } else {
                                         globalClass.showMsg(R.string.invalid_folder_name)
                                     }
                                 }
                             },
-                            enabled = error.isEmpty() && newNameInput.isNotBlank(),
+                            enabled = error.isEmpty(),
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(

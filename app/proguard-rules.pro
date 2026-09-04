@@ -62,3 +62,7 @@
 -dontwarn org.ietf.jgss.**
 
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+
+# Markwon
+-dontwarn pl.droidsonroids.gif.GifDrawable
+-dontwarn io.noties.markwon.**

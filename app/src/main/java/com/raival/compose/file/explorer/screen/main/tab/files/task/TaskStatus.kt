@@ -16,5 +16,6 @@ enum class TaskContentStatus {
     CONFLICT,
     SKIP,
     REPLACE,
-    ASK
+    ASK,
+    AUTO_RENAME
 }

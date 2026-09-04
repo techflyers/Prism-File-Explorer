@@ -338,20 +338,26 @@ object ArchiveManager {
      *
      * @param password Optional password for encrypted archives. Passed as -p<password> to 7za.
      */
-    suspend fun extractAll(archivePath: String, destinationDir: String, password: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun extractAll(
+        archivePath: String,
+        destinationDir: String,
+        password: String? = null,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) = withContext(Dispatchers.IO) {
         val accessiblePath = resolveAccessibleArchivePath(archivePath)
 
         if (isLz4Archive(archivePath)) {
-            extractAllLz4(accessiblePath, archivePath, destinationDir)
+            extractAllLz4(accessiblePath, archivePath, destinationDir, isAborted, onProgress)
             return@withContext
         }
 
         if (isCompoundArchive(archivePath)) {
-            extractAllCompound(accessiblePath, destinationDir, password)
+            extractAllCompound(accessiblePath, destinationDir, password, isAborted, onProgress)
             return@withContext
         }
 
-        val args = mutableListOf("x", accessiblePath, "-o$destinationDir", "-y", "-aoa")
+        val args = mutableListOf("x", accessiblePath, "-o$destinationDir", "-y", "-aoa", "-bsp1")
         if (!password.isNullOrEmpty()) {
             args.add("-p$password")
         } else {
@@ -361,10 +367,16 @@ object ArchiveManager {
         val result = NativeBinaryExecutor.run(
             context = globalClass,
             binaryName = "lib7za.so",
-            arguments = args
+            arguments = args,
+            isAborted = isAborted,
+            onProgressUpdate = onProgress
         )
 
         android.util.Log.d("PrismArchive", "ArchiveManager: extractAll exitCode=${result.exitCode}, success=${result.success}")
+
+        if (isAborted?.invoke() == true) {
+            return@withContext
+        }
 
         if (!result.success) {
             android.util.Log.e("PrismArchive", "ArchiveManager: extractAll failed. Output: ${result.output}")
@@ -373,7 +385,13 @@ object ArchiveManager {
         android.util.Log.d("PrismArchive", "ArchiveManager: Extraction successful for $archivePath")
     }
 
-    private fun extractAllLz4(accessiblePath: String, archivePath: String, destinationDir: String) {
+    private fun extractAllLz4(
+        accessiblePath: String,
+        archivePath: String,
+        destinationDir: String,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) {
         val file = File(accessiblePath)
         val lower = archivePath.lowercase()
         val destDir = File(destinationDir).apply { mkdirs() }
@@ -382,6 +400,7 @@ object ArchiveManager {
                 FramedLZ4CompressorInputStream(file.inputStream().buffered(), true).use { lz4In ->
                     TarArchiveInputStream(lz4In).use { tarIn ->
                         while (true) {
+                            if (isAborted?.invoke() == true) return
                             val entry = try {
                                 tarIn.nextEntry
                             } catch (e: Exception) {
@@ -396,6 +415,7 @@ object ArchiveManager {
                                     outFile.mkdirs()
                                 } else {
                                     outFile.parentFile?.mkdirs()
+                                    onProgress?.invoke(-1f, outFile.name)
                                     try {
                                         outFile.outputStream().use { out -> tarIn.copyTo(out) }
                                     } catch (e: Exception) {
@@ -414,17 +434,24 @@ object ArchiveManager {
             val innerName = archiveFileName.removeSuffix(".lz4").removeSuffix(".LZ4")
             val outFile = File(destDir, innerName)
             outFile.parentFile?.mkdirs()
+            onProgress?.invoke(-1f, innerName)
             FramedLZ4CompressorInputStream(file.inputStream().buffered(), true).use { input ->
                 outFile.outputStream().use { output -> input.copyTo(output) }
             }
         }
     }
 
-    private suspend fun extractAllCompound(accessiblePath: String, destinationDir: String, password: String?) {
+    private suspend fun extractAllCompound(
+        accessiblePath: String,
+        destinationDir: String,
+        password: String?,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) {
         val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
         val tempDir = File(cacheParent, "compound_ext_all_${UUID.randomUUID()}").apply { mkdirs() }
         try {
-            val args = mutableListOf("x", accessiblePath, "-o${tempDir.absolutePath}", "-y", "-aoa")
+            val args = mutableListOf("x", accessiblePath, "-o${tempDir.absolutePath}", "-y", "-aoa", "-bsp1")
             if (!password.isNullOrEmpty()) {
                 args.add("-p$password")
             } else {
@@ -433,20 +460,38 @@ object ArchiveManager {
             val outerResult = NativeBinaryExecutor.run(
                 context = globalClass,
                 binaryName = "lib7za.so",
-                arguments = args
+                arguments = args,
+                isAborted = isAborted,
+                onProgressUpdate = { pct, file ->
+                    if (pct >= 0f) {
+                        onProgress?.invoke(pct * 0.5f, file)
+                    } else {
+                        onProgress?.invoke(-1f, file)
+                    }
+                }
             )
+            if (isAborted?.invoke() == true) return
             if (!outerResult.success) {
                 throw Exception("7za compound outer unpack failed (exit ${outerResult.exitCode}):\n${outerResult.output}")
             }
             val tarFile = tempDir.listFiles()?.firstOrNull { it.extension.lowercase() == "tar" }
                 ?: throw Exception("No intermediate tar file found in compound archive")
 
-            val tarArgs = mutableListOf("x", tarFile.absolutePath, "-o$destinationDir", "-y", "-aoa")
+            val tarArgs = mutableListOf("x", tarFile.absolutePath, "-o$destinationDir", "-y", "-aoa", "-bsp1")
             val tarResult = NativeBinaryExecutor.run(
                 context = globalClass,
                 binaryName = "lib7za.so",
-                arguments = tarArgs
+                arguments = tarArgs,
+                isAborted = isAborted,
+                onProgressUpdate = { pct, file ->
+                    if (pct >= 0f) {
+                        onProgress?.invoke(0.5f + (pct * 0.5f), file)
+                    } else {
+                        onProgress?.invoke(-1f, file)
+                    }
+                }
             )
+            if (isAborted?.invoke() == true) return
             if (!tarResult.success) {
                 throw Exception("7za intermediate tar extract failed (exit ${tarResult.exitCode}):\n${tarResult.output}")
             }
@@ -915,7 +960,9 @@ object ArchiveManager {
         sourcePaths: List<String>,
         archivePath: String,
         password: String? = null,
-        compressionLevel: Int = 5
+        compressionLevel: Int = 5,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) = withContext(Dispatchers.IO) {
         val lowerName = archivePath.lowercase()
         val ext = when {
@@ -926,8 +973,8 @@ object ArchiveManager {
         }
 
         when (ext) {
-            "tgz", "tbz2", "txz" -> compressCompound(sourcePaths, archivePath, ext, compressionLevel)
-            else -> compressSimple(sourcePaths, archivePath, ext, password, compressionLevel)
+            "tgz", "tbz2", "txz" -> compressCompound(sourcePaths, archivePath, ext, compressionLevel, isAborted, onProgress)
+            else -> compressSimple(sourcePaths, archivePath, ext, password, compressionLevel, isAborted, onProgress)
         }
     }
 
@@ -936,7 +983,9 @@ object ArchiveManager {
         archivePath: String,
         ext: String,
         password: String?,
-        compressionLevel: Int
+        compressionLevel: Int,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) {
         val formatFlag = when (ext) {
             "7z" -> "-t7z"
@@ -949,7 +998,7 @@ object ArchiveManager {
             else -> "-t7z"
         }
 
-        val args = mutableListOf("a", formatFlag, archivePath)
+        val args = mutableListOf("a", formatFlag, archivePath, "-bsp1")
         args.add("-mx=$compressionLevel")
 
         if (!password.isNullOrEmpty() && (ext == "7z" || ext == "zip")) {
@@ -965,10 +1014,14 @@ object ArchiveManager {
         val result = NativeBinaryExecutor.run(
             context = globalClass,
             binaryName = "lib7za.so",
-            arguments = args
+            arguments = args,
+            isAborted = isAborted,
+            onProgressUpdate = onProgress
         )
 
         android.util.Log.d("PrismArchive", "ArchiveManager: compress exitCode=${result.exitCode}, success=${result.success}")
+
+        if (isAborted?.invoke() == true) return
 
         if (!result.success) {
             android.util.Log.e("PrismArchive", "ArchiveManager: compress failed. Output: ${result.output}")
@@ -985,20 +1038,31 @@ object ArchiveManager {
         sourcePaths: List<String>,
         archivePath: String,
         compoundExt: String,
-        compressionLevel: Int
+        compressionLevel: Int,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) {
         val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
         val tarTemp = File(cacheParent, "compress_tar_${System.currentTimeMillis()}.tar")
         try {
             // Step 1: create intermediate tar
-            val tarArgs = mutableListOf("a", "-ttar", tarTemp.absolutePath)
+            val tarArgs = mutableListOf("a", "-ttar", tarTemp.absolutePath, "-bsp1")
             tarArgs.addAll(sourcePaths)
             android.util.Log.d("PrismArchive", "ArchiveManager: compressCompound tar step: 7z ${tarArgs.joinToString(" ")}")
             val tarResult = NativeBinaryExecutor.run(
                 context = globalClass,
                 binaryName = "lib7za.so",
-                arguments = tarArgs
+                arguments = tarArgs,
+                isAborted = isAborted,
+                onProgressUpdate = { pct, file ->
+                    if (pct >= 0f) {
+                        onProgress?.invoke(pct * 0.5f, file)
+                    } else {
+                        onProgress?.invoke(-1f, file)
+                    }
+                }
             )
+            if (isAborted?.invoke() == true) return
             if (!tarResult.success) {
                 throw Exception("7za tar step failed (exit ${tarResult.exitCode}):\n${tarResult.output}")
             }
@@ -1011,14 +1075,23 @@ object ArchiveManager {
                 else -> "-tgzip"
             }
             val outerArgs = mutableListOf(
-                "a", outerFlag, archivePath, "-mx=$compressionLevel", tarTemp.absolutePath
+                "a", outerFlag, archivePath, "-mx=$compressionLevel", tarTemp.absolutePath, "-bsp1"
             )
             android.util.Log.d("PrismArchive", "ArchiveManager: compressCompound outer step: 7z ${outerArgs.joinToString(" ")}")
             val outerResult = NativeBinaryExecutor.run(
                 context = globalClass,
                 binaryName = "lib7za.so",
-                arguments = outerArgs
+                arguments = outerArgs,
+                isAborted = isAborted,
+                onProgressUpdate = { pct, file ->
+                    if (pct >= 0f) {
+                        onProgress?.invoke(0.5f + (pct * 0.5f), file)
+                    } else {
+                        onProgress?.invoke(-1f, file)
+                    }
+                }
             )
+            if (isAborted?.invoke() == true) return
             if (!outerResult.success) {
                 throw Exception("7za outer compress failed (exit ${outerResult.exitCode}):\n${outerResult.output}")
             }

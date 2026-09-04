@@ -66,7 +66,8 @@ class ExtractTask(
 
         progressMonitor.apply {
             processName = globalClass.resources.getString(R.string.preparing)
-            progress = 0.05f
+            progress = 0f
+            totalContent = archives.size
         }
 
         try {
@@ -77,12 +78,14 @@ class ExtractTask(
                     return
                 }
 
-                val progressPercent = 0.1f + (0.9f * (index.toFloat() / archives.size))
+                val archiveBaseProgress = index.toFloat() / archives.size
+                val archiveWeight = 1f / archives.size
+
                 progressMonitor.apply {
                     contentName = archive.displayName
                     remainingContent = archives.size - (index + 1)
-                    progress = progressPercent
-                    processName = "Extracting ${archive.displayName}"
+                    progress = archiveBaseProgress.coerceIn(0f, 1f)
+                    processName = "Extracting (${(archiveBaseProgress * 100).toInt()}%)"
                 }
 
                 if (archive is LocalFileHolder || archive is com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder) {
@@ -111,7 +114,36 @@ class ExtractTask(
                             "password=${if (pwd != null) "***" else "none"}"
                     )
                     // ArchiveManager.resolveAccessibleArchivePath handles native vs fallback copy
-                    ArchiveManager.extractAll(archivePath, destDirPath, pwd)
+                    ArchiveManager.extractAll(
+                        archivePath = archivePath,
+                        destinationDir = destDirPath,
+                        password = pwd,
+                        isAborted = { aborted },
+                        onProgress = { subPercent, currentFile ->
+                            if (aborted) return@extractAll
+                            val currentOverall = if (subPercent >= 0f) {
+                                (archiveBaseProgress + (subPercent * archiveWeight)).coerceIn(0.01f, 0.99f)
+                            } else {
+                                progressMonitor.progress
+                            }
+                            val pctInt = (currentOverall * 100).toInt()
+                            progressMonitor.apply {
+                                progress = currentOverall
+                                if (currentFile.isNotEmpty()) {
+                                    contentName = currentFile
+                                }
+                                processName = "Extracting ($pctInt%)"
+                            }
+                        }
+                    )
+
+                    if (aborted) {
+                        progressMonitor.apply {
+                            status = TaskStatus.PAUSED
+                            summary = globalClass.getString(R.string.task_aborted)
+                        }
+                        return
+                    }
                 }
             }
 
@@ -122,6 +154,13 @@ class ExtractTask(
                 summary = globalClass.getString(R.string.task_completed)
             }
         } catch (e: Exception) {
+            if (aborted) {
+                progressMonitor.apply {
+                    status = TaskStatus.PAUSED
+                    summary = globalClass.getString(R.string.task_aborted)
+                }
+                return
+            }
             logger.logError(e)
             progressMonitor.apply {
                 status = TaskStatus.FAILED

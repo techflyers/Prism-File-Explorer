@@ -216,13 +216,17 @@ class CopyTask(
 
     private fun finalizeTask() {
         if (progressMonitor.status == TaskStatus.RUNNING) {
-            progressMonitor.status = TaskStatus.SUCCESS
-            progressMonitor.summary = buildString {
-                pendingFiles.forEach { content ->
-                    append(content.content.displayName)
-                    append(" -> ")
-                    append(content.status.name)
-                    append("\n")
+            progressMonitor.apply {
+                status = TaskStatus.SUCCESS
+                progress = 1.0f
+                processName = globalClass.getString(R.string.completed)
+                summary = buildString {
+                    pendingFiles.forEach { content ->
+                        append(content.content.displayName)
+                        append(" -> ")
+                        append(content.status.name)
+                        append("\n")
+                    }
                 }
             }
         }
@@ -275,12 +279,27 @@ class CopyTask(
         progressMonitor.apply {
             contentName = itemName
             remainingContent = pendingFiles.size - (index + 1)
-            progress = (index + 1f) / pendingFiles.size
+            progress = (index.toFloat() / pendingFiles.size).coerceIn(0f, 1f)
+            val pct = (progress * 100).toInt()
+            processName = if (deleteSourceFiles)
+                "${globalClass.resources.getString(R.string.moving)} ($pct%)"
+            else
+                "${globalClass.resources.getString(R.string.copying)} ($pct%)"
         }
     }
 
     private fun handleConflict(item: TaskContentItem): Boolean {
-        return when (commonConflictResolution) {
+        val resolution = if (globalClass.preferencesManager.autoRenameOnConflict) {
+            TaskContentStatus.AUTO_RENAME
+        } else {
+            commonConflictResolution
+        }
+        return when (resolution) {
+            TaskContentStatus.AUTO_RENAME -> {
+                item.status = TaskContentStatus.AUTO_RENAME
+                true
+            }
+
             TaskContentStatus.SKIP -> {
                 item.status = TaskContentStatus.SKIP
                 true
@@ -298,8 +317,40 @@ class CopyTask(
                 true
             }
 
-            else -> true
+            else -> {
+                item.status = TaskContentStatus.AUTO_RENAME
+                true
+            }
         }
+    }
+
+    private fun getUniqueLocalFile(file: File): File {
+        if (!file.exists()) return file
+        val parent = file.parentFile ?: return file
+        val nameWithoutExt = file.nameWithoutExtension
+        val ext = if (file.extension.isNotEmpty()) ".${file.extension}" else ""
+        var counter = 1
+        var candidate = File(parent, "$nameWithoutExt ($counter)$ext")
+        while (candidate.exists()) {
+            counter++
+            candidate = File(parent, "$nameWithoutExt ($counter)$ext")
+        }
+        return candidate
+    }
+
+    private fun getUniqueRemotePath(client: com.raival.compose.file.explorer.screen.main.tab.files.service.remote.RemoteClient, remotePath: String): String {
+        if (!client.exists(remotePath)) return remotePath
+        val parent = RemotePaths.parent(remotePath) ?: "/"
+        val name = RemotePaths.name(remotePath)
+        val nameWithoutExt = name.substringBeforeLast('.', name)
+        val ext = if (name.contains('.')) ".${name.substringAfterLast('.')}" else ""
+        var counter = 1
+        var candidate = RemotePaths.join(parent, "$nameWithoutExt ($counter)$ext")
+        while (client.exists(candidate)) {
+            counter++
+            candidate = RemotePaths.join(parent, "$nameWithoutExt ($counter)$ext")
+        }
+        return candidate
     }
 
     private fun performSourceDeletion() {
@@ -326,16 +377,21 @@ class CopyTask(
                 return
             }
 
+            val deleteProgress = (index.toFloat() / successfulItems.size).coerceIn(0f, 1f)
+            val pct = (deleteProgress * 100).toInt()
             progressMonitor.apply {
                 remainingContent = successfulItems.size - (index + 1)
                 contentName = item.content.displayName
-                progress = (index + 1f) / successfulItems.size
+                progress = deleteProgress
+                processName = "${globalClass.resources.getString(R.string.deleting_source_files)} ($pct%)"
             }
 
             val local = item.content as LocalFileHolder
-            var deleted = local.file.deleteRecursively()
-            if (!deleted && ShizukuManager.isPrivileged) {
-                ShizukuManager.delete(local.uniquePath)
+            if (local.file.exists()) {
+                var deleted = local.file.deleteRecursively()
+                if (!deleted && ShizukuManager.isPrivileged) {
+                    ShizukuManager.delete(local.uniquePath)
+                }
             }
         }
 
@@ -431,11 +487,20 @@ class CopyTask(
 
         if (progressMonitor.status == TaskStatus.FAILED) return
 
+        val totalBytes = pendingFiles.sumOf { item ->
+            if (item.content is LocalFileHolder && (item.content as LocalFileHolder).file.isFile) {
+                (item.content as LocalFileHolder).file.length()
+            } else 0L
+        }
+        var bytesCopiedSoFar = 0L
+
         progressMonitor.apply {
             totalContent = pendingFiles.size
+            progress = 0f
             processName = if (deleteSourceFiles)
-                globalClass.resources.getString(R.string.moving)
-            else globalClass.resources.getString(R.string.copying)
+                "${globalClass.resources.getString(R.string.moving)} (0%)"
+            else
+                "${globalClass.resources.getString(R.string.copying)} (0%)"
         }
 
         pendingFiles.forEachIndexed { index, item ->
@@ -447,14 +512,29 @@ class CopyTask(
             if (item.status isNot TaskContentStatus.PENDING
                 && item.status isNot TaskContentStatus.REPLACE
                 && item.status isNot TaskContentStatus.CONFLICT
+                && item.status isNot TaskContentStatus.AUTO_RENAME
             ) {
                 return@forEachIndexed
             }
 
             val sourceFile = (item.content as LocalFileHolder).file
-            val destinationFile = File(destinationHolder.file, item.relativePath)
+            var destinationFile = File(destinationHolder.file, item.relativePath)
 
-            updateProgress(index, sourceFile.name)
+            val baseProgress = if (totalBytes > 0) {
+                (bytesCopiedSoFar.toFloat() / totalBytes).coerceIn(0f, 0.99f)
+            } else {
+                (index.toFloat() / pendingFiles.size).coerceIn(0f, 0.99f)
+            }
+            val basePct = (baseProgress * 100).toInt()
+            progressMonitor.apply {
+                contentName = sourceFile.name
+                remainingContent = pendingFiles.size - (index + 1)
+                progress = baseProgress
+                processName = if (deleteSourceFiles)
+                    "${globalClass.resources.getString(R.string.moving)} ($basePct%)"
+                else
+                    "${globalClass.resources.getString(R.string.copying)} ($basePct%)"
+            }
 
             if (item.status == TaskContentStatus.CONFLICT && !handleConflict(item)) {
                 return
@@ -467,13 +547,32 @@ class CopyTask(
                 }
             }
 
+            if (item.status == TaskContentStatus.AUTO_RENAME && destinationFile.exists()) {
+                destinationFile = getUniqueLocalFile(destinationFile)
+            }
+
             when (item.status) {
-                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE, TaskContentStatus.AUTO_RENAME -> {
                     item.status = if (copyLocalFile(
                             sourceFile,
                             destinationFile,
                             item.status == TaskContentStatus.REPLACE
-                        )
+                        ) { delta ->
+                            bytesCopiedSoFar += delta
+                            val curProgress = if (totalBytes > 0) {
+                                (bytesCopiedSoFar.toFloat() / totalBytes).coerceIn(0.01f, 0.99f)
+                            } else {
+                                (index.toFloat() / pendingFiles.size).coerceIn(0.01f, 0.99f)
+                            }
+                            val pct = (curProgress * 100).toInt()
+                            progressMonitor.apply {
+                                progress = curProgress
+                                processName = if (deleteSourceFiles)
+                                    "${globalClass.resources.getString(R.string.moving)} ($pct%)"
+                                else
+                                    "${globalClass.resources.getString(R.string.copying)} ($pct%)"
+                            }
+                        }
                     ) {
                         TaskContentStatus.SUCCESS
                     } else {
@@ -487,7 +586,61 @@ class CopyTask(
         }
     }
 
-    private fun copyLocalFile(source: File, destination: File, overwrite: Boolean): Boolean {
+    private fun streamCopy(
+        source: File,
+        destination: File,
+        overwrite: Boolean,
+        onBytesCopied: (bytes: Long) -> Unit
+    ): Boolean {
+        if (destination.exists()) {
+            if (!overwrite) return false
+            destination.delete()
+        }
+        destination.parentFile?.mkdirs()
+
+        val buffer = ByteArray(65536)
+        var streamBytes = 0L
+        val fileSize = source.length()
+        var lastReported = 0L
+
+        return try {
+            source.inputStream().buffered(65536).use { input ->
+                destination.outputStream().buffered(65536).use { output ->
+                    while (true) {
+                        if (aborted) {
+                            try { destination.delete() } catch (_: Exception) {}
+                            return false
+                        }
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        streamBytes += read
+
+                        if (streamBytes - lastReported >= 131072L || streamBytes == fileSize) {
+                            onBytesCopied(streamBytes - lastReported)
+                            lastReported = streamBytes
+                        }
+                    }
+                    output.flush()
+                }
+            }
+            if (streamBytes > lastReported) {
+                onBytesCopied(streamBytes - lastReported)
+            }
+            true
+        } catch (e: Exception) {
+            logger.logError(e)
+            try { destination.delete() } catch (_: Exception) {}
+            false
+        }
+    }
+
+    private fun copyLocalFile(
+        source: File,
+        destination: File,
+        overwrite: Boolean,
+        onBytesCopied: (bytes: Long) -> Unit
+    ): Boolean {
         return try {
             if (source.isFile) {
                 destination.parentFile?.mkdirs()
@@ -497,14 +650,7 @@ class CopyTask(
                 if (deleteSourceFiles) {
                     if (!canPerformAtomicFileMove) {
                         // Fallback to copy only - deletion will be handled by performSourceDeletion()
-                        Files.copy(
-                            source.toPath(),
-                            destination.toPath(),
-                            *buildList {
-                                add(StandardCopyOption.COPY_ATTRIBUTES)
-                                if (overwrite) add(StandardCopyOption.REPLACE_EXISTING)
-                            }.toTypedArray()
-                        )
+                        streamCopy(source, destination, overwrite, onBytesCopied)
                     } else {
                         try {
                             // Try atomic move first (faster when supported)
@@ -516,35 +662,34 @@ class CopyTask(
                                     if (overwrite) add(StandardCopyOption.REPLACE_EXISTING)
                                 }.toTypedArray()
                             )
-                        } catch (_: AtomicMoveNotSupportedException) {
-                            // Fallback to copy only - deletion will be handled by performSourceDeletion()
-                            Files.copy(
-                                source.toPath(),
-                                destination.toPath(),
-                                *buildList {
-                                    add(StandardCopyOption.COPY_ATTRIBUTES)
-                                    if (overwrite) add(StandardCopyOption.REPLACE_EXISTING)
-                                }.toTypedArray()
-                            )
+                            onBytesCopied(source.length())
+                            true
+                        } catch (_: Exception) {
+                            // Catch any move exception (AtomicMoveNotSupportedException, Cross-device link, etc.)
                             canPerformAtomicFileMove = false
+                            streamCopy(source, destination, overwrite, onBytesCopied)
                         }
                     }
                 } else {
-                    source.copyTo(destination, overwrite)
+                    streamCopy(source, destination, overwrite, onBytesCopied)
                 }
             } else {
                 destination.mkdirs() || destination.exists()
                 if (!destination.exists() && ShizukuManager.isPrivileged) {
                     ShizukuManager.createDirectory(destination.absolutePath)
                 }
+                true
             }
-            true
         } catch (e: Exception) {
             if (ShizukuManager.isPrivileged) {
                 if (deleteSourceFiles) {
-                    ShizukuManager.rename(source.absolutePath, destination.absolutePath)
+                    val res = ShizukuManager.rename(source.absolutePath, destination.absolutePath)
+                    if (res) onBytesCopied(source.length())
+                    res
                 } else {
-                    ShizukuManager.copy(source.absolutePath, destination.absolutePath)
+                    val res = ShizukuManager.copy(source.absolutePath, destination.absolutePath)
+                    if (res) onBytesCopied(source.length())
+                    res
                 }
             } else {
                 logger.logError(e)
@@ -1254,14 +1399,17 @@ class CopyTask(
         val client = destinationHolder.client
         pendingFiles.forEachIndexed { index, item ->
             if (!prepareItem(index, item)) return
-            val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+            var destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
             val sourceFile = (item.content as LocalFileHolder).file
             if (item.status == TaskContentStatus.PENDING) {
                 val conflictExists = !sourceFile.isDirectory && client.exists(destPath)
                 if (conflictExists && !handleConflict(item)) return
             }
+            if (item.status == TaskContentStatus.AUTO_RENAME && client.exists(destPath)) {
+                destPath = getUniqueRemotePath(client, destPath)
+            }
             when (item.status) {
-                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE, TaskContentStatus.AUTO_RENAME -> {
                     item.status = try {
                         if (sourceFile.isDirectory) {
                             client.ensureDirectory(destPath)
@@ -1270,7 +1418,11 @@ class CopyTask(
                                 client.delete(destPath, false)
                             }
                             client.ensureDirectory(RemotePaths.parent(destPath) ?: destinationHolder.remotePath)
-                            client.uploadFile(sourceFile.absolutePath, destPath) {}
+                            client.uploadFile(sourceFile.absolutePath, destPath) { byteProgress ->
+                                val base = (index.toFloat() / pendingFiles.size)
+                                val span = 1f / pendingFiles.size
+                                progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                            }
                         }
                         TaskContentStatus.SUCCESS
                     } catch (e: Exception) {
@@ -1292,13 +1444,16 @@ class CopyTask(
         pendingFiles.forEachIndexed { index, item ->
             if (!prepareItem(index, item)) return
             val source = item.content as RemoteFileHolder
-            val destinationFile = File(destinationHolder.file, item.relativePath)
+            var destinationFile = File(destinationHolder.file, item.relativePath)
             if (item.status == TaskContentStatus.PENDING) {
                 val conflictExists = destinationFile.exists() && destinationFile.isFile
                 if (conflictExists && !handleConflict(item)) return
             }
+            if (item.status == TaskContentStatus.AUTO_RENAME && destinationFile.exists()) {
+                destinationFile = getUniqueLocalFile(destinationFile)
+            }
             when (item.status) {
-                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE, TaskContentStatus.AUTO_RENAME -> {
                     item.status = try {
                         if (source.isFolder) {
                             destinationFile.mkdirs()
@@ -1307,7 +1462,11 @@ class CopyTask(
                             source.client.downloadFile(
                                 source.remotePath,
                                 destinationFile.absolutePath
-                            ) {}
+                            ) { byteProgress ->
+                                val base = (index.toFloat() / pendingFiles.size)
+                                val span = 1f / pendingFiles.size
+                                progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                            }
                         }
                         TaskContentStatus.SUCCESS
                     } catch (e: Exception) {
@@ -1338,13 +1497,16 @@ class CopyTask(
         pendingFiles.forEachIndexed { index, item ->
             if (!prepareItem(index, item)) return
             val source = item.content as RemoteFileHolder
-            val destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
+            var destPath = RemotePaths.join(destinationHolder.remotePath, item.relativePath)
             if (item.status == TaskContentStatus.PENDING) {
                 val conflictExists = !source.isFolder && destClient.exists(destPath)
                 if (conflictExists && !handleConflict(item)) return
             }
+            if (item.status == TaskContentStatus.AUTO_RENAME && destClient.exists(destPath)) {
+                destPath = getUniqueRemotePath(destClient, destPath)
+            }
             when (item.status) {
-                TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                TaskContentStatus.PENDING, TaskContentStatus.REPLACE, TaskContentStatus.AUTO_RENAME -> {
                     item.status = try {
                         if (source.isFolder) {
                             destClient.ensureDirectory(destPath)
@@ -1360,8 +1522,16 @@ class CopyTask(
                                 "remote-copy-${UUID.randomUUID()}"
                             )
                             try {
-                                source.client.downloadFile(source.remotePath, temp.absolutePath) {}
-                                destClient.uploadFile(temp.absolutePath, destPath) {}
+                                source.client.downloadFile(source.remotePath, temp.absolutePath) { byteProgress ->
+                                    val base = (index.toFloat() / pendingFiles.size)
+                                    val span = 0.5f / pendingFiles.size
+                                    progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                                }
+                                destClient.uploadFile(temp.absolutePath, destPath) { byteProgress ->
+                                    val base = (index.toFloat() / pendingFiles.size) + (0.5f / pendingFiles.size)
+                                    val span = 0.5f / pendingFiles.size
+                                    progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                                }
                             } finally {
                                 temp.delete()
                             }
