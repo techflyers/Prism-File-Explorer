@@ -1,6 +1,7 @@
 package com.raival.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
 import androidx.compose.material.icons.rounded.Numbers
@@ -83,6 +84,19 @@ fun FileListContainer() {
             icon = Icons.Rounded.HideSource,
             switchState = prefs.hideFileExtensions,
             onSwitchChange = { prefs.hideFileExtensions = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.show_source_folder_badges),
+            supportingText = stringResource(R.string.show_source_folder_badges_desc),
+            icon = Icons.Rounded.Badge,
+            switchState = prefs.showSourceBadges,
+            onSwitchChange = { prefs.showSourceBadges = it }
         )
     }
 }

@@ -48,6 +48,8 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParam
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SourceFolderInfo
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SourceFolderResolver
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import kotlinx.coroutines.Dispatchers.IO
@@ -398,6 +400,13 @@ private fun ColumnFileItem(
         tab.onSelectionChange()
     }
 
+    val showSourceBadge = tab.activeFolder is VirtualFileHolder && globalClass.preferencesManager.showSourceBadges
+    val sourceInfo = if (showSourceBadge) {
+        remember(currentItemPath) {
+            SourceFolderResolver.resolve(item)
+        }
+    } else null
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -438,7 +447,8 @@ private fun ColumnFileItem(
                 size = getFileListIconSize(tab.activeFolder).dp,
                 viewConfigs = viewConfigs,
                 onClick = { toggleSelection() },
-                onLongClick = { handleLongClick(tab, currentItemPath, item, index) }
+                onLongClick = { handleLongClick(tab, currentItemPath, item, index) },
+                sourceInfo = sourceInfo
             )
 
             Space(size = 8.dp)
@@ -470,7 +480,8 @@ private fun ColumnFileItem(
                     item = item,
                     currentItemPath = currentItemPath,
                     fontSize = fontSize,
-                    isHighlighted = isSelected || tab.highlightedFiles.contains(currentItemPath)
+                    isHighlighted = isSelected || tab.highlightedFiles.contains(currentItemPath),
+                    sourceInfo = sourceInfo
                 )
             }
         }
@@ -511,6 +522,13 @@ private fun GridFileItem(
         }
         tab.onSelectionChange()
     }
+
+    val showSourceBadge = tab.activeFolder is VirtualFileHolder && globalClass.preferencesManager.showSourceBadges
+    val sourceInfo = if (showSourceBadge) {
+        remember(itemPath) {
+            SourceFolderResolver.resolve(item)
+        }
+    } else null
 
     Box(
         modifier = Modifier
@@ -571,7 +589,8 @@ private fun GridFileItem(
                     viewConfigs = viewConfigs,
                     onLongClick = {
                         handleLongClick(tab, itemPath, item, index)
-                    }
+                    },
+                    sourceInfo = sourceInfo
                 )
                 if (isSelected) {
                     Box(
@@ -650,7 +669,8 @@ private fun FileIcon(
     size: Dp,
     viewConfigs: ViewConfigs,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {}
+    onLongClick: () -> Unit = {},
+    sourceInfo: SourceFolderInfo? = null
 ) {
     val sizeModifier = if (viewConfigs.viewType == ViewType.GRID && viewConfigs.galleryMode) {
         Modifier.fillMaxSize()
@@ -689,11 +709,25 @@ private fun FileIcon(
                 FileContentIcon(item)
             }
 
+            if (sourceInfo != null) {
+                val isGallery = viewConfigs.viewType == ViewType.GRID && viewConfigs.galleryMode
+                val badgeSize = if (isGallery) 22.dp else (size.value * 0.42f).coerceIn(14f, 22f).dp
+                val badgeIconSize = if (isGallery) 15.dp else (badgeSize.value * 0.72f).dp
+                SourceFolderBadge(
+                    sourceInfo = sourceInfo,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(if (isGallery) 4.dp else 2.dp),
+                    badgeSize = badgeSize,
+                    iconSize = badgeIconSize
+                )
+            }
+
             if (!item.canRead) {
                 Icon(
                     modifier = Modifier
                         .size(14.dp)
-                        .align(Alignment.BottomEnd)
+                        .align(if (sourceInfo != null) Alignment.TopEnd else Alignment.BottomEnd)
                         .alpha(if (item.isHidden()) 0.4f else 1f),
                     imageVector = Icons.Rounded.Lock,
                     tint = Color.Red,
@@ -709,7 +743,8 @@ private fun FileDetails(
     item: ContentHolder,
     currentItemPath: String,
     fontSize: Int,
-    isHighlighted: Boolean
+    isHighlighted: Boolean,
+    sourceInfo: SourceFolderInfo? = null
 ) {
     val initialDetails = remember(currentItemPath) {
         if (item is LocalFileHolder && item.details.isNotEmpty()) {
@@ -738,7 +773,14 @@ private fun FileDetails(
 
     // Parse dual-aligned format: "leftInfo\trightDate"
     val parts = details.split("\t", limit = 2)
-    val leftText = parts.getOrNull(0)?.trim().orEmpty()
+    val rawLeftText = parts.getOrNull(0)?.trim().orEmpty()
+    val leftText = if (sourceInfo != null && rawLeftText.isNotEmpty()) {
+        "${sourceInfo.folderName} • $rawLeftText"
+    } else if (sourceInfo != null) {
+        sourceInfo.folderName
+    } else {
+        rawLeftText
+    }
     val rightText = parts.getOrNull(1)?.trim().orEmpty()
     val smallFontSize = (fontSize - 4).sp
     val textColor = if (isHighlighted) colorScheme.primary else Color.Unspecified

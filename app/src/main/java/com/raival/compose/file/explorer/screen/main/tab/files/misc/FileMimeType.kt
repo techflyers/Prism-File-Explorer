@@ -36,6 +36,19 @@ object FileMimeType {
     val fontFileType = setOf("ttf", "otf")
 
     @JvmField
+    val documentFileType = setOf(
+        pdfFileType,
+        "doc", "docx", "dot", "dotx", "docm", "dotm",
+        "xls", "xlsx", "xlsm", "xlt", "xltx", "csv", "tsv",
+        "ppt", "pptx", "pptm", "pot", "potx", "pps", "ppsx",
+        "odt", "ods", "odp", "odg", "odf",
+        "txt", "text", "rtf", "rtx", markdownFileType, "markdown",
+        "tex", "latex",
+        "epub", "mobi", "azw", "azw3", "fb2", "djvu",
+        "pages", "numbers", "key", "log", "wps"
+    )
+
+    @JvmField
     val vectorFileType = setOf(
         "svg", "ai", "eps", "pdf", "dxf",
         "wmf", "emf", "cdr", "odg", "swf"

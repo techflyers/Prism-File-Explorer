@@ -169,14 +169,17 @@ class SearchManager {
                 results.forEach { aiRes ->
                     val file = java.io.File(aiRes.filePath)
                     if (file.exists()) {
-                        searchResults.add(
-                            SearchResult(
-                                file = LocalFileHolder(file),
-                                matchType = SearchResult.MatchType.CONTENT,
-                                lineNumber = 1,
-                                matchedLine = "Semantic match score: ${(aiRes.score * 100).toInt()}%"
+                        val holder = LocalFileHolder(file)
+                        if (searchOptions.matchesFilter(holder)) {
+                            searchResults.add(
+                                SearchResult(
+                                    file = holder,
+                                    matchType = SearchResult.MatchType.CONTENT,
+                                    lineNumber = 1,
+                                    matchedLine = "Semantic match score: ${(aiRes.score * 100).toInt()}%"
+                                )
                             )
-                        )
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -195,7 +198,7 @@ class SearchManager {
             return
         }
 
-        if (searchQuery.isEmpty()) {
+        if (searchQuery.isEmpty() && searchOptions.selectedFormats.isEmpty()) {
             clearResults()
             return
         }
@@ -220,7 +223,7 @@ class SearchManager {
 
         searchJob = tab.scope.launch {
             try {
-                val searchPattern = if (searchOptions.useRegex) {
+                val searchPattern = if (searchOptions.useRegex && searchQuery.isNotEmpty()) {
                     try {
                         Pattern.compile(
                             searchQuery,
@@ -388,8 +391,10 @@ class SearchManager {
     ) {
         if (!isSearching) return
 
+        if (!searchOptions.matchesFilter(item)) return
+
         // Search by extension
-        if (searchOptions.searchByExtension) {
+        if (searchOptions.searchByExtension && searchQuery.isNotEmpty()) {
             val extension = item.extension
             if (extension.isNotEmpty() && matchesQuery(extension, searchPattern)) {
                 addSearchResult(
@@ -411,7 +416,7 @@ class SearchManager {
         }
 
         // Search in file content
-        if (searchOptions.searchInFileContent && item.isFile() && isEditableFile(item)) {
+        if (searchOptions.searchInFileContent && searchQuery.isNotEmpty() && item.isFile() && isEditableFile(item)) {
             searchInFileContent(item, searchPattern)
         }
     }
@@ -461,6 +466,7 @@ class SearchManager {
     }
 
     private fun matchesQuery(text: String, searchPattern: Pattern?): Boolean {
+        if (searchQuery.isEmpty()) return true
         return if (searchPattern != null) {
             searchPattern.matcher(text).find()
         } else {

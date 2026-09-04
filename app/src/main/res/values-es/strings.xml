@@ -453,4 +453,7 @@
     <string name="close_tab_on_back_nav">Navegación hacia atrás para cerrar pestañas</string>
     <string name="remember_last_session">Recordar última sesión</string>
     <string name="confirm_before_exit">Confirmar antes de salir de la aplicación</string>
+    <string name="folders">Carpetas</string>
+    <string name="apk">APK</string>
+    <string name="no_results_found">No se encontraron resultados</string>
 </resources>

@@ -1,188 +1,195 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.service.remote
 
 import android.content.Context
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import jcifs.CIFSContext
+import jcifs.config.PropertyConfiguration
+import jcifs.context.BaseContext
+import jcifs.smb.NtlmPasswordAuthenticator
+import jcifs.smb.SmbFile
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.Date
+import java.util.Properties
 
 class LanRemoteClient(
     private val context: Context,
     private val conn: NetworkConnectionModel
 ) : RemoteClient {
-    private val key = "smb_virtual_fs_${conn.host}_${conn.port}"
-    private val prefs = context.getSharedPreferences("virtual_smb_prefs", Context.MODE_PRIVATE)
-    private val virtualItems = mutableListOf<RemoteFileItem>()
+    private var cifsContext: CIFSContext? = null
+
+    private fun getContext(): CIFSContext {
+        cifsContext?.let { return it }
+        val prop = Properties().apply {
+            setProperty("jcifs.smb.client.enableSMB2", "true")
+            setProperty("jcifs.smb.client.disableSMB1", "false")
+            setProperty("jcifs.smb.client.responseTimeout", "10000")
+            setProperty("jcifs.smb.client.soTimeout", "10000")
+            setProperty("jcifs.smb.client.connTimeout", "8000")
+        }
+        val base = BaseContext(PropertyConfiguration(prop))
+        val auth = if (conn.username.isNotBlank()) {
+            val domain = if (conn.username.contains("\\")) conn.username.substringBefore("\\") else null
+            val user = if (conn.username.contains("\\")) conn.username.substringAfter("\\") else conn.username
+            NtlmPasswordAuthenticator(domain, user, conn.password)
+        } else {
+            NtlmPasswordAuthenticator()
+        }
+        val ctx = base.withCredentials(auth)
+        cifsContext = ctx
+        return ctx
+    }
+
+    private fun buildUrl(path: String, isDirectory: Boolean = false): String {
+        val cleanHost = conn.host.trim()
+        val port = conn.port
+        val portPart = if (port == 445 || port <= 0) "" else ":$port"
+
+        val configuredRoot = conn.rootPath.trim().removePrefix("/").removeSuffix("/")
+        val requestPath = path.trim().removePrefix("/").removeSuffix("/")
+
+        val combined = when {
+            configuredRoot.isEmpty() && requestPath.isEmpty() -> ""
+            configuredRoot.isEmpty() -> requestPath
+            requestPath.isEmpty() -> configuredRoot
+            else -> "$configuredRoot/$requestPath"
+        }
+
+        val trailing = if (isDirectory && combined.isNotEmpty()) "/" else if (combined.isEmpty()) "/" else ""
+        return "smb://$cleanHost$portPart/$combined$trailing"
+    }
 
     override fun connect() {
-        virtualItems.clear()
-        val stored = prefs.getString(key, null)
-        if (stored != null) {
-            try {
-                val type = object : TypeToken<List<RemoteFileItem>>() {}.type
-                val items: List<RemoteFileItem> = Gson().fromJson(stored, type) ?: emptyList()
-                virtualItems.addAll(items)
-            } catch (e: Exception) {
-                loadDefaultStructure()
-            }
-        } else {
-            loadDefaultStructure()
-            saveStructure()
-        }
-    }
-
-    private fun loadDefaultStructure() {
-        val now = Date()
-        virtualItems.add(
-            RemoteFileItem(
-                name = "Shared_Media",
-                path = "/Shared_Media",
-                isDirectory = true,
-                size = 0,
-                modified = Date(now.time - 3 * 24 * 3600 * 1000L)
-            )
-        )
-        virtualItems.add(
-            RemoteFileItem(
-                name = "Office_Documents",
-                path = "/Office_Documents",
-                isDirectory = true,
-                size = 0,
-                modified = Date(now.time - 1 * 24 * 3600 * 1000L)
-            )
-        )
-        virtualItems.add(
-            RemoteFileItem(
-                name = "lan_read_me.txt",
-                path = "/lan_read_me.txt",
-                isDirectory = false,
-                size = 1450,
-                modified = now
-            )
-        )
-    }
-
-    private fun saveStructure() {
-        val str = Gson().toJson(virtualItems)
-        prefs.edit().putString(key, str).apply()
+        val ctx = getContext()
+        val testUrl = buildUrl("", isDirectory = true)
+        val rootFile = SmbFile(testUrl, ctx)
+        rootFile.connect()
     }
 
     override fun disconnect() {
-        // No-op
+        cifsContext = null
     }
 
     override fun listDirectory(path: String): List<RemoteFileItem> {
-        val cleanPath = if (path == "/") "" else path
-        return virtualItems.filter { item ->
-            val parent = item.path.substringBeforeLast("/", "")
-            val checkParent = if (parent.isEmpty()) "" else parent
-            checkParent == cleanPath
+        val ctx = getContext()
+        val url = buildUrl(path, isDirectory = true)
+        val dir = SmbFile(url, ctx)
+        val files = dir.listFiles() ?: emptyArray()
+
+        val normalizedParent = if (path == "/" || path.isBlank()) "" else path.trimEnd('/')
+        return files.mapNotNull { file ->
+            val rawName = file.name
+            val cleanName = rawName.trimEnd('/')
+            if (cleanName.isBlank()) return@mapNotNull null
+
+            val isDir = try {
+                file.isDirectory
+            } catch (_: Throwable) {
+                rawName.endsWith("/")
+            }
+
+            val size = if (isDir) 0L else try { file.length() } catch (_: Throwable) { 0L }
+            val modified = try { Date(file.lastModified()) } catch (_: Throwable) { Date() }
+            val itemPath = "$normalizedParent/$cleanName"
+
+            RemoteFileItem(
+                name = cleanName,
+                path = itemPath,
+                isDirectory = isDir,
+                size = size,
+                modified = modified
+            )
         }
     }
 
     override fun createDirectory(path: String) {
-        val name = path.substringAfterLast("/")
-        if (virtualItems.any { it.path == path }) return
-        virtualItems.add(
-            RemoteFileItem(
-                name = name,
-                path = path,
-                isDirectory = true,
-                size = 0,
-                modified = Date()
-            )
-        )
-        saveStructure()
+        val ctx = getContext()
+        val url = buildUrl(path, isDirectory = true)
+        val smbFile = SmbFile(url, ctx)
+        smbFile.mkdirs()
     }
 
     override fun delete(path: String, isDir: Boolean) {
-        virtualItems.removeAll { it.path == path || it.path.startsWith("$path/") }
-        saveStructure()
+        val ctx = getContext()
+        val url = buildUrl(path, isDirectory = isDir)
+        val smbFile = SmbFile(url, ctx)
+        smbFile.delete()
     }
 
     override fun downloadFile(remotePath: String, localPath: String, onProgress: (Double) -> Unit) {
-        val item = virtualItems.firstOrNull { it.path == remotePath } ?: throw Exception("File not found")
-        val file = File(localPath)
-        file.parentFile?.mkdirs()
+        val ctx = getContext()
+        val url = buildUrl(remotePath, isDirectory = false)
+        val smbFile = SmbFile(url, ctx)
+        val totalSize = try { smbFile.length() } catch (_: Throwable) { -1L }
+        val localFile = File(localPath)
+        localFile.parentFile?.mkdirs()
 
-        val text = """
-            Prism LAN/SMB Virtual Storage Bridge
-            File: ${item.name}
-            Path: ${item.path}
-            Size: ${item.size} bytes
-            Successfully fetched from host IP ${conn.host}.
-            ================================================================================
-        """.trimIndent()
-
-        // Simulate network progress
-        for (i in 1..10) {
-            Thread.sleep(60)
-            onProgress(i / 10.0)
+        var bytesCopied = 0L
+        smbFile.inputStream.use { input ->
+            localFile.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                    bytesCopied += read
+                    if (totalSize > 0) {
+                        onProgress((bytesCopied.toDouble() / totalSize).coerceIn(0.0, 1.0))
+                    }
+                }
+            }
         }
-
-        file.writeText(text)
         onProgress(1.0)
     }
 
     override fun uploadFile(localPath: String, remotePath: String, onProgress: (Double) -> Unit) {
+        val ctx = getContext()
         val localFile = File(localPath)
-        if (!localFile.exists()) throw FileNotFoundException("Local file not found")
-        val size = localFile.length()
-        val name = remotePath.substringAfterLast("/")
+        if (!localFile.exists()) throw FileNotFoundException("Local file not found: $localPath")
+        val totalSize = localFile.length()
 
-        onProgress(0.0)
-        for (i in 1..5) {
-            Thread.sleep(80)
-            onProgress(i / 5.0)
+        val url = buildUrl(remotePath, isDirectory = false)
+        val smbFile = SmbFile(url, ctx)
+
+        var bytesCopied = 0L
+        localFile.inputStream().use { input ->
+            smbFile.outputStream.use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                    bytesCopied += read
+                    if (totalSize > 0) {
+                        onProgress((bytesCopied.toDouble() / totalSize).coerceIn(0.0, 1.0))
+                    }
+                }
+            }
         }
-
-        virtualItems.removeAll { it.path == remotePath }
-        virtualItems.add(
-            RemoteFileItem(
-                name = name,
-                path = remotePath,
-                isDirectory = false,
-                size = size,
-                modified = Date()
-            )
-        )
-        saveStructure()
         onProgress(1.0)
     }
 
     override fun createFile(path: String) {
-        val name = path.substringAfterLast("/")
-        virtualItems.removeAll { it.path == path }
-        virtualItems.add(
-            RemoteFileItem(
-                name = name,
-                path = path,
-                isDirectory = false,
-                size = 0,
-                modified = Date()
-            )
-        )
-        saveStructure()
+        val ctx = getContext()
+        val url = buildUrl(path, isDirectory = false)
+        val smbFile = SmbFile(url, ctx)
+        smbFile.createNewFile()
     }
 
     override fun rename(fromPath: String, toPath: String) {
-        val name = toPath.substringAfterLast("/")
-        val updated = virtualItems.map { item ->
-            when {
-                item.path == fromPath -> item.copy(name = name, path = toPath, modified = Date())
-                item.path.startsWith("$fromPath/") ->
-                    item.copy(path = toPath + item.path.removePrefix(fromPath))
-                else -> item
-            }
-        }
-        virtualItems.clear()
-        virtualItems.addAll(updated)
-        saveStructure()
+        val ctx = getContext()
+        val fromUrl = buildUrl(fromPath)
+        val toUrl = buildUrl(toPath)
+        val fromFile = SmbFile(fromUrl, ctx)
+        val toFile = SmbFile(toUrl, ctx)
+        fromFile.renameTo(toFile)
     }
 
     override fun exists(path: String): Boolean {
-        val normalized = if (path == "/") "" else path
-        return virtualItems.any { it.path == path || it.path == normalized }
+        return try {
+            val ctx = getContext()
+            val url = buildUrl(path)
+            val smbFile = SmbFile(url, ctx)
+            smbFile.exists()
+        } catch (_: Throwable) {
+            false
+        }
     }
 }

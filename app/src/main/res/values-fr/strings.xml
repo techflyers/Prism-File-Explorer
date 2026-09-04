@@ -453,4 +453,7 @@
     <string name="close_tab_on_back_nav">Navigation arrière pour fermer les onglets</string>
     <string name="remember_last_session">Se souvenir de la dernière session</string>
     <string name="confirm_before_exit">Confirmer avant de quitter l\'application</string>
+    <string name="folders">Dossiers</string>
+    <string name="apk">APK</string>
+    <string name="no_results_found">Aucun résultat trouvé</string>
 </resources>

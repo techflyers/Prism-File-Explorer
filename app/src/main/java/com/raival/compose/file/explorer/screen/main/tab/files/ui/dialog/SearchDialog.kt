@@ -12,6 +12,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Search
@@ -42,6 +46,8 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -89,6 +95,7 @@ import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchFileFilter
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchManager
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchOptions
 import com.raival.compose.file.explorer.screen.main.tab.files.search.SearchResult
@@ -109,14 +116,19 @@ fun SearchDialog(
         val useDarkIcons = !isSystemInDarkTheme()
         var showAdvancedOptions by remember { mutableStateOf(false) }
 
-        // Auto-trigger search on type with debounce
-        LaunchedEffect(searchManager.searchQuery) {
-            if (searchManager.searchQuery.length >= 2 && !searchManager.isAiMode) {
+        // Auto-trigger search on type or filter change with debounce
+        LaunchedEffect(searchManager.searchQuery, searchManager.searchOptions.selectedFormats) {
+            val hasFormats = searchManager.searchOptions.selectedFormats.isNotEmpty()
+            val hasQuery = searchManager.searchQuery.length >= 2
+            if ((hasQuery || hasFormats) && !searchManager.isAiMode) {
                 if (searchManager.isSearching) {
                     searchManager.stopSearch()
                 }
                 delay(300)
                 searchManager.startSearch(tab)
+            } else if (!hasQuery && !hasFormats) {
+                searchManager.stopSearch()
+                searchManager.clearResults()
             }
         }
 
@@ -153,6 +165,23 @@ fun SearchDialog(
                     onSearchClick = { searchManager.startSearch(tab) },
                     onAdvancedToggle = { showAdvancedOptions = !showAdvancedOptions },
                     onAiToggle = { searchManager.toggleAiMode(tab) }
+                )
+
+                // Format Tag Filters
+                SearchFilterTagsRow(
+                    selectedFormats = searchManager.searchOptions.selectedFormats,
+                    onFilterToggled = { filter ->
+                        val current = searchManager.searchOptions.selectedFormats
+                        val newFormats = if (current.contains(filter)) {
+                            current - filter
+                        } else {
+                            current + filter
+                        }
+                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = newFormats)
+                    },
+                    onClearAll = {
+                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = emptySet())
+                    }
                 )
 
                 // Advanced Options
@@ -615,37 +644,62 @@ private fun SearchResultsSection(
 
         // Results List
         val resultsListState = rememberLazyListState()
-        LazyColumn(
-            state = resultsListState,
-            modifier = Modifier
-                .fillMaxSize()
-                .fastScrollbar(resultsListState),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        if (searchManager.searchResults.isEmpty() && !searchManager.isSearching &&
+            (searchManager.searchQuery.isNotEmpty() || searchManager.searchOptions.selectedFormats.isNotEmpty())
         ) {
-            itemsIndexed(
-                searchManager.searchResults,
-                key = { index, item -> "${item.file.uniquePath}_${item.matchType}_$index" }
-            ) { index, searchResult ->
-                SearchResultItem(
-                    searchResult = searchResult,
-                    onItemClick = {
-                        if (searchResult.file.isFile()) {
-                            tab.openFile(context, searchResult.file)
-                        } else {
-                            tab.openFolder(searchResult.file, rememberListState = false)
-                        }
-                    },
-                    onLocateClick = {
-                        onDismissRequest()
-                        globalClass.mainActivityManager.replaceCurrentTabWith(
-                            tab = FilesTab(source = searchResult.file)
-                        )
-                    },
-                    onCopyPathClick = {
-                        searchResult.file.uniquePath.copyToClipboard()
-                        globalClass.showMsg(globalClass.getString(R.string.copied_to_clipboard))
-                    }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 )
+                Space(12.dp)
+                Text(
+                    text = stringResource(R.string.no_results_found),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                state = resultsListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .fastScrollbar(resultsListState),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                itemsIndexed(
+                    searchManager.searchResults,
+                    key = { index, item -> "${item.file.uniquePath}_${item.matchType}_$index" }
+                ) { index, searchResult ->
+                    SearchResultItem(
+                        searchResult = searchResult,
+                        onItemClick = {
+                            if (searchResult.file.isFile()) {
+                                tab.openFile(context, searchResult.file)
+                            } else {
+                                tab.openFolder(searchResult.file, rememberListState = false)
+                            }
+                        },
+                        onLocateClick = {
+                            onDismissRequest()
+                            globalClass.mainActivityManager.replaceCurrentTabWith(
+                                tab = FilesTab(source = searchResult.file)
+                            )
+                        },
+                        onCopyPathClick = {
+                            searchResult.file.uniquePath.copyToClipboard()
+                            globalClass.showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                        }
+                    )
+                }
             }
         }
     }
@@ -742,6 +796,82 @@ private fun SearchResultItem(
                         contentDescription = null
                     )
                 }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchFilterTagsRow(
+    selectedFormats: Set<SearchFileFilter>,
+    onFilterToggled: (SearchFileFilter) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // "All" chip
+        item(key = "all") {
+            val isAllSelected = selectedFormats.isEmpty()
+            FilterChip(
+                selected = isAllSelected,
+                onClick = onClearAll,
+                label = {
+                    Text(
+                        text = stringResource(R.string.all),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                leadingIcon = if (isAllSelected) {
+                    {
+                        Icon(
+                            imageVector = Icons.Rounded.Done,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else null,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(8.dp)
+            )
+        }
+
+        // Format tag chips
+        items(SearchFileFilter.entries.toTypedArray(), key = { it.name }) { filter ->
+            val isSelected = selectedFormats.contains(filter)
+            FilterChip(
+                selected = isSelected,
+                onClick = { onFilterToggled(filter) },
+                label = {
+                    Text(
+                        text = stringResource(filter.labelRes),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Rounded.Done else filter.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(8.dp)
             )
         }
     }

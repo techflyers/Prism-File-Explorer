@@ -89,7 +89,7 @@ fun AppsTabContentView(tab: AppsTab) {
                     Space(8.dp)
                 }
 
-                items(tab.appsList, key = { it.packageName }) { app ->
+                items(tab.appsList, key = { "${it.packageName}_${it.uid}" }) { app ->
                     AppListItem(
                         app = app,
                         onClick = { tab.previewAppDialog = app }

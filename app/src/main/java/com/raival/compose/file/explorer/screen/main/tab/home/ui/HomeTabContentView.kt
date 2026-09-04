@@ -68,6 +68,8 @@ import com.raival.compose.file.explorer.screen.main.MainActivityManager
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SourceFolderResolver
+import com.raival.compose.file.explorer.screen.main.tab.files.ui.SourceFolderBadge
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.BOOKMARKS
@@ -483,6 +485,22 @@ private fun RecentFilesSection(
                             )
                         } else {
                             FileContentIcon(it.file)
+                        }
+
+                        if (globalClass.preferencesManager.showSourceBadges) {
+                            val sourceInfo = remember(it.path) {
+                                SourceFolderResolver.resolve(it.file)
+                            }
+                            if (sourceInfo != null) {
+                                SourceFolderBadge(
+                                    sourceInfo = sourceInfo,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp),
+                                    badgeSize = 20.dp,
+                                    iconSize = 14.dp
+                                )
+                            }
                         }
                     }
                     Box(modifier = Modifier

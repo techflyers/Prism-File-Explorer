@@ -33,6 +33,7 @@ import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.ui.Space
 import com.raival.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SourceFolderResolver
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.FontSize
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.IconSize
 import com.raival.compose.file.explorer.screen.preferences.constant.FileItemSizeMap.getFileListFontSize
@@ -45,6 +46,7 @@ fun FileItemRow(
     fileDetails: String,
     namePrefix: String = emptyString,
     ignoreSizePreferences: Boolean = false,
+    showSourceBadge: Boolean = false,
     onFileIconClick: (() -> Unit)? = null,
     onItemClick: (() -> Unit)? = null,
 ) {
@@ -55,6 +57,7 @@ fun FileItemRow(
             FileIcon(
                 contentHolder = item,
                 ignoreSizePreferences = ignoreSizePreferences,
+                showSourceBadge = showSourceBadge,
                 onClickListener = onFileIconClick
             )
         },
@@ -120,9 +123,16 @@ fun ItemRow(
 fun FileIcon(
     contentHolder: ContentHolder,
     ignoreSizePreferences: Boolean = false,
+    showSourceBadge: Boolean = false,
     onClickListener: (() -> Unit)? = null
 ) {
     val iconSize = if (ignoreSizePreferences) IconSize.MEDIUM else getFileListIconSize()
+    val sourceInfo = if (showSourceBadge) {
+        remember(contentHolder.uniquePath) {
+            SourceFolderResolver.resolve(contentHolder)
+        }
+    } else null
+
     Box(
         modifier = Modifier
             .size(iconSize.dp)
@@ -148,6 +158,19 @@ fun FileIcon(
             )
         } else {
             FileContentIcon(contentHolder)
+        }
+
+        if (sourceInfo != null) {
+            val badgeSize = (iconSize * 0.42f).coerceIn(14f, 22f).dp
+            val badgeIconSize = (badgeSize.value * 0.72f).dp
+            SourceFolderBadge(
+                sourceInfo = sourceInfo,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(2.dp),
+                badgeSize = badgeSize,
+                iconSize = badgeIconSize
+            )
         }
     }
 }

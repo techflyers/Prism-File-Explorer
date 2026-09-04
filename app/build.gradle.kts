@@ -183,6 +183,12 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
+    // SMB / CIFS support (discovery & client)
+    implementation(libs.jcifs.ng) {
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk18on")
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
+    }
+
     // QR Code Generation (offline)
     implementation("com.google.zxing:core:3.5.3")
 

@@ -453,4 +453,7 @@
     <string name="close_tab_on_back_nav">返回导航以关闭标签页</string>
     <string name="remember_last_session">记住上次会话</string>
     <string name="confirm_before_exit">退出应用前确认</string>
+    <string name="folders">文件夹</string>
+    <string name="apk">APK</string>
+    <string name="no_results_found">未找到结果</string>
 </resources>

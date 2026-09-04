@@ -1,6 +1,12 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Tab
@@ -10,11 +16,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.limitLength
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.SourceFolderResolver
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,10 +51,24 @@ fun CategoriesRow(tab: FilesTab) {
                 tab.reloadFiles()
             },
             text = {
-                Text(text = stringResource(R.string.all))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (selectedIndex == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(text = stringResource(R.string.all))
+                }
             }
         )
         tab.categories.forEach {
+            val sourceInfo = remember(it.data) {
+                (it.data as? File)?.let { file -> SourceFolderResolver.resolve(file) }
+            }
             Tab(
                 selected = selectedIndex == tab.categories.indexOf(it) + 1,
                 onClick = {
@@ -53,7 +77,15 @@ fun CategoriesRow(tab: FilesTab) {
                     tab.reloadFiles()
                 },
                 text = {
-                    Text(text = it.name.limitLength(18))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (sourceInfo != null) {
+                            SourceFolderIcon(sourceInfo = sourceInfo, size = 16.dp)
+                        }
+                        Text(text = it.name.limitLength(18))
+                    }
                 }
             )
         }

@@ -54,4 +54,11 @@
 -dontwarn org.slf4j.**
 -dontwarn javax.security.auth.kerberos.**
 
+# jCIFS-NG
+-keep class jcifs.** { *; }
+-dontwarn jcifs.**
+-dontwarn javax.annotation.**
+-dontwarn javax.el.**
+-dontwarn org.ietf.jgss.**
+
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod

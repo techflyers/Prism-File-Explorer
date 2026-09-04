@@ -18,34 +18,38 @@ suspend fun getInstalledApps(context: Context): List<AppHolder> {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getInstalledPackages(
                 PackageManager.PackageInfoFlags.of(
-                    (PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA).toLong()
+                    PackageManager.GET_PERMISSIONS.toLong()
                 )
             )
         } else {
             @Suppress("DEPRECATION")
             packageManager.getInstalledPackages(
-                PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA
+                PackageManager.GET_PERMISSIONS
             )
         }
     } catch (_: Exception) {
         // Fallback if bulk query encounters TransactionTooLargeException
-        packageManager.getInstalledApplications(PackageManager.GET_META_DATA).mapNotNull { appInfo ->
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.getPackageInfo(
-                        appInfo.packageName,
-                        PackageManager.PackageInfoFlags.of(
-                            (PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA).toLong()
+        try {
+            packageManager.getInstalledApplications(0).mapNotNull { appInfo ->
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        packageManager.getPackageInfo(
+                            appInfo.packageName,
+                            PackageManager.PackageInfoFlags.of(
+                                PackageManager.GET_PERMISSIONS.toLong()
+                            )
                         )
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(
-                        appInfo.packageName,
-                        PackageManager.GET_PERMISSIONS or PackageManager.GET_META_DATA
-                    )
-                }
-            } catch (_: Exception) { null }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageManager.getPackageInfo(
+                            appInfo.packageName,
+                            PackageManager.GET_PERMISSIONS
+                        )
+                    }
+                } catch (_: Exception) { null }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -64,14 +68,15 @@ private fun createAppHolder(
     packageInfo: android.content.pm.PackageInfo,
     appInfo: ApplicationInfo
 ): AppHolder {
-    val appFile = File(appInfo.sourceDir)
+    val appPath = appInfo.sourceDir ?: ""
+    val appFile = File(appPath)
     val permissions = packageInfo.requestedPermissions?.toList() ?: emptyList()
     val category = getCategoryName(appInfo.category)
 
     return AppHolder(
         name = appInfo.loadLabel(packageManager).toString(),
-        packageName = appInfo.packageName,
-        path = appInfo.sourceDir,
+        packageName = appInfo.packageName ?: "",
+        path = appPath,
         versionName = packageInfo.versionName ?: globalClass.getString(R.string.unknown),
         versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             packageInfo.longVersionCode.toInt()
@@ -79,7 +84,7 @@ private fun createAppHolder(
             @Suppress("DEPRECATION")
             packageInfo.versionCode
         },
-        size = appFile.length(),
+        size = if (appPath.isNotEmpty()) appFile.length() else 0L,
         isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) isNot 0,
         installDate = Date(packageInfo.firstInstallTime),
         lastUpdateDate = Date(packageInfo.lastUpdateTime),
@@ -87,7 +92,7 @@ private fun createAppHolder(
         minSdkVersion = appInfo.minSdkVersion,
         permissions = permissions,
         category = category,
-        dataDir = appInfo.dataDir,
+        dataDir = appInfo.dataDir ?: "",
         uid = appInfo.uid,
         enabled = appInfo.enabled,
         debuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) isNot 0

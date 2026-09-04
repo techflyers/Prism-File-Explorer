@@ -301,14 +301,10 @@ class MainActivityManager {
             }
             PlusButtonOverride.DEFAULT -> {
                 val firstTab = startupTabsObj.tabs.firstOrNull()
-                if (firstTab != null) {
-                    when (firstTab.type) {
-                        StartupTabType.FILES -> FilesTab(LocalFileHolder(File(firstTab.extra.ifEmpty { "/storage/emulated/0" })))
-                        StartupTabType.APPS -> AppsTab()
-                        StartupTabType.HOME -> HomeTab()
-                    }
-                } else {
-                    HomeTab()
+                when (firstTab?.type) {
+                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(firstTab.extra.ifEmpty { "/storage/emulated/0" })))
+                    StartupTabType.APPS -> AppsTab()
+                    else -> HomeTab()
                 }
             }
         }
@@ -493,7 +489,7 @@ class MainActivityManager {
             val index = 0
 
             startupTabsObj.tabs.forEachIndexed { _, tab ->
-                val newTab = when (tab.type) {
+                val newTab = when (tab?.type) {
                     StartupTabType.FILES -> FilesTab(LocalFileHolder(File(tab.extra.ifEmpty { "/storage/emulated/0" })))
                     StartupTabType.APPS -> AppsTab()
                     else -> HomeTab()

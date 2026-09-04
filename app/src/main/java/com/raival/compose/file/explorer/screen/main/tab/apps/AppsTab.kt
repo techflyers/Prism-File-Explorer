@@ -14,6 +14,7 @@ import com.raival.compose.file.explorer.screen.main.tab.apps.provider.getInstall
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AppsTab : Tab() {
     override val id = globalClass.generateUid()
@@ -66,35 +67,45 @@ class AppsTab : Tab() {
         scope.launch {
             try {
                 val apps = getInstalledApps(globalClass)
+                val newSystemApps = ArrayList<AppHolder>()
+                val newUserApps = ArrayList<AppHolder>()
                 apps.forEach { app ->
-                    if (app.isSystemApp) systemApps.add(app)
-                    else userApps.add(app)
+                    if (app.isSystemApp) newSystemApps.add(app)
+                    else newUserApps.add(app)
                 }
-                updateAppsList()
+                withContext(Dispatchers.Main) {
+                    systemApps.clear()
+                    systemApps.addAll(newSystemApps)
+                    userApps.clear()
+                    userApps.addAll(newUserApps)
+                    updateAppsList()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
-                isLoading = false
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
             }
         }
     }
 
     fun updateAppsList() {
-        appsList.clear()
         val filteredApps = when (selectedChoice) {
             0 -> userApps
             1 -> systemApps
-            2 -> userApps + systemApps
+            2 -> (userApps + systemApps).distinctBy { it.packageName to it.uid }
             else -> emptyList()
         }
 
         val sortedApps = when (sortOption) {
-            SortOption.NAME -> filteredApps.sortedBy { it.name }
+            SortOption.NAME -> filteredApps.sortedBy { it.name.lowercase() }
             SortOption.SIZE -> filteredApps.sortedByDescending { it.size }
             SortOption.INSTALL_DATE -> filteredApps.sortedByDescending { it.installDate }
             SortOption.UPDATE_DATE -> filteredApps.sortedByDescending { it.lastUpdateDate }
         }
 
+        appsList.clear()
         appsList.addAll(sortedApps)
     }
 
@@ -110,7 +121,7 @@ class AppsTab : Tab() {
                 val baseList = when (selectedChoice) {
                     0 -> userApps
                     1 -> systemApps
-                    2 -> userApps + systemApps
+                    2 -> (userApps + systemApps).distinctBy { it.packageName to it.uid }
                     else -> emptyList()
                 }
 
@@ -120,16 +131,20 @@ class AppsTab : Tab() {
                 }
 
                 val sortedApps = when (sortOption) {
-                    SortOption.NAME -> filteredApps.sortedBy { it.name }
+                    SortOption.NAME -> filteredApps.sortedBy { it.name.lowercase() }
                     SortOption.SIZE -> filteredApps.sortedByDescending { it.size }
                     SortOption.INSTALL_DATE -> filteredApps.sortedByDescending { it.installDate }
                     SortOption.UPDATE_DATE -> filteredApps.sortedByDescending { it.lastUpdateDate }
                 }
 
-                appsList.clear()
-                appsList.addAll(sortedApps)
+                withContext(Dispatchers.Main) {
+                    appsList.clear()
+                    appsList.addAll(sortedApps)
+                }
             } finally {
-                isSearching = false
+                withContext(Dispatchers.Main) {
+                    isSearching = false
+                }
             }
         }
     }
