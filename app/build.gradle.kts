@@ -158,6 +158,8 @@ dependencies {
     implementation(libs.storage)
     implementation(libs.zip4j)
     implementation(libs.commons.compress)
+    implementation(libs.xz)
+    implementation(libs.rtfparserkit)
 
     // Markdown Rendering
     implementation(libs.markwon.core)
@@ -198,6 +200,8 @@ dependencies {
     // Shizuku (privileged file access)
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    testImplementation("junit:junit:4.13.2")
 }
 
 configurations.all {

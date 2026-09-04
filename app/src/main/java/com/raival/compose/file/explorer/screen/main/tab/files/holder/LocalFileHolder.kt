@@ -29,7 +29,10 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.editableFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.prismPrefsFileType
 import com.raival.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
+import com.raival.compose.file.explorer.screen.viewer.comic.ComicViewerActivity
+import com.raival.compose.file.explorer.screen.viewer.djvu.DjvuViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.document.DocumentViewerActivity
+import com.raival.compose.file.explorer.screen.viewer.epub.EpubViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.html.HtmlViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.latex.LatexViewerActivity
@@ -511,6 +514,36 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
         }
 
+        // Comic book archives (CBZ, CBR, CB7, CBT) -> dedicated comic viewer
+        if (FileMimeType.comicFileType.contains(extension)) {
+            openFileWithPackage(
+                context,
+                context.packageName,
+                ComicViewerActivity::class.java.name
+            )
+            return true
+        }
+
+        // EPUB & reflowable e-books (MOBI, AZW, AZW3, PRC, RTF, ODT, FB2) -> dedicated viewer
+        if (FileMimeType.ebookFileType.contains(extension) || file.name.lowercase().endsWith(".fb2.zip")) {
+            openFileWithPackage(
+                context,
+                context.packageName,
+                EpubViewerActivity::class.java.name
+            )
+            return true
+        }
+
+        // DJVU documents -> dedicated DJVU viewer
+        if (FileMimeType.djvuFileTypes.contains(extension)) {
+            openFileWithPackage(
+                context,
+                context.packageName,
+                DjvuViewerActivity::class.java.name
+            )
+            return true
+        }
+
         if (FileMimeType.supportedArchiveFileType.contains(extension) || isTarCompressed()) {
             if (isApk() && skipSupportedExtensions) return false
             if (isApkBundle()) {
@@ -647,6 +680,21 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
             label == "latex" || mime.contains("tex") -> {
                 openFileWithPackage(context, context.packageName, LatexViewerActivity::class.java.name)
+                return true
+            }
+            label == "epub" || mime == "application/epub+zip" || label in setOf("mobi", "azw", "azw3", "rtf", "odt", "fb2") -> {
+                openFileWithPackage(context, context.packageName, EpubViewerActivity::class.java.name)
+                return true
+            }
+            label in setOf("djvu") || mime in setOf("image/vnd.djvu", "image/djvu", "image/x-djvu") -> {
+                openFileWithPackage(context, context.packageName, DjvuViewerActivity::class.java.name)
+                return true
+            }
+            label in setOf("cbz", "cbr", "cb7", "cbt") || mime in setOf(
+                "application/vnd.comicbook+zip", "application/vnd.comicbook-rar",
+                "application/x-cbz", "application/x-cbr", "application/x-cb7", "application/x-cbt"
+            ) -> {
+                openFileWithPackage(context, context.packageName, ComicViewerActivity::class.java.name)
                 return true
             }
             label in setOf("pdf") || mime == "application/pdf" -> {

@@ -1,5 +1,8 @@
 <resources>
     <string name="app_name">Prism File Explorer</string>
+    <string name="title_activity_comic_viewer">Comic Viewer</string>
+    <string name="title_activity_epub_viewer">E-Book Reader</string>
+    <string name="title_activity_djvu_viewer">DjVu Viewer</string>
     <string name="root_dir">Root</string>
     <string name="internal_storage">Internal Storage</string>
     <string name="storage_permission_required">Storage access permission is required</string>

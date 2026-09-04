@@ -271,6 +271,111 @@
             </intent-filter>
         </activity>
 
+        <!-- Comic Viewer -->
+        <activity
+            android:name=".screen.viewer.comic.ComicViewerActivity"
+            android:exported="true"
+            android:label="@string/title_activity_comic_viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/x-cb7" />
+                <data android:mimeType="application/x-cbt" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.cbz" />
+                <data android:pathPattern=".*\\.cbr" />
+                <data android:pathPattern=".*\\.cb7" />
+                <data android:pathPattern=".*\\.cbt" />
+            </intent-filter>
+        </activity>
+
+        <!-- E-Book Viewer (EPUB, MOBI, AZW, AZW3, PRC, RTF, ODT, FB2) -->
+        <activity
+            android:name=".screen.viewer.epub.EpubViewerActivity"
+            android:exported="true"
+            android:label="@string/title_activity_epub_viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="text/rtf" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\.mobi" />
+                <data android:pathPattern=".*\\.azw" />
+                <data android:pathPattern=".*\\.azw3" />
+                <data android:pathPattern=".*\\.prc" />
+                <data android:pathPattern=".*\\.rtf" />
+                <data android:pathPattern=".*\\.odt" />
+                <data android:pathPattern=".*\\.fb2" />
+            </intent-filter>
+        </activity>
+
+        <!-- DjVu Viewer -->
+        <activity
+            android:name=".screen.viewer.djvu.DjvuViewerActivity"
+            android:exported="true"
+            android:label="@string/title_activity_djvu_viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/vnd.djvu" />
+                <data android:mimeType="image/djvu" />
+                <data android:mimeType="image/x-djvu" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.djvu" />
+                <data android:pathPattern=".*\\.djv" />
+            </intent-filter>
+        </activity>
+
         <!-- SAF File & Folder Picker Activity -->
         <activity
             android:name=".screen.picker.FilePickerActivity"
@@ -330,6 +435,22 @@
                 <data android:mimeType="application/x-archive" />
                 <data android:mimeType="application/zstd" />
                 <data android:mimeType="application/x-lz4" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/x-cb7" />
+                <data android:mimeType="application/x-cbt" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="text/rtf" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:mimeType="image/vnd.djvu" />
+                <data android:mimeType="image/djvu" />
+                <data android:mimeType="image/x-djvu" />
                 <data android:scheme="file" />
                 <data android:scheme="content" />
             </intent-filter>

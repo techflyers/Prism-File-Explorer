@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme.colorScheme
@@ -41,8 +43,12 @@ import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.archiveFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.audioFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.codeFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.comicFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.djvuFileTypes
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.docFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.ebookFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.editableFileType
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.epubFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.excelFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.fontFileType
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
@@ -89,7 +95,9 @@ private fun magikaIconForLabel(label: String): FileContentIcon? = when (label) {
     "ppt", "pptx" -> FileContentIcon(Icons.Default.Slideshow)
     "ttf", "otf" -> FileContentIcon(Icons.Default.TextFields)
     "mp3", "wav", "ogg", "flac", "midi" -> FileContentIcon(Icons.Default.Audiotrack)
-    "zip", "jar", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "cab", "dmg" ->
+    "epub" -> FileContentIcon(Icons.Rounded.Bookmark)
+    "cbz", "cbr", "cb7", "cbt" -> FileContentIcon(Icons.Rounded.Bookmarks)
+    "zip", "jar", "apk", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "iso", "dmg", "cab" ->
         FileContentIcon(Icons.Default.Archive)
     "python", "javascript", "typescript", "c", "cpp", "go", "rust", "ruby", "php",
     "perl", "shell", "css", "scss", "html", "xml", "json", "yaml", "latex",
@@ -128,6 +136,8 @@ private fun getContentIcon(content: ContentHolder): FileContentIcon {
     if (vectorFileType.contains(extension)) return FileContentIcon(PrismIcons.Vector)
     if (audioFileType.contains(extension)) return FileContentIcon(Icons.Default.Audiotrack)
     if (codeFileType.contains(extension)) return FileContentIcon(PrismIcons.Code)
+    if (comicFileType.contains(extension)) return FileContentIcon(Icons.Rounded.Bookmarks)
+    if (ebookFileType.contains(extension) || djvuFileTypes.contains(extension) || content.displayName.lowercase().endsWith(".fb2.zip")) return FileContentIcon(Icons.Rounded.Bookmark)
     if (editableFileType.contains(extension)) return FileContentIcon(Icons.Default.Description)
     if (archiveFileType.contains(extension)) return FileContentIcon(Icons.Default.Archive)
 

@@ -25,7 +25,10 @@ import com.raival.compose.file.explorer.common.ui.SafeSurface
 import com.raival.compose.file.explorer.screen.main.MainActivity
 import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.raival.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
+import com.raival.compose.file.explorer.screen.viewer.comic.ComicViewerActivity
+import com.raival.compose.file.explorer.screen.viewer.djvu.DjvuViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.document.DocumentViewerActivity
+import com.raival.compose.file.explorer.screen.viewer.epub.EpubViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.html.HtmlViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.latex.LatexViewerActivity
@@ -221,9 +224,33 @@ class OpenWithDispatchActivity : BaseActivity() {
             return
         }
 
-        // 8. Office Documents
+        // 8. DJVU Documents -> route to DjvuViewerActivity
+        if (FileMimeType.djvuFileTypes.contains(lowerExt) ||
+            mimeType in setOf("image/vnd.djvu", "image/djvu", "image/x-djvu")
+        ) {
+            startViewer(DjvuViewerActivity::class.java, uri, mimeType, localFile)
+            return
+        }
+
+        // 9. E-books (EPUB, MOBI, AZW, AZW3, PRC, RTF, ODT, FB2) -> route to EpubViewerActivity
+        if (FileMimeType.ebookFileType.contains(lowerExt) ||
+            fileName.lowercase().endsWith(".fb2.zip") ||
+            mimeType in setOf(
+                "application/epub+zip",
+                "application/x-mobipocket-ebook",
+                "application/vnd.amazon.mobi",
+                "application/x-fictionbook+xml",
+                "application/rtf",
+                "text/rtf"
+            )
+        ) {
+            startViewer(EpubViewerActivity::class.java, uri, mimeType, localFile)
+            return
+        }
+
+        // 10. Office Documents
         if (FileMimeType.officeFileType.contains(lowerExt) ||
-            lowerExt in setOf("odt", "ods", "odp") ||
+            lowerExt in setOf("ods", "odp") ||
             mimeType in setOf(
                 "application/msword",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -272,7 +299,24 @@ class OpenWithDispatchActivity : BaseActivity() {
             return
         }
 
-        // 11. Archive formats -> route to MainActivity archive browser (ZipManager)
+        // 11. Comic Book Archives -> route to ComicViewerActivity
+        if (FileMimeType.comicFileType.contains(lowerExt) ||
+            mimeType in setOf(
+                "application/vnd.comicbook+zip",
+                "application/vnd.comicbook-rar",
+                "application/x-cbz",
+                "application/x-cbr",
+                "application/x-cb7",
+                "application/x-cbt"
+            )
+        ) {
+            startViewer(ComicViewerActivity::class.java, uri, mimeType, localFile)
+            return
+        }
+
+
+
+        // 13. Archive formats -> route to MainActivity archive browser (ZipManager)
         if (FileMimeType.supportedArchiveFileType.contains(lowerExt) ||
             FileMimeType.archiveFileType.contains(lowerExt) ||
             isTarCompressed(fileName) ||
@@ -340,6 +384,22 @@ class OpenWithDispatchActivity : BaseActivity() {
                     }
                     label in setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp") -> {
                         startViewer(DocumentViewerActivity::class.java, uri, detectedMime, ensuredFile)
+                        return
+                    }
+                    label == "epub" || detectedMime == "application/epub+zip" ||
+                    label in setOf("mobi", "azw", "azw3", "rtf", "odt", "fb2") -> {
+                        startViewer(EpubViewerActivity::class.java, uri, detectedMime, ensuredFile)
+                        return
+                    }
+                    label in setOf("djvu") || detectedMime in setOf("image/vnd.djvu", "image/djvu", "image/x-djvu") -> {
+                        startViewer(DjvuViewerActivity::class.java, uri, detectedMime, ensuredFile)
+                        return
+                    }
+                    label in setOf("cbz", "cbr", "cb7", "cbt") || detectedMime in setOf(
+                        "application/vnd.comicbook+zip", "application/vnd.comicbook-rar",
+                        "application/x-cbz", "application/x-cbr", "application/x-cb7", "application/x-cbt"
+                    ) -> {
+                        startViewer(ComicViewerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }
                     detectedMime.contains("zip") || detectedMime.contains("archive") ||

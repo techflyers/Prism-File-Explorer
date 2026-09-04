@@ -32,6 +32,36 @@ object FileMimeType {
     @JvmField
     val pptFileType = setOf("ppt", "pptx")
 
+    const val epubFileType = "epub"
+
+    const val djvuFileType = "djvu"
+
+    @JvmField
+    val djvuFileTypes = setOf("djvu", "djv")
+
+    @JvmField
+    val mobiFileType = setOf("mobi", "azw", "azw3", "prc")
+
+    @JvmField
+    val rtfFileType = setOf("rtf", "rtx")
+
+    const val odtFileType = "odt"
+
+    @JvmField
+    val fb2FileType = setOf("fb2")
+
+    @JvmField
+    val ebookFileType = setOf(
+        epubFileType,
+        "mobi", "azw", "azw3", "prc",
+        "rtf", "rtx",
+        "odt",
+        "fb2"
+    )
+
+    @JvmField
+    val comicFileType = setOf("cbz", "cbr", "cb7", "cbt")
+
     @JvmField
     val fontFileType = setOf("ttf", "otf")
 
@@ -44,7 +74,8 @@ object FileMimeType {
         "odt", "ods", "odp", "odg", "odf",
         "txt", "text", "rtf", "rtx", markdownFileType, "markdown",
         "tex", "latex",
-        "epub", "mobi", "azw", "azw3", "fb2", "djvu",
+        epubFileType, "mobi", "azw", "azw3", "fb2", "djvu",
+        "cbz", "cbr", "cb7", "cbt",
         "pages", "numbers", "key", "log", "wps"
     )
 
@@ -70,7 +101,9 @@ object FileMimeType {
         // ZSTD / LZ4
         "zst", "zstd", "tzst", "lz4",
         // Common aliases / wrappers
-        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz", "obb"
+        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz", "obb",
+        // Comic book archives & e-books
+        "cbz", "cbr", "cb7", "cbt", epubFileType
     )
 
     /**
@@ -90,6 +123,8 @@ object FileMimeType {
         "zst", "zstd", "tzst", "lz4",
         // Common aliases / wrappers
         "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz",
+        // Comic book archives & e-books
+        "cbz", "cbr", "cb7", "cbt", epubFileType,
         // APK/APKS handled separately via ApkDialog but also zip-browsable
         "apk", "apks"
     )

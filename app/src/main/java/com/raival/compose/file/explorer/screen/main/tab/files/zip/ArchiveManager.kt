@@ -58,7 +58,9 @@ object ArchiveManager {
         // LZ4 (via Apache Commons Compress fallback)
         "lz4",
         // Common aliases / wrappers / compound outer extensions
-        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz", "apk", "apks", "obb"
+        "jar", "war", "ear", "tgz", "tbz2", "tbz", "txz", "lz", "apk", "apks", "obb",
+        // Comic book archives & e-books
+        "cbz", "cbr", "cb7", "cbt", "epub"
     )
 
     /**

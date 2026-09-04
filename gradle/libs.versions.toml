@@ -42,6 +42,8 @@ sshj = "0.39.0"
 mlkit-text-recognition = "16.0.1"
 commonsCompress = "1.26.2"
 jcifs-ng = "2.1.10"
+xz = "1.10"
+rtfparserkit = "1.16.0"
 
 [libraries]
 accompanist-systemuicontroller = { module = "com.google.accompanist:accompanist-systemuicontroller", version.ref = "accompanistSystemuicontroller" }
@@ -98,6 +100,8 @@ sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit-text-recognition" }
 commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 jcifs-ng = { module = "eu.agno3.jcifs:jcifs-ng", version.ref = "jcifs-ng" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+rtfparserkit = { module = "com.github.joniles:rtfparserkit", version.ref = "rtfparserkit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
