@@ -76,7 +76,12 @@ class VideoPlayerActivity : ViewerActivity() {
                 VideoPlayerScreen(
                     videoUri = videoPlayerInstance.uri,
                     videoPlayerInstance = videoPlayerInstance,
-                    onBackPressed = { finish() }
+                    onBackPressed = { finish() },
+                    onDelete = { uri ->
+                        val deleted = resolveFilePath(uri)?.let { File(it).delete() }
+                            ?: (runCatching { contentResolver.delete(uri, null, null) }.getOrDefault(0) > 0)
+                        if (deleted) finish()
+                    }
                 )
             }
         }

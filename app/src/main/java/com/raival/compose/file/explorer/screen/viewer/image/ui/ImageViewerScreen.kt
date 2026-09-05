@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.BorderOuter
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.WidthFull
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +54,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -106,6 +109,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
     var currentImageBackgroundColorIndex by remember { mutableIntStateOf(0) }
     var showControls by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
     var imageInfo by remember { mutableStateOf<ImageInfo?>(null) }
     var rotationAngle by remember { mutableFloatStateOf(0f) }
     var imageDimensions by remember { mutableStateOf("" to "") }
@@ -357,6 +361,13 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
+                    IconButton(onClick = { showDeleteConfirmation = true }) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
@@ -420,6 +431,33 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
             imageInfo?.let { info ->
                 ImageInfoBottomSheet(imageInfo = info, onDismiss = { showInfo = false })
             }
+        }
+
+        if (showDeleteConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirmation = false },
+                title = { Text(stringResource(R.string.delete_confirmation)) },
+                text = { Text(stringResource(R.string.delete_confirmation_message)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirmation = false
+                        val path = imageInfo?.path
+                        val deleted = if (!path.isNullOrEmpty()) {
+                            java.io.File(path).delete()
+                        } else {
+                            runCatching { context.contentResolver.delete(currentUri, null, null) }.getOrDefault(0) > 0
+                        }
+                        if (deleted) (context as? ViewerActivity)?.finish()
+                    }) {
+                        Text(stringResource(R.string.confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirmation = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            )
         }
     }
 }

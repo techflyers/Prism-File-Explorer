@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Brightness5
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.OpenInNew
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -61,6 +63,7 @@ import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -106,7 +109,8 @@ private val SPEED_OPTIONS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
 fun VideoPlayerScreen(
     videoUri: Uri,
     videoPlayerInstance: VideoPlayerInstance,
-    onBackPressed: () -> Unit
+    onBackPressed: () -> Unit,
+    onDelete: (Uri) -> Unit
 ) {
     val context = LocalContext.current
     val playerState by videoPlayerInstance.playerState.collectAsState()
@@ -127,6 +131,7 @@ fun VideoPlayerScreen(
 
     // Playlist bottom sheet visibility
     var showPlaylist by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
@@ -321,6 +326,7 @@ fun VideoPlayerScreen(
                     },
                     onPlayNext = { videoPlayerInstance.playNext() },
                     onPlayPrevious = { videoPlayerInstance.playPrevious() },
+                    onDelete = { showDeleteConfirmation = true },
                     onOpenWith = {
                         val openIntent = Intent(Intent.ACTION_VIEW).apply {
                             data = videoUri
@@ -383,6 +389,29 @@ fun VideoPlayerScreen(
                 )
             }
 
+            if (showDeleteConfirmation && !playerState.isInPictureInPicture) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmation = false },
+                    title = { Text(context.getString(com.raival.compose.file.explorer.R.string.delete_confirmation)) },
+                    text = { Text(context.getString(com.raival.compose.file.explorer.R.string.delete_confirmation_message)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showDeleteConfirmation = false
+                            val currentVideoUri = playerState.playlist
+                                .getOrNull(playerState.currentPlaylistIndex) ?: videoUri
+                            onDelete(currentVideoUri)
+                        }) {
+                            Text(context.getString(com.raival.compose.file.explorer.R.string.confirm))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirmation = false }) {
+                            Text(context.getString(com.raival.compose.file.explorer.R.string.cancel))
+                        }
+                    }
+                )
+            }
+
             // Loading indicator
             if (playerState.isLoading) {
                 Box(
@@ -432,6 +461,7 @@ fun VideoControls(
     onPlayNext: () -> Unit,
     onPlayPrevious: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
+    onDelete: () -> Unit,
 ) {
     val defaultColor = colorScheme.surface
 
@@ -460,7 +490,9 @@ fun VideoControls(
             onEnterPiP = onEnterPiP,
             onPlaylistClick = onPlaylistClick,
             onOpenWith = onOpenWith,
+            onDelete = onDelete,
             modifier = Modifier.align(Alignment.TopStart)
+
         )
 
         // Center controls
@@ -496,6 +528,7 @@ fun TopBar(
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
+    onDelete: () -> Unit,
     modifier: Modifier,
 ) {
     Row(
@@ -586,6 +619,14 @@ fun TopBar(
             Icon(
                 imageVector = if (playerState.isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                 contentDescription = null,
+                tint = colorScheme.onSurface
+            )
+        }
+
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete",
                 tint = colorScheme.onSurface
             )
         }
