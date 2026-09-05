@@ -1,12 +1,14 @@
 package com.raival.compose.file.explorer.screen.viewer
 
 import android.net.Uri
+import android.provider.MediaStore
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.base.BaseActivity
 import com.raival.compose.file.explorer.common.emptyString
 import com.raival.compose.file.explorer.common.randomString
+import com.raival.compose.file.explorer.screen.main.tab.home.HomeTab
 
 abstract class ViewerActivity : BaseActivity() {
     private var uri: Uri? = null
@@ -56,6 +58,24 @@ abstract class ViewerActivity : BaseActivity() {
         super.onDestroy()
         currentInstance?.onClose()
         globalClass.viewersManager.instances.remove(currentInstance)
+    }
+
+    /**
+     * Removes stale MediaStore and in-memory Recent Files references after a viewer deletion.
+     */
+    fun onFileDeleted(path: String?) {
+        if (!path.isNullOrEmpty()) {
+            runCatching {
+                contentResolver.delete(
+                    MediaStore.Files.getContentUri("external"),
+                    "${MediaStore.Files.FileColumns.DATA} = ?",
+                    arrayOf(path)
+                )
+            }
+            globalClass.mainActivityManager.state.value.tabs
+                .filterIsInstance<HomeTab>()
+                .forEach { it.removeRecentFile(path) }
+        }
     }
 
     override fun onPermissionGranted() {

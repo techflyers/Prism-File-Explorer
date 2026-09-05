@@ -484,7 +484,7 @@ object StorageProvider {
                 val name = it.getString(columnName)
                 val lastModified = it.getLong(columnLastModified)
 
-                if (filePath != null && name != null) {
+                if (filePath != null && name != null && File(filePath).isFile) {
                     recentFiles.add(
                         RecentFile(
                             name,

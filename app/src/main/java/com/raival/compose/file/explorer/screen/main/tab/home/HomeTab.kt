@@ -83,6 +83,13 @@ class HomeTab : Tab() {
         fetchRecentFiles()
     }
 
+    fun removeRecentFile(path: String) {
+        val canonicalPath = runCatching { File(path).canonicalPath }.getOrDefault(path)
+        recentFiles.removeAll { recent ->
+            runCatching { File(recent.path).canonicalPath }.getOrDefault(recent.path) == canonicalPath
+        }
+    }
+
     private val _mainCategories by lazy {
         val mainActivityManager = globalClass.mainActivityManager
         listOf(

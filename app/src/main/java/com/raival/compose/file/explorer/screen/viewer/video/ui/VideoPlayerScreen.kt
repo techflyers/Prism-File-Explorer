@@ -110,7 +110,7 @@ fun VideoPlayerScreen(
     videoUri: Uri,
     videoPlayerInstance: VideoPlayerInstance,
     onBackPressed: () -> Unit,
-    onDelete: (Uri) -> Unit
+    onDelete: (Uri) -> Boolean
 ) {
     val context = LocalContext.current
     val playerState by videoPlayerInstance.playerState.collectAsState()
@@ -397,9 +397,19 @@ fun VideoPlayerScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             showDeleteConfirmation = false
+                            val deletedIndex = playerState.currentPlaylistIndex
                             val currentVideoUri = playerState.playlist
-                                .getOrNull(playerState.currentPlaylistIndex) ?: videoUri
-                            onDelete(currentVideoUri)
+                                .getOrNull(deletedIndex) ?: videoUri
+                            if (onDelete(currentVideoUri)) {
+                                val remaining = videoPlayerInstance.removePlaylistItem(deletedIndex)
+                                if (remaining.isEmpty()) {
+                                    onBackPressed()
+                                } else {
+                                    videoPlayerInstance.playPlaylistItem(
+                                        deletedIndex.coerceAtMost(remaining.lastIndex)
+                                    )
+                                }
+                            }
                         }) {
                             Text(context.getString(com.raival.compose.file.explorer.R.string.confirm))
                         }

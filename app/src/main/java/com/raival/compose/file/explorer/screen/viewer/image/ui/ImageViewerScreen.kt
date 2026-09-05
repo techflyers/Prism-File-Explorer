@@ -66,6 +66,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -95,6 +96,7 @@ import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerInstance
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo.Companion.extractImageInfo
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
@@ -116,7 +118,9 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
     var contentScale by remember { mutableStateOf(ContentScale.Fit) }
     val context = LocalContext.current
 
-    val imageList = instance.imageList.ifEmpty { listOf(instance.uri) }
+    val scope = rememberCoroutineScope()
+    var imageUris by remember { mutableStateOf(instance.imageList.ifEmpty { listOf(instance.uri) }) }
+    val imageList = imageUris
     val pagerState = rememberPagerState(
         initialPage = instance.initialIndex.coerceIn(0, (imageList.size - 1).coerceAtLeast(0)),
         pageCount = { imageList.size }
@@ -136,6 +140,12 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                 imageDimensions = "" to ""
                 imageInfo = null
             }
+    }
+
+    LaunchedEffect(currentUri) {
+        rotationAngle = 0f
+        imageDimensions = "" to ""
+        imageInfo = null
     }
 
     LaunchedEffect(currentUri, imageDimensions.first) {
@@ -442,12 +452,25 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                     TextButton(onClick = {
                         showDeleteConfirmation = false
                         val path = imageInfo?.path
+                        val viewerActivity = context as? ViewerActivity
                         val deleted = if (!path.isNullOrEmpty()) {
                             java.io.File(path).delete()
                         } else {
                             runCatching { context.contentResolver.delete(currentUri, null, null) }.getOrDefault(0) > 0
                         }
-                        if (deleted) (context as? ViewerActivity)?.finish()
+                        if (deleted) {
+                            viewerActivity?.onFileDeleted(path)
+                            val deletedIndex = pagerState.currentPage
+                            val remaining = imageList.filterIndexed { index, _ -> index != deletedIndex }
+                            imageUris = remaining
+                            if (remaining.isEmpty()) {
+                                viewerActivity?.finish()
+                            } else {
+                                scope.launch {
+                                    pagerState.animateScrollToPage(deletedIndex.coerceAtMost(remaining.lastIndex))
+                                }
+                            }
+                        }
                     }) {
                         Text(stringResource(R.string.confirm))
                     }

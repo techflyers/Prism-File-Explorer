@@ -178,6 +178,23 @@ class VideoPlayerInstance(
         _playerState.update { it.copy(repeatMode = newMode) }
     }
 
+    fun removePlaylistItem(index: Int): List<Uri> {
+        val player = exoPlayer ?: return _playerState.value.playlist
+        if (index !in 0 until player.mediaItemCount) return _playerState.value.playlist
+
+        player.removeMediaItem(index)
+        val remaining = List(player.mediaItemCount) { itemIndex ->
+            player.getMediaItemAt(itemIndex).localConfiguration?.uri ?: uri
+        }
+        _playerState.update { state ->
+            state.copy(
+                playlist = remaining,
+                currentPlaylistIndex = state.currentPlaylistIndex.coerceAtMost((remaining.size - 1).coerceAtLeast(0))
+            )
+        }
+        return remaining
+    }
+
     fun playPlaylistItem(index: Int) {
         exoPlayer?.let { player ->
             if (index in 0 until player.mediaItemCount) {

@@ -78,9 +78,14 @@ class VideoPlayerActivity : ViewerActivity() {
                     videoPlayerInstance = videoPlayerInstance,
                     onBackPressed = { finish() },
                     onDelete = { uri ->
-                        val deleted = resolveFilePath(uri)?.let { File(it).delete() }
-                            ?: (runCatching { contentResolver.delete(uri, null, null) }.getOrDefault(0) > 0)
-                        if (deleted) finish()
+                        val path = resolveFilePath(uri)
+                        val deleted = if (path != null) {
+                            File(path).delete()
+                        } else {
+                            runCatching { contentResolver.delete(uri, null, null) }.getOrDefault(0) > 0
+                        }
+                        if (deleted) onFileDeleted(path)
+                        deleted
                     }
                 )
             }
@@ -214,7 +219,7 @@ class VideoPlayerActivity : ViewerActivity() {
      */
     private fun resolveFilePath(uri: Uri): String? {
         val extraPath = intent.getStringExtra("extra_file_path")
-        if (!extraPath.isNullOrEmpty() && File(extraPath).exists()) {
+        if (uri == intent.data && !extraPath.isNullOrEmpty() && File(extraPath).exists()) {
             return extraPath
         }
 
