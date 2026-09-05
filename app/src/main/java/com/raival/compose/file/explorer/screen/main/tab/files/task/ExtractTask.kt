@@ -68,6 +68,7 @@ class ExtractTask(
             processName = globalClass.resources.getString(R.string.preparing)
             progress = 0f
             totalContent = archives.size
+            remainingContent = archives.size
         }
 
         try {
@@ -83,7 +84,7 @@ class ExtractTask(
 
                 progressMonitor.apply {
                     contentName = archive.displayName
-                    remainingContent = archives.size - (index + 1)
+                    remainingContent = archives.size - index
                     progress = archiveBaseProgress.coerceIn(0f, 1f)
                     processName = "Extracting (${(archiveBaseProgress * 100).toInt()}%)"
                 }
@@ -144,6 +145,8 @@ class ExtractTask(
                         }
                         return
                     }
+
+                    progressMonitor.remainingContent = archives.size - (index + 1)
                 }
             }
 

@@ -303,7 +303,7 @@ class ZipFileHolder(
             } else sizeStr
         }
 
-        return "$leftSide\t$rightSide"
+        return if (leftSide.isNotEmpty()) "$leftSide\t $rightSide" else "\t$rightSide"
     }
 
     private suspend fun getFormattedIconCount(): String {

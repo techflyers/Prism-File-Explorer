@@ -103,7 +103,7 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                                     "FTP" -> "21"
                                     "SFTP" -> "22"
                                     "LAN/SMB" -> "445"
-                                    "WebDav" -> "80"
+                                    "WebDav" -> if (webdavProtocol == "https") "443" else "80"
                                     else -> "21"
                                 }
                             },
@@ -362,17 +362,39 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                 modifier = Modifier.align(Alignment.Start)
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(
-                    selected = webdavProtocol == "http",
-                    onClick = { webdavProtocol = "http" }
-                )
-                Text("HTTP")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable {
+                        webdavProtocol = "http"
+                        if (port == "443") port = "80"
+                    }
+                ) {
+                    RadioButton(
+                        selected = webdavProtocol == "http",
+                        onClick = {
+                            webdavProtocol = "http"
+                            if (port == "443") port = "80"
+                        }
+                    )
+                    Text("HTTP")
+                }
                 Spacer(modifier = Modifier.width(20.dp))
-                RadioButton(
-                    selected = webdavProtocol == "https",
-                    onClick = { webdavProtocol = "https" }
-                )
-                Text("HTTPS")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable {
+                        webdavProtocol = "https"
+                        if (port == "80") port = "443"
+                    }
+                ) {
+                    RadioButton(
+                        selected = webdavProtocol == "https",
+                        onClick = {
+                            webdavProtocol = "https"
+                            if (port == "80") port = "443"
+                        }
+                    )
+                    Text("HTTPS")
+                }
             }
         }
 
@@ -388,12 +410,19 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                 onClick = {
                     isTesting = true
                     scope.launch {
+                        val defaultPort = when (selectedType) {
+                            "FTP" -> 21
+                            "SFTP" -> 22
+                            "LAN/SMB" -> 445
+                            "WebDav" -> if (webdavProtocol == "https") 443 else 80
+                            else -> 21
+                        }
                         val connectionModel = NetworkConnectionModel(
                             id = UUID.randomUUID().toString(),
                             name = name.ifEmpty { "Test Server" },
                             type = selectedType,
                             host = host,
-                            port = port.toIntOrNull() ?: 21,
+                            port = port.toIntOrNull() ?: defaultPort,
                             username = username,
                             password = password,
                             rootPath = rootPath,
@@ -446,12 +475,19 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
             Button(
                 onClick = {
                     val finalName = name.ifEmpty { "$selectedType - $host" }
+                    val defaultPort = when (selectedType) {
+                        "FTP" -> 21
+                        "SFTP" -> 22
+                        "LAN/SMB" -> 445
+                        "WebDav" -> if (webdavProtocol == "https") 443 else 80
+                        else -> 21
+                    }
                     val connectionModel = NetworkConnectionModel(
                         id = UUID.randomUUID().toString(),
                         name = finalName,
                         type = selectedType,
                         host = host,
-                        port = port.toIntOrNull() ?: 21,
+                        port = port.toIntOrNull() ?: defaultPort,
                         username = username,
                         password = password,
                         rootPath = rootPath,

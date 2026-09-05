@@ -327,6 +327,7 @@ fun Context.isDarkTheme() = (resources.configuration.uiMode
 
 fun CodeEditor.setContent(content: Content, fileInstance: TextEditorManager.FileInstance) {
     setText(content.toString())
+    fileInstance.content = text
     post {
         try {
             setSelectionRegion(

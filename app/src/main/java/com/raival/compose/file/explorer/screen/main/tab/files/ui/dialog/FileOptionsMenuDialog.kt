@@ -107,9 +107,24 @@ fun FileOptionsMenuDialog(
                 if (details.isEmpty()) details = targetContentHolder.getDetails()
             }
 
+            val formattedSubtitle = remember(details) {
+                if (details.contains("\t")) {
+                    val parts = details.split("\t", limit = 2)
+                    val left = parts.getOrNull(0)?.trim().orEmpty()
+                    val right = parts.getOrNull(1)?.trim().orEmpty()
+                    if (left.isNotEmpty() && right.isNotEmpty()) {
+                        "$left $right"
+                    } else {
+                        left.ifEmpty { right }
+                    }
+                } else {
+                    details
+                }
+            }
+
             ItemRow(
                 title = targetContentHolder.displayName,
-                subtitle = details,
+                subtitle = formattedSubtitle,
                 ignoreSizePreferences = true,
                 icon = {
                     FileIcon(

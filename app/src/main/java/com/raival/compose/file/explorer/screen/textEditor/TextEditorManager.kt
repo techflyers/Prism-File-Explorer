@@ -215,16 +215,11 @@ class TextEditorManager {
                 onFinish?.invoke()
             }
             onConfirm = {
-                save(
-                    onSaved = {
-                        save(fileInstance) {
-                            globalClass.showMsg(R.string.saved)
-                            fileInstanceList.remove(fileInstance)
-                            onFinish?.invoke()
-                        }
-                    },
-                    onFailed = { globalClass.showMsg(R.string.failed_to_save) }
-                )
+                save(fileInstance) {
+                    globalClass.showMsg(R.string.saved)
+                    fileInstanceList.remove(fileInstance)
+                    onFinish?.invoke()
+                }
                 showWarningDialog = false
             }
             showWarningDialog = true
@@ -237,6 +232,7 @@ class TextEditorManager {
             try {
                 fileInstance.apply {
                     file.writeText(fileInstance.content.toString())
+                    file.resetCachedTimestamp()
                     lastModified = fileInstance.file.lastModified
                     requireSave = false
                     requireSaveCurrentFile = false
@@ -259,6 +255,7 @@ class TextEditorManager {
             try {
                 getFileInstance()?.let { instance ->
                     activeFile.writeText(instance.content.toString())
+                    activeFile.resetCachedTimestamp()
                     instance.lastModified = activeFile.lastModified
                     instance.requireSave = false
                     requireSaveCurrentFile = false

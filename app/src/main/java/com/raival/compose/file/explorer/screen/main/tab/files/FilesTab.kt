@@ -628,9 +628,9 @@ class FilesTab(
     }
 
     // Called when a new file/folder is created
-    fun onNewFileCreated(newFile: ContentHolder, openFolder: Boolean = false) {
+    fun onNewFileCreated(newFile: ContentHolder, openContent: Boolean = false, context: Context? = null) {
         scope.launch {
-            if (openFolder) {
+            if (openContent && newFile.isFolder) {
                 openFolderImpl(newFile)
             } else {
                 highlightedFiles.apply {
@@ -644,6 +644,10 @@ class FilesTab(
                             activeFolderContent.getIndexIf { displayName == newFile.displayName }
                         if (newItemIndex > -1) {
                             getFileListState().scrollToItem(newItemIndex, 0)
+                        }
+                        if (openContent && !newFile.isFolder) {
+                            val ctx = context ?: globalClass
+                            openFile(ctx, newFile)
                         }
                     }
                 }

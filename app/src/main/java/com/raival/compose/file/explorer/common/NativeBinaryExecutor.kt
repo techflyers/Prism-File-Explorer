@@ -82,10 +82,27 @@ object NativeBinaryExecutor {
         try {
             val process = pb.start()
             val outputBuilder = StringBuilder()
-            val buffer = ByteArray(2048)
+            val charBuffer = CharArray(1024)
             val lineBuffer = StringBuilder()
-            val percentPattern = java.util.regex.Pattern.compile("([0-9]{1,3})\\s*%")
-            val stream = process.inputStream
+            val streamReader = java.io.InputStreamReader(process.inputStream, Charsets.UTF_8)
+
+            var lastReportedPercent = -1f
+            var lastReportedFile = ""
+
+            fun evaluateProgress(line: String) {
+                val (percent, fileName) = parseProgress(line)
+                if (percent != null && percent >= 0f) {
+                    val effectiveFile = if (fileName.isNotEmpty()) fileName else lastReportedFile
+                    if (percent != lastReportedPercent || effectiveFile != lastReportedFile) {
+                        lastReportedPercent = percent
+                        lastReportedFile = effectiveFile
+                        onProgressUpdate?.invoke(percent, effectiveFile)
+                    }
+                } else if (fileName.isNotEmpty() && fileName != lastReportedFile) {
+                    lastReportedFile = fileName
+                    onProgressUpdate?.invoke(-1f, fileName)
+                }
+            }
 
             while (true) {
                 if (isAborted?.invoke() == true) {
@@ -99,32 +116,44 @@ object NativeBinaryExecutor {
                     )
                 }
 
-                val read = stream.read(buffer)
+                val read = streamReader.read(charBuffer)
                 if (read == -1) break
 
-                val textChunk = String(buffer, 0, read, Charsets.UTF_8)
-                outputBuilder.append(textChunk)
+                outputBuilder.append(charBuffer, 0, read)
 
                 if (onProgressUpdate != null) {
                     for (i in 0 until read) {
-                        val c = buffer[i].toInt().toChar()
-                        if (c == '\r' || c == '\n') {
-                            val line = lineBuffer.toString().trim()
-                            lineBuffer.clear()
-                            if (line.isNotEmpty()) {
-                                parseAndReportProgress(line, percentPattern, onProgressUpdate)
+                        val c = charBuffer[i]
+                        when (c) {
+                            '\b' -> {
+                                // 7-Zip on Linux/Android uses \b to clear the previous progress line
+                                if (lineBuffer.isNotEmpty()) {
+                                    lineBuffer.deleteCharAt(lineBuffer.length - 1)
+                                }
                             }
-                        } else {
-                            lineBuffer.append(c)
-                            if (c == '%' && lineBuffer.length in 2..15) {
-                                parseAndReportProgress(lineBuffer.toString(), percentPattern, onProgressUpdate)
-                            }
-                            if (lineBuffer.length > 500) {
+                            '\r', '\n' -> {
+                                val line = lineBuffer.toString().trim()
                                 lineBuffer.clear()
+                                if (line.isNotEmpty()) {
+                                    evaluateProgress(line)
+                                }
+                            }
+                            else -> {
+                                lineBuffer.append(c)
                             }
                         }
                     }
+
+                    // 7-Zip flushes after printing progress without emitting \r or \n.
+                    // If lineBuffer contains a complete progress string, evaluate it immediately.
+                    if (lineBuffer.isNotEmpty()) {
+                        evaluateProgress(lineBuffer.toString().trim())
+                    }
                 }
+            }
+
+            if (onProgressUpdate != null && lineBuffer.isNotEmpty()) {
+                evaluateProgress(lineBuffer.toString().trim())
             }
 
             val exitCode = process.waitFor()
@@ -141,29 +170,49 @@ object NativeBinaryExecutor {
         }
     }
 
-    private fun parseAndReportProgress(
-        line: String,
-        pattern: java.util.regex.Pattern,
-        onProgressUpdate: (progressPercent: Float, statusText: String) -> Unit
-    ) {
-        val matcher = pattern.matcher(line)
+    private val PERCENT_PATTERN = java.util.regex.Pattern.compile("(\\d{1,3})\\s*%")
+    private val ACTION_REGEX = Regex("""%\s*\d*\.?\s*([+\-U])\s+""")
+
+    internal fun parseProgress(line: String): Pair<Float?, String> {
+        val cleanLine = line.trim()
+        val matcher = PERCENT_PATTERN.matcher(cleanLine)
         val percent = if (matcher.find()) {
-            matcher.group(1)?.toIntOrNull()
+            val p = matcher.group(1)?.toIntOrNull()
+            p?.let { (it / 100f).coerceIn(0f, 1f) }
         } else null
 
-        val fileName = when {
-            line.contains(" - ") -> line.substringAfter(" - ").trim().substringAfterLast('/')
-            line.contains(" + ") -> line.substringAfter(" + ").trim().substringAfterLast('/')
-            line.contains("Extracting ") -> line.substringAfter("Extracting").trim().substringAfterLast('/')
-            line.contains("Compressing ") -> line.substringAfter("Compressing").trim().substringAfterLast('/')
-            else -> ""
+        val fileName = extractFileName(cleanLine)
+        return Pair(percent, fileName)
+    }
+
+    internal fun extractFileName(line: String): String {
+        val cleanLine = line.trim()
+        val actionIndex = when {
+            cleanLine.contains(" + ") -> cleanLine.indexOf(" + ") + 3
+            cleanLine.contains(" - ") -> cleanLine.indexOf(" - ") + 3
+            cleanLine.contains(" U ") -> cleanLine.indexOf(" U ") + 3
+            cleanLine.contains("Extracting ") -> cleanLine.indexOf("Extracting ") + 11
+            cleanLine.contains("Compressing ") -> cleanLine.indexOf("Compressing ") + 12
+            cleanLine.startsWith("+ ") -> 2
+            cleanLine.startsWith("- ") -> 2
+            cleanLine.startsWith("U ") -> 2
+            else -> {
+                val match = ACTION_REGEX.find(cleanLine)
+                if (match != null) {
+                    match.range.last + 1
+                } else {
+                    -1
+                }
+            }
         }
 
-        if (percent != null) {
-            val progressFloat = (percent / 100f).coerceIn(0f, 1f)
-            onProgressUpdate(progressFloat, fileName)
-        } else if (fileName.isNotEmpty()) {
-            onProgressUpdate(-1f, fileName)
+        if (actionIndex != -1 && actionIndex < cleanLine.length) {
+            val rawPath = cleanLine.substring(actionIndex).trim()
+            val fileName = rawPath.substringAfterLast('/').substringAfterLast('\\').trim()
+            if (fileName.isNotEmpty() && !fileName.startsWith("%")) {
+                return fileName
+            }
         }
+        return ""
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +45,7 @@ fun CreateNewFileDialog(
     onDismissRequest: () -> Unit
 ) {
     if (show) {
+        val context = LocalContext.current
         var isOpenFileDirectly by remember { mutableStateOf(false) }
         val listContent by remember(tab.activeFolderContent) {
             mutableStateOf(tab.activeFolderContent.map { it.displayName }.toTypedArray())
@@ -157,7 +159,11 @@ fun CreateNewFileDialog(
                                             if (newFile == null) {
                                                 globalClass.showMsg(R.string.failed_to_create_file)
                                             } else {
-                                                tab.onNewFileCreated(newFile)
+                                                tab.onNewFileCreated(
+                                                    newFile,
+                                                    isOpenFileDirectly,
+                                                    context
+                                                )
                                             }
                                         }
                                     } else {
@@ -191,7 +197,8 @@ fun CreateNewFileDialog(
                                             } else {
                                                 tab.onNewFileCreated(
                                                     newFile,
-                                                    isOpenFileDirectly
+                                                    isOpenFileDirectly,
+                                                    context
                                                 )
                                             }
                                         }

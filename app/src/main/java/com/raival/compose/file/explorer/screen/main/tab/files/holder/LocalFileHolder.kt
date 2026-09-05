@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
+import android.media.MediaScannerConnection
 import android.os.ParcelFileDescriptor
 import androidx.core.content.FileProvider
 import com.anggrayudi.storage.file.getBasePath
@@ -66,12 +67,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override val isFolder: Boolean by lazy { file.isDirectory }
 
     override val lastModified: Long
-        get() {
-            if (timestamp == -1L) timestamp = file.lastModified()
-            return timestamp
+        get() = file.lastModified().also {
+            if (timestamp == -1L) timestamp = it
         }
 
-    override val size: Long by lazy { file.length() }
+    override val size: Long
+        get() = file.length()
 
     override val uniquePath: String by lazy { file.absolutePath }
 
@@ -157,7 +158,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
             }
         }
 
-        return "$leftSide\t$rightSide".also {
+        return (if (leftSide.isNotEmpty()) "$leftSide\t $rightSide" else "\t$rightSide").also {
             details = it
             detailsCache.put(cacheKey, it)
         }
@@ -407,10 +408,13 @@ class LocalFileHolder(file: File) : ContentHolder() {
 
     fun exists() = runBlocking { isValid() }
 
-    fun hasSourceChanged() = timestamp isNot -1L && lastModified isNot timestamp
+    fun hasSourceChanged(): Boolean {
+        val current = file.lastModified()
+        return timestamp != -1L && current != timestamp
+    }
 
     fun resetCachedTimestamp() {
-        timestamp = lastModified
+        timestamp = file.lastModified()
     }
 
     fun getAppsHandlingFile(mimeType: String = emptyString): List<OpenWithActivityHolder> {
@@ -483,6 +487,16 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 throw e
             }
         }
+        details = emptyString
+        resetCachedTimestamp()
+        try {
+            MediaScannerConnection.scanFile(
+                globalClass,
+                arrayOf(file.absolutePath),
+                null,
+                null
+            )
+        } catch (_: Exception) {}
     }
 
     fun readText(): String {

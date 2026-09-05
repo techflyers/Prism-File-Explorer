@@ -105,6 +105,7 @@ class CompressTask(
 
         progressMonitor.apply {
             totalContent = pendingContent.size
+            remainingContent = pendingContent.size
             processName = "${globalClass.getString(R.string.compressing)} (0%)"
             progress = 0f
         }
@@ -113,8 +114,8 @@ class CompressTask(
         val destPath = parameters!!.destPath
         val destExt = destPath.substringAfterLast('.', "").lowercase()
 
-        // lib7za handles all formats except zip (which keeps zip4j for AES-256 password support)
-        val useNativeCompression = ArchiveManager.isNativeCompressFormat(destExt) && destExt != "zip"
+        // lib7za handles all formats including zip
+        val useNativeCompression = ArchiveManager.isNativeCompressFormat(destExt)
 
         try {
             if (aborted) {
@@ -124,7 +125,15 @@ class CompressTask(
 
             if (useNativeCompression) {
                 // Native compression via lib7za
-                val sourcePaths = pendingContent.map { it.content.uniquePath }
+                val parentPath = sourceContent.firstOrNull()?.getParent()?.uniquePath?.takeIf {
+                    it.isNotEmpty() && File(it).isDirectory
+                }
+                val sourcePaths = if (parentPath != null) {
+                    pendingContent.map { it.content.displayName }
+                } else {
+                    pendingContent.map { it.content.uniquePath }
+                }
+
                 progressMonitor.apply {
                     processName = "${globalClass.getString(R.string.compressing)} (0%)"
                     progress = 0f
@@ -134,17 +143,19 @@ class CompressTask(
                     archivePath = destPath,
                     password = parameters?.password,
                     compressionLevel = parameters?.compressionLevel ?: 5,
+                    workingDir = parentPath,
                     isAborted = { aborted },
                     onProgress = { subPercent, currentFile ->
                         if (aborted) return@compress
                         if (subPercent >= 0f) {
                             val pct = subPercent.coerceIn(0.01f, 0.99f)
+                            val pctInt = (pct * 100).toInt()
                             progressMonitor.apply {
                                 progress = pct
                                 if (currentFile.isNotEmpty()) {
                                     contentName = currentFile
                                 }
-                                processName = "Compressing (${(pct * 100).toInt()}%)"
+                                processName = "${globalClass.getString(R.string.compressing)} ($pctInt%)"
                             }
                         } else if (currentFile.isNotEmpty()) {
                             progressMonitor.contentName = currentFile
@@ -156,12 +167,15 @@ class CompressTask(
                     return
                 }
             } else {
-                // ZIP creation via zip4j (supports AES-256 password encryption)
+                // Fallback ZIP creation via zip4j with active background progress tracking
                 val pwd = parameters?.password
                 ZipFile(destPath).use { zipOut ->
                     if (!pwd.isNullOrEmpty()) {
                         zipOut.setPassword(pwd.toCharArray())
                     }
+                    zipOut.isRunInThread = true
+                    val pm = zipOut.progressMonitor
+
                     pendingContent.forEachIndexed { index, itemToCompress ->
                         if (aborted) {
                             markAsAborted()
@@ -169,15 +183,9 @@ class CompressTask(
                         }
 
                         if (itemToCompress.status == TaskContentStatus.PENDING) {
-                            val progressPercent =
-                                (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
-                            val pct = (progressPercent * 100).toInt()
-
                             progressMonitor.apply {
                                 contentName = itemToCompress.content.displayName
-                                remainingContent = pendingContent.size - (index + 1)
-                                progress = progressPercent
-                                processName = "${globalClass.getString(R.string.compressing)} ($pct%)"
+                                remainingContent = pendingContent.size - index
                             }
 
                             try {
@@ -186,6 +194,33 @@ class CompressTask(
                                 } else {
                                     addFileToZip(zipOut, itemToCompress.content)
                                 }
+
+                                while (pm.state == net.lingala.zip4j.progress.ProgressMonitor.State.BUSY) {
+                                    if (aborted) {
+                                        pm.isCancelAllTasks = true
+                                        markAsAborted()
+                                        return
+                                    }
+                                    val subPct = (pm.percentDone / 100f).coerceIn(0f, 1f)
+                                    val overallProgress =
+                                        ((index + subPct) / pendingContent.size).coerceIn(0f, 0.99f)
+                                    val pct = (overallProgress * 100).toInt()
+
+                                    progressMonitor.apply {
+                                        if (!pm.fileName.isNullOrEmpty()) {
+                                            contentName = pm.fileName.substringAfterLast('/')
+                                        }
+                                        remainingContent = pendingContent.size - index
+                                        progress = overallProgress
+                                        processName = "${globalClass.getString(R.string.compressing)} ($pct%)"
+                                    }
+                                    kotlinx.coroutines.delay(50)
+                                }
+
+                                if (pm.result == net.lingala.zip4j.progress.ProgressMonitor.Result.ERROR) {
+                                    throw pm.exception ?: Exception("zip4j compression error")
+                                }
+
                                 itemToCompress.status = TaskContentStatus.SUCCESS
                             } catch (e: Exception) {
                                 logger.logError(e)

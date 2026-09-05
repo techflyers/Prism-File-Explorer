@@ -961,6 +961,7 @@ object ArchiveManager {
         archivePath: String,
         password: String? = null,
         compressionLevel: Int = 5,
+        workingDir: String? = null,
         isAborted: (() -> Boolean)? = null,
         onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) = withContext(Dispatchers.IO) {
@@ -973,8 +974,8 @@ object ArchiveManager {
         }
 
         when (ext) {
-            "tgz", "tbz2", "txz" -> compressCompound(sourcePaths, archivePath, ext, compressionLevel, isAborted, onProgress)
-            else -> compressSimple(sourcePaths, archivePath, ext, password, compressionLevel, isAborted, onProgress)
+            "tgz", "tbz2", "txz" -> compressCompound(sourcePaths, archivePath, ext, compressionLevel, workingDir, isAborted, onProgress)
+            else -> compressSimple(sourcePaths, archivePath, ext, password, compressionLevel, workingDir, isAborted, onProgress)
         }
     }
 
@@ -984,6 +985,7 @@ object ArchiveManager {
         ext: String,
         password: String?,
         compressionLevel: Int,
+        workingDir: String? = null,
         isAborted: (() -> Boolean)? = null,
         onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) {
@@ -1005,6 +1007,8 @@ object ArchiveManager {
             args.add("-p$password")
             if (ext == "7z") {
                 args.add("-mhe=on")
+            } else if (ext == "zip") {
+                args.add("-mem=AES256")
             }
         }
 
@@ -1015,6 +1019,7 @@ object ArchiveManager {
             context = globalClass,
             binaryName = "lib7za.so",
             arguments = args,
+            workingDir = workingDir,
             isAborted = isAborted,
             onProgressUpdate = onProgress
         )
@@ -1039,6 +1044,7 @@ object ArchiveManager {
         archivePath: String,
         compoundExt: String,
         compressionLevel: Int,
+        workingDir: String? = null,
         isAborted: (() -> Boolean)? = null,
         onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) {
@@ -1053,6 +1059,7 @@ object ArchiveManager {
                 context = globalClass,
                 binaryName = "lib7za.so",
                 arguments = tarArgs,
+                workingDir = workingDir,
                 isAborted = isAborted,
                 onProgressUpdate = { pct, file ->
                     if (pct >= 0f) {

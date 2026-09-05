@@ -80,7 +80,7 @@ class RemoteFileHolder(
             size.toFormattedSize()
         }
 
-        return "$leftSide\t$rightSide".also { details = it }
+        return (if (leftSide.isNotEmpty()) "$leftSide\t $rightSide" else "\t$rightSide").also { details = it }
     }
 
     override suspend fun listContent(): ArrayList<out ContentHolder> {

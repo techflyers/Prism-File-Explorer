@@ -746,7 +746,8 @@ private fun FileDetails(
     isHighlighted: Boolean,
     sourceInfo: SourceFolderInfo? = null
 ) {
-    val initialDetails = remember(currentItemPath) {
+    val detailsKey = "${item.uniquePath}_${item.lastModified}_${item.size}"
+    val initialDetails = remember(detailsKey) {
         if (item is LocalFileHolder && item.details.isNotEmpty()) {
             item.details
         } else if (item is LocalFileHolder) {
@@ -756,13 +757,9 @@ private fun FileDetails(
         }
     }
 
-    var details by remember(
-        key1 = currentItemPath
-    ) { mutableStateOf(initialDetails) }
+    var details by remember(detailsKey) { mutableStateOf(initialDetails) }
 
-    LaunchedEffect(
-        key1 = currentItemPath
-    ) {
+    LaunchedEffect(detailsKey) {
         if (details.isEmpty()) {
             val det = withContext(IO) {
                 item.getDetails()
@@ -847,7 +844,8 @@ private fun FileDetailsCompact(
     isHighlighted: Boolean
 ) {
     Isolate {
-        val initialDetails = remember(currentItemPath) {
+        val detailsKey = "${item.uniquePath}_${item.lastModified}_${item.size}"
+        val initialDetails = remember(detailsKey) {
             if (item is LocalFileHolder && item.details.isNotEmpty()) {
                 item.details
             } else if (item is LocalFileHolder) {
@@ -857,13 +855,9 @@ private fun FileDetailsCompact(
             }
         }
 
-        var details by remember(
-            key1 = currentItemPath
-        ) { mutableStateOf(initialDetails) }
+        var details by remember(detailsKey) { mutableStateOf(initialDetails) }
 
-        LaunchedEffect(
-            key1 = currentItemPath
-        ) {
+        LaunchedEffect(detailsKey) {
             if (details.isEmpty()) {
                 val det = withContext(IO) {
                     item.getDetails()

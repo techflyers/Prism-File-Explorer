@@ -33,7 +33,8 @@ class WebDavRemoteClient(
             if (hostStr.contains("/")) {
                 hostStr = hostStr.substringBefore("/")
             }
-            return "${conn.protocol}://$hostStr:${conn.port}"
+            val effectivePort = if (conn.port > 0) conn.port else if (conn.protocol == "https") 443 else 80
+            return "${conn.protocol}://$hostStr:$effectivePort"
         }
 
     private fun authHeader(): String? {
