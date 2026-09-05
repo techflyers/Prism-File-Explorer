@@ -85,14 +85,22 @@ object ShizukuManager {
             } catch (_: Exception) {}
         }
 
-        // Check root availability
-        isRootAvailable = checkRoot()
-
-        // Auto-select best available mode
-        if (accessMode == AccessMode.NONE) {
-            if (isShizukuGranted) accessMode = AccessMode.SHIZUKU
-            else if (isRootAvailable) accessMode = AccessMode.ROOT
+        // Auto-select Shizuku mode if granted
+        if (accessMode == AccessMode.NONE && isShizukuGranted) {
+            accessMode = AccessMode.SHIZUKU
         }
+    }
+
+    /**
+     * Probes root availability on-demand (does NOT run on app startup).
+     * Call this when opening the Privileged Access settings screen or when user opts into Root.
+     */
+    fun probeRoot(): Boolean {
+        isRootAvailable = checkRoot()
+        if (accessMode == AccessMode.NONE && isRootAvailable && !isShizukuGranted) {
+            accessMode = AccessMode.ROOT
+        }
+        return isRootAvailable
     }
 
     private fun onShizukuBinderReceived() {

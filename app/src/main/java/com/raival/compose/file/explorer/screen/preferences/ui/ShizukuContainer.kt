@@ -13,12 +13,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
 
 @Composable
 fun ShizukuContainer() {
+    LaunchedEffect(Unit) {
+        ShizukuManager.probeRoot()
+    }
+
     Container(title = "Privileged Access") {
         // Status overview
         val statusText = when (ShizukuManager.accessMode) {
@@ -77,13 +82,15 @@ fun ShizukuContainer() {
                 supportingText = modeLabel,
                 icon = Icons.Rounded.AdminPanelSettings,
                 onClick = {
+                    val rootOk = ShizukuManager.probeRoot()
                     // Cycle through available modes
                     val next = when (ShizukuManager.accessMode) {
                         ShizukuManager.AccessMode.NONE ->
                             if (ShizukuManager.isShizukuGranted) ShizukuManager.AccessMode.SHIZUKU
-                            else ShizukuManager.AccessMode.ROOT
+                            else if (rootOk) ShizukuManager.AccessMode.ROOT
+                            else ShizukuManager.AccessMode.NONE
                         ShizukuManager.AccessMode.SHIZUKU ->
-                            if (ShizukuManager.isRootAvailable) ShizukuManager.AccessMode.ROOT
+                            if (rootOk) ShizukuManager.AccessMode.ROOT
                             else ShizukuManager.AccessMode.NONE
                         ShizukuManager.AccessMode.ROOT -> ShizukuManager.AccessMode.NONE
                     }

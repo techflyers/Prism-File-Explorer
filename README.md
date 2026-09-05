@@ -154,6 +154,17 @@
 
 ---
 
+## 🛡️ Play Protect & Security Scanner Information
+
+Prism File Explorer is distributed directly via GitHub Releases (sideloaded APK). Security scanners or Google Play Protect may present warnings on newly published builds due to advanced developer tools:
+
+* **In-App Linux Terminal (PRoot)**: An optional user-space Linux environment powered by PRoot (the same class of engine used by Termux). Antivirus engines may flag this with dual-use labels such as `Tool.Linux.Proot.1` or `hacktool.proot`. This is an intentional power-user utility, not a root exploit or trojan.
+* **APK Bundle Merge & Install**: Merging split APK bundles (`.apks` / `.xapk`) produces an installable APK signed on-device with a unique, app-local cryptographic key (never the public AOSP testkey).
+* **Internet Sharing Tunnel**: Web sharing establishes reverse proxy tunnels using an on-device generated SSH key and Trust-On-First-Use (TOFU) host verification, without baked-in private keys.
+* **Privileged Access**: Root access is strictly opt-in and is never probed automatically on application startup.
+
+---
+
 ## 🤝 Contributing
 
 1. **Fork** the repository

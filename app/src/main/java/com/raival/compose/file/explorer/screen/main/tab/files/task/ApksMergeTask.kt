@@ -12,10 +12,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHo
 import com.reandroid.apkeditor.merge.Merger
 import com.reandroid.apkeditor.merge.MergerOptions
 import java.io.File
-import java.security.KeyFactory
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
-import java.security.spec.PKCS8EncodedKeySpec
+
 
 class ApksMergeTask(
     val sourceContent: ContentHolder
@@ -217,19 +214,7 @@ class ApksMergeTask(
                 return
             }
 
-            val testKeyInputStream = globalClass.assets.open("keystore/testkey.pk8")
-            val certificateInputStream = globalClass.assets.open("keystore/testkey.x509.pem")
-
-            val testKey = testKeyInputStream.use { inputStream ->
-                val keyBytes = inputStream.readBytes()
-                val keySpec = PKCS8EncodedKeySpec(keyBytes)
-                val keyFactory = KeyFactory.getInstance("RSA")
-                keyFactory.generatePrivate(keySpec)
-            }
-            val certificate = certificateInputStream.use { inputStream ->
-                val certificateFactory = CertificateFactory.getInstance("X.509")
-                certificateFactory.generateCertificate(inputStream) as X509Certificate
-            }
+            val (signingKey, certificate) = LocalApkSigningKey.load(globalClass)
 
             progressMonitor.apply {
                 processName = globalClass.getString(R.string.signing)
@@ -242,10 +227,10 @@ class ApksMergeTask(
                 return
             }
 
-            val keyConfig = KeyConfig.Jca(testKey)
+            val keyConfig = KeyConfig.Jca(signingKey)
 
             val signerConfig = ApkSigner.SignerConfig.Builder(
-                "Android",
+                "Prism",
                 keyConfig,
                 listOf(certificate)
             ).build()

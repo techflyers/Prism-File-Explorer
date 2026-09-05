@@ -5,9 +5,6 @@ import android.net.Uri
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.forwarded.RemotePortForwarder
 import net.schmizz.sshj.connection.channel.forwarded.SocketForwardingConnectListener
-import net.schmizz.sshj.transport.verification.PromiscuousVerifier
-import org.bouncycastle.jce.provider.BouncyCastleProvider
-import java.security.Security
 import java.io.*
 import java.net.*
 import java.text.SimpleDateFormat
@@ -17,13 +14,6 @@ import kotlin.concurrent.thread
 
 object WebSharingServer {
     private const val PORT = 8080
-    private const val ED25519_PRIVATE_KEY_PEM = """-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACAWN3mZdOKrXnP+VFVDS6yuPfVgGbCOa0a/B0YHt7wfpAAAAJj80blj/NG5
-YwAAAAtzc2gtZWQyNTUxOQAAACAWN3mZdOKrXnP+VFVDS6yuPfVgGbCOa0a/B0YHt7wfpA
-AAAEBbu6hQHydFb0ZGHuYq+gCui5fFtXW1X2e3Ok3UKTfXMhY3eZl04qtec/5UVUNLrK49
-9WAZsI5rRr8HRge3vB+kAAAAFWFkbWluQERFU0tUT1AtS1NIUkFVNw==
------END OPENSSH PRIVATE KEY-----"""
 
     private var serverSocket: ServerSocket? = null
     private var isLocalActive = false
@@ -82,10 +72,14 @@ AAAEBbu6hQHydFb0ZGHuYq+gCui5fFtXW1X2e3Ok3UKTfXMhY3eZl04qtec/5UVUNLrK49
                 com.raival.compose.file.explorer.screen.main.tab.files.service.remote.SftpRemoteClient.ensureBouncyCastle()
 
                 sshClient = SSHClient()
-                sshClient!!.addHostKeyVerifier(PromiscuousVerifier())
+                sshClient!!.addHostKeyVerifier(WebShareTunnelKeys.createTofuVerifier(context))
                 sshClient!!.connect("localhost.run", 22)
-                val keys = sshClient!!.loadKeys(ED25519_PRIVATE_KEY_PEM, null, null)
-                sshClient!!.authPublickey("nokey", keys)
+                val keys = WebShareTunnelKeys.loadKeys(sshClient!!, context)
+                sshClient!!.auth(
+                    "nokey",
+                    net.schmizz.sshj.userauth.method.AuthNone(),
+                    net.schmizz.sshj.userauth.method.AuthPublickey(keys)
+                )
 
                 // Bind port 80 of proxy server to local port 8080
                 sshClient!!.remotePortForwarder.bind(
@@ -95,9 +89,8 @@ AAAEBbu6hQHydFb0ZGHuYq+gCui5fFtXW1X2e3Ok3UKTfXMhY3eZl04qtec/5UVUNLrK49
 
                 // Start shell session to read dynallocated domain
                 val session = sshClient!!.startSession()
-                session.allocateDefaultPTY()
-                val shell = session.startShell()
-                val reader = shell.inputStream.bufferedReader(Charsets.UTF_8)
+                WebShareTunnelKeys.requestShellNoReply(session)
+                val reader = session.inputStream.bufferedReader(Charsets.UTF_8)
                 var line: String? = null
                 val pattern = Pattern.compile("([a-zA-Z0-9.-]+\\.(localhost\\.run|lhr\\.life))")
                 while (isInternetActive && reader.readLine().also { line = it } != null) {
