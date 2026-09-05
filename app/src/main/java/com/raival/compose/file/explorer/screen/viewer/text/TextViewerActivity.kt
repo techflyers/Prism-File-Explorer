@@ -24,14 +24,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.common.ui.SafeSurface
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.javaFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.jsonFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.kotlinFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.xmlFileType
 import com.raival.compose.file.explorer.screen.textEditor.holder.SymbolHolder
-import com.raival.compose.file.explorer.screen.textEditor.language.json.JsonCodeLanguage
-import com.raival.compose.file.explorer.screen.textEditor.language.kotlin.KotlinCodeLanguage
-import com.raival.compose.file.explorer.screen.textEditor.language.xml.XmlCodeLanguage
+import com.raival.compose.file.explorer.screen.textEditor.intelligent.AutoCloseTag
 import com.raival.compose.file.explorer.screen.textEditor.ui.BottomBarView
 import com.raival.compose.file.explorer.screen.textEditor.ui.InfoBar
 import com.raival.compose.file.explorer.screen.textEditor.ui.JumpToPositionDialog
@@ -44,8 +38,6 @@ import com.raival.compose.file.explorer.theme.FileExplorerTheme
 import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.PublishSearchResultEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
-import io.github.rosemoe.sora.lang.EmptyLanguage
-import io.github.rosemoe.sora.langs.java.JavaLanguage
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.subscribeAlways
 
@@ -126,35 +118,24 @@ class TextViewerActivity : ViewerActivity() {
                                     }
                                     subscribeAlways<ContentChangeEvent> {
                                         textViewerInstance.content = it.editor.text.toString()
+                                        if (it.changedText.length == 1) {
+                                            val ext = textViewerInstance.uriContent.extension ?: ""
+                                            AutoCloseTag.handleInsertChar(it.changedText[0], this, ext)
+                                        }
                                         textViewerInstance.requireSave = true
                                         textViewerInstance.canUndo = canUndo()
                                         textViewerInstance.canRedo = canRedo()
                                     }
                                 }
-                                val name = textViewerInstance.uriContent.name
-                                if (name != null) {
-                                    if (name.endsWith(javaFileType)) {
-                                        codeEditor.setEditorLanguage(JavaLanguage())
-                                        textViewerInstance.changeFontStyle(codeEditor)
-                                    } else if (name.endsWith(kotlinFileType)) {
-                                        codeEditor.setEditorLanguage(KotlinCodeLanguage())
-                                        textViewerInstance.changeFontStyle(codeEditor)
-                                    } else if (name.endsWith(jsonFileType)) {
-                                        codeEditor.setEditorLanguage(JsonCodeLanguage())
-                                        textViewerInstance.changeFontStyle(codeEditor)
-                                    } else if (name.endsWith(xmlFileType)) {
-                                        codeEditor.setEditorLanguage(XmlCodeLanguage())
-                                        textViewerInstance.changeFontStyle(codeEditor)
-                                    } else {
-                                        codeEditor.setEditorLanguage(EmptyLanguage())
-                                    }
-                                }
+                                textViewerInstance.setLanguage(codeEditor)
+                                textViewerInstance.changeFontStyle(codeEditor)
                             }
 
                             symbols.addAll(textViewerInstance.updateSymbols())
                         }
 
                         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                            textViewerInstance.resetColorScheme(codeEditor, true)
                             textViewerInstance.checkActiveFileValidity(
                                 onSourceReload = {
                                     codeEditor.setText(it, true, null)

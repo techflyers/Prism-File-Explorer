@@ -98,6 +98,10 @@
     <string name="auto_symbol_pair">Auto symbol pair</string>
     <string name="delete_empty_lines">Delete empty lines</string>
     <string name="delete_tabs">Delete tabs</string>
+    <string name="code_completion">Code completion</string>
+    <string name="snippet_suggestions">Snippet suggestions</string>
+    <string name="auto_close_tags">Auto close HTML/XML tags</string>
+    <string name="bullet_continuation">Markdown list continuation</string>
     <string name="auto_indentation">Auto indentation</string>
     <string name="magnifier">Magnifier</string>
     <string name="recent_files">Recent Files</string>
@@ -532,4 +536,14 @@
     <string name="folders">Folders</string>
     <string name="apk">APK</string>
     <string name="no_results_found">No results found</string>
+
+    <!-- Text Editor Themes -->
+    <string name="editor_theme">Editor theme</string>
+    <string name="select_editor_theme">Select syntax &amp; editor theme</string>
+    <string name="theme_auto">Follow System (Darcula / QuietLight)</string>
+    <string name="theme_darcula">Darcula (Dark)</string>
+    <string name="theme_quietlight">QuietLight (Light)</string>
+    <string name="theme_vscode_dark">VS Code Dark</string>
+    <string name="theme_textmate_light">TextMate Light</string>
+    <string name="theme_amoled_black">AMOLED Pure Black</string>
 </resources>

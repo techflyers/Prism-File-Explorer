@@ -29,22 +29,25 @@ import com.raival.compose.file.explorer.common.isNot
 import com.raival.compose.file.explorer.common.lastModified
 import com.raival.compose.file.explorer.common.whiteSpace
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.javaFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.jsonFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.kotlinFileType
-import com.raival.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.xmlFileType
+import com.raival.compose.file.explorer.screen.textEditor.filetype.BuiltinFileType
+import com.raival.compose.file.explorer.screen.textEditor.filetype.FileTypeManager
 import com.raival.compose.file.explorer.screen.textEditor.holder.SymbolHolder
+import com.raival.compose.file.explorer.screen.textEditor.intelligent.AutoCloseTag
+import com.raival.compose.file.explorer.screen.textEditor.intelligent.BulletContinuation
+import com.raival.compose.file.explorer.screen.textEditor.language.PrismTextMateLanguage
 import com.raival.compose.file.explorer.screen.textEditor.model.Searcher
 import com.raival.compose.file.explorer.screen.textEditor.model.WarningDialogProperties
 import com.raival.compose.file.explorer.screen.textEditor.scheme.DarkScheme
 import com.raival.compose.file.explorer.screen.textEditor.scheme.LightScheme
+import com.raival.compose.file.explorer.screen.textEditor.scheme.PrismColorScheme
 import com.raival.compose.file.explorer.screen.viewer.ViewerInstance
-import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
-import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
+import io.github.rosemoe.sora.event.EditorKeyEvent
+import io.github.rosemoe.sora.lang.EmptyLanguage
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.component.EditorAutoCompletion
 import io.github.rosemoe.sora.widget.component.Magnifier
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import io.github.rosemoe.sora.widget.subscribeAlways
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -122,94 +125,38 @@ class TextViewerInstance(
     fun getDarkScheme() = DarkScheme()
 
     fun resetColorScheme(codeEditor: CodeEditor, isTextmate: Boolean) {
-        codeEditor.apply {
-            if (isTextmate) {
-                ensureTextmateTheme(codeEditor)
-                if (globalClass.isDarkTheme()) {
-                    ThemeRegistry.getInstance().setTheme("dark")
-                } else {
-                    ThemeRegistry.getInstance().setTheme("light")
-                }
-                adaptCodeEditorScheme(colorScheme)
-            } else {
-                colorScheme = if (globalClass.isDarkTheme()) getDarkScheme() else getLightScheme()
-                adaptCodeEditorScheme(colorScheme)
-            }
-        }
+        PrismColorScheme.applyTheme(codeEditor, globalClass, isTextmate)
     }
 
-    fun ensureTextmateTheme(codeEditor: CodeEditor) {
-        try {
-            var editorColorScheme = codeEditor.colorScheme
-            if (editorColorScheme !is TextMateColorScheme) {
-                editorColorScheme = TextMateColorScheme.create(ThemeRegistry.getInstance())
-                codeEditor.colorScheme = editorColorScheme
+    fun setCodeEditorLanguage(codeEditor: CodeEditor, scope: String?) {
+        if (scope != null) {
+            val language = PrismTextMateLanguage.create(scope)
+            if (language != null) {
+                codeEditor.setEditorLanguage(language)
+                resetColorScheme(codeEditor, true)
+                return
             }
-        } catch (_: Exception) {
         }
+        codeEditor.setEditorLanguage(EmptyLanguage())
+        resetColorScheme(codeEditor, false)
     }
 
-    fun adaptCodeEditorScheme(scheme: EditorColorScheme) {
-        val colorScheme = if (globalClass.isDarkTheme()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                dynamicDarkColorScheme(globalClass)
-            } else {
-                darkColorScheme()
-            }
-        } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                dynamicLightColorScheme(globalClass)
-            } else {
-                lightColorScheme()
-            }
-        }
-        scheme.apply {
-            setColor(
-                EditorColorScheme.LINE_NUMBER_CURRENT,
-                colorScheme.onSurface.toArgb()
-            )
-            setColor(
-                EditorColorScheme.SELECTION_HANDLE,
-                colorScheme.primary.toArgb()
-            )
-            setColor(
-                EditorColorScheme.SELECTION_INSERT,
-                colorScheme.primary.toArgb()
-            )
-            setColor(
-                EditorColorScheme.SELECTED_TEXT_BACKGROUND,
-                colorScheme.primary.copy(alpha = 0.3f).toArgb()
-            )
-            setColor(
-                EditorColorScheme.CURRENT_LINE,
-                colorScheme.surfaceContainerHigh.toArgb()
-            )
-            setColor(
-                EditorColorScheme.WHOLE_BACKGROUND,
-                colorScheme.surfaceContainerLowest.toArgb()
-            )
-            setColor(
-                EditorColorScheme.LINE_NUMBER_BACKGROUND,
-                colorScheme.surfaceContainer.toArgb()
-            )
-            setColor(
-                EditorColorScheme.LINE_NUMBER,
-                colorScheme.onSurface.copy(alpha = 0.5f).toArgb()
-            )
-            setColor(
-                EditorColorScheme.MATCHED_TEXT_BACKGROUND,
-                colorScheme.surfaceVariant.toArgb()
-            )
-            setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND, Color.Red.toArgb())
-        }
+    fun setLanguage(codeEditor: CodeEditor) {
+        val fileType = FileTypeManager.fromFileName(uriContent.name ?: "")
+        setCodeEditorLanguage(codeEditor, fileType.textmateScope)
     }
 
     private fun analyseFile() {
+        val fileType = FileTypeManager.fromFileName(uriContent.name ?: "")
         activityTitle = uriContent.name ?: globalClass.getString(R.string.unknown)
-
-        canFormatFile = uriContent.extension.let {
-            it == jsonFileType || it == javaFileType || it == kotlinFileType || it == xmlFileType
+        activitySubtitle = if (fileType != BuiltinFileType.UNKNOWN && fileType.textmateScope != null) {
+            "${fileType.title} • ${uriContent.name ?: ""}"
+        } else {
+            uriContent.name ?: ""
         }
+
+        val scope = fileType.textmateScope
+        canFormatFile = scope in setOf("source.json", "text.xml", "source.java", "source.kotlin")
     }
 
     fun hideSearchPanel(codeEditor: CodeEditor) {
@@ -342,11 +289,21 @@ class TextViewerInstance(
                 editable = !it.readOnly
                 setPinLineNumber(it.pinLineNumber)
                 getComponent(Magnifier::class.java).isEnabled = it.enableMagnifier
+                getComponent(EditorAutoCompletion::class.java).apply {
+                    isEnabled = it.codeCompletion
+                    setEnabledAnimation(true)
+                }
             }
 
-            getComponent(EditorAutoCompletion::class.java).isEnabled = false
+            typefaceText =
+                Typeface.createFromAsset(context.assets, "font/JetBrainsMono-Regular.ttf")
 
-            resetColorScheme(this, true)
+            setLanguage(this)
+
+            subscribeAlways<EditorKeyEvent> { event ->
+                val ext = uriContent.extension ?: ""
+                BulletContinuation.handleKeyEvent(event, this, ext)
+            }
         }
     }
 

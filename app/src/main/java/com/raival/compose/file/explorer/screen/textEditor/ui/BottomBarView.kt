@@ -52,7 +52,9 @@ fun BottomBarView(
                     onClick = {
                         if (!codeEditor.editable) return@SymbolBox
 
-                        if (codeEditor.cursor.isSelected) {
+                        if (codeEditor.snippetController.isInSnippet()) {
+                            codeEditor.snippetController.shiftToNextTabStop()
+                        } else if (codeEditor.cursor.isSelected) {
                             codeEditor.indentSelection()
                         } else {
                             codeEditor.insertText(indentChar, indentChar.length)

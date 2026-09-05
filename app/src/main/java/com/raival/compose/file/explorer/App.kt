@@ -38,6 +38,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.TaskManager
 import com.raival.compose.file.explorer.screen.main.tab.files.zip.ZipManager
 import com.raival.compose.file.explorer.screen.preferences.PreferencesManager
 import com.raival.compose.file.explorer.screen.textEditor.TextEditorManager
+import com.raival.compose.file.explorer.screen.textEditor.keyword.KeywordManager
 import com.raival.compose.file.explorer.screen.viewer.ViewersManager
 import io.github.rosemoe.sora.langs.textmate.registry.FileProviderRegistry
 import io.github.rosemoe.sora.langs.textmate.registry.GrammarRegistry
@@ -179,39 +180,46 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
 
     private fun setupTextMate() {
         applicationScope.launch {
-            FileProviderRegistry.getInstance().addFileProvider(
-                AssetsFileResolver(
-                    appContext.assets
-                )
-            )
+            try {
+                val zipResolver = com.raival.compose.file.explorer.screen.textEditor.language.ZipFileResolver.getInstance(appContext)
+                if (zipResolver != null) {
+                    FileProviderRegistry.getInstance().addFileProvider(zipResolver)
+                } else {
+                    FileProviderRegistry.getInstance().addFileProvider(
+                        AssetsFileResolver(
+                            appContext.assets
+                        )
+                    )
+                }
 
-            GrammarRegistry.getInstance().loadGrammars("textmate/languages.json")
+                GrammarRegistry.getInstance().loadGrammars("textmate/languages.json")
 
-            val themeRegistry = ThemeRegistry.getInstance()
-            themeRegistry.loadTheme(
-                ThemeModel(
-                    IThemeSource.fromInputStream(
-                        FileProviderRegistry
-                            .getInstance()
-                            .tryGetInputStream("textmate/dark.json"),
-                        "dark.json", null
-                    ),
-                    "dark"
-                )
-            )
+                val themeRegistry = ThemeRegistry.getInstance()
 
-            themeRegistry.loadTheme(
-                ThemeModel(
-                    IThemeSource.fromInputStream(
-                        FileProviderRegistry
-                            .getInstance()
-                            .tryGetInputStream("textmate/light.tmTheme"),
-                        "light.tmTheme",
-                        null
-                    ),
-                    "light"
-                )
-            )
+                fun loadThemeSafe(assetPath: String, name: String) {
+                    try {
+                        val stream = FileProviderRegistry.getInstance().tryGetInputStream(assetPath) ?: return
+                        themeRegistry.loadTheme(
+                            ThemeModel(
+                                IThemeSource.fromInputStream(stream, assetPath, null),
+                                name
+                            )
+                        )
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                    }
+                }
+
+                loadThemeSafe("textmate/darcula.json", "darcula")
+                loadThemeSafe("textmate/quietlight.json", "quietlight")
+                loadThemeSafe("textmate/dark.json", "dark")
+                loadThemeSafe("textmate/light.tmTheme", "light")
+                loadThemeSafe("textmate/black/darcula.json", "black_darcula")
+
+                KeywordManager.initKeywordRegistry(appContext)
+            } catch (e: Exception) {
+                logger.logError(e)
+            }
         }
     }
 

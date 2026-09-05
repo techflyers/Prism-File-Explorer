@@ -6,8 +6,10 @@ import androidx.compose.material.icons.automirrored.rounded.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.rounded.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.rounded.WrapText
 import androidx.compose.material.icons.rounded.AirlineStops
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -100,6 +102,36 @@ fun OptionsMenu(expanded: Boolean, codeEditor: CodeEditor, onDismissRequest: () 
                 onDismissRequest()
             },
             leadingIcon = { Icon(Icons.Rounded.AirlineStops, null) }
+        )
+
+        DropdownMenuItem(
+            text = { Text(text = stringResource(R.string.editor_theme)) },
+            leadingIcon = { Icon(Icons.Rounded.Palette, null) },
+            children = {
+                val themeKeys = listOf(
+                    "auto" to R.string.theme_auto,
+                    "darcula" to R.string.theme_darcula,
+                    "quietlight" to R.string.theme_quietlight,
+                    "dark" to R.string.theme_vscode_dark,
+                    "light" to R.string.theme_textmate_light,
+                    "black_darcula" to R.string.theme_amoled_black
+                )
+                themeKeys.forEach { (key, strRes) ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(text = stringResource(strRes)) },
+                        onClick = {
+                            preferences.textEditorTheme = key
+                            textEditorManager.resetColorScheme(codeEditor, true)
+                            onDismissRequest()
+                        },
+                        trailingIcon = {
+                            if (preferences.textEditorTheme == key) {
+                                Icon(Icons.Rounded.Check, null)
+                            }
+                        }
+                    )
+                }
+            }
         )
 
         DropdownMenuItem(

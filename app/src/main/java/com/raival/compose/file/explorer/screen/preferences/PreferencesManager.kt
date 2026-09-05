@@ -392,6 +392,36 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var codeCompletion by prefMutableState(
+        keyName = "codeCompletion",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var snippetSuggestions by prefMutableState(
+        keyName = "snippetSuggestions",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var autoCloseTags by prefMutableState(
+        keyName = "autoCloseTags",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var bulletContinuation by prefMutableState(
+        keyName = "bulletContinuation",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var textEditorTheme by prefMutableState(
+        keyName = "textEditorTheme",
+        defaultValue = "auto",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
     //---------- Convertio & AI -------------//
     var convertioApiKey by prefMutableState(
         keyName = "convertioApiKey",

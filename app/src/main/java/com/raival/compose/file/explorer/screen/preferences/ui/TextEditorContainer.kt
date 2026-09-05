@@ -1,11 +1,15 @@
 package com.raival.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.automirrored.rounded.KeyboardTab
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.IntegrationInstructions
 import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SpaceBar
 import androidx.compose.material.icons.rounded.TextRotationNone
@@ -25,7 +29,46 @@ fun TextEditorContainer() {
         "5", "10", "15", "25", "Unlimited"
     )
 
+    val themeChoices = listOf(
+        stringResource(R.string.theme_auto),
+        stringResource(R.string.theme_darcula),
+        stringResource(R.string.theme_quietlight),
+        stringResource(R.string.theme_vscode_dark),
+        stringResource(R.string.theme_textmate_light),
+        stringResource(R.string.theme_amoled_black),
+    )
+    val themeKeys = listOf(
+        "auto",
+        "darcula",
+        "quietlight",
+        "dark",
+        "light",
+        "black_darcula"
+    )
+    val currentThemeIndex = themeKeys.indexOf(preferences.textEditorTheme).let { if (it == -1) 0 else it }
+
     Container(title = stringResource(R.string.text_editor)) {
+        PreferenceItem(
+            label = stringResource(R.string.editor_theme),
+            supportingText = themeChoices[currentThemeIndex],
+            icon = Icons.Rounded.Palette,
+            onClick = {
+                preferences.singleChoiceDialog.show(
+                    title = globalClass.getString(R.string.editor_theme),
+                    description = globalClass.getString(R.string.select_editor_theme),
+                    choices = themeChoices,
+                    selectedChoice = currentThemeIndex,
+                    onSelect = {
+                        preferences.textEditorTheme = themeKeys[it]
+                    }
+                )
+            }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
         PreferenceItem(
             label = stringResource(R.string.recent_files_limit),
             supportingText = if (preferences.recentFilesLimit == -1) recentFilesLimits[4] else preferences.recentFilesLimit.toString(),
@@ -131,6 +174,54 @@ fun TextEditorContainer() {
             icon = Icons.Rounded.SpaceBar,
             switchState = preferences.deleteMultiSpaces,
             onSwitchChange = { preferences.deleteMultiSpaces = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(id = R.string.code_completion),
+            icon = Icons.Rounded.AutoAwesome,
+            switchState = preferences.codeCompletion,
+            onSwitchChange = { preferences.codeCompletion = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(id = R.string.snippet_suggestions),
+            icon = Icons.Rounded.Code,
+            switchState = preferences.snippetSuggestions,
+            onSwitchChange = { preferences.snippetSuggestions = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(id = R.string.auto_close_tags),
+            icon = Icons.Rounded.IntegrationInstructions,
+            switchState = preferences.autoCloseTags,
+            onSwitchChange = { preferences.autoCloseTags = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(id = R.string.bullet_continuation),
+            icon = Icons.AutoMirrored.Rounded.FormatListBulleted,
+            switchState = preferences.bulletContinuation,
+            onSwitchChange = { preferences.bulletContinuation = it }
         )
     }
 }

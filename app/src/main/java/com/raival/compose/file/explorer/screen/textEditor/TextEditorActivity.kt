@@ -82,6 +82,7 @@ class TextEditorActivity : BaseActivity() {
                         }
 
                         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                            textEditorManager.resetColorScheme(codeEditor, true)
                             textEditorManager.checkActiveFileValidity(
                                 onSourceReload = {
                                     codeEditor.setContent(
