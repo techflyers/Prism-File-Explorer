@@ -10,6 +10,8 @@ import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -789,11 +793,9 @@ private fun FileDetails(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         if (leftText.isNotEmpty()) {
-            Text(
-                text = leftText,
+            FileDetailsText(
+                details = leftText,
                 fontSize = smallFontSize,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 color = textColor,
                 modifier = Modifier.weight(1f, fill = false)
             )
@@ -809,6 +811,71 @@ private fun FileDetails(
             )
         }
     }
+}
+
+private val folderCountPattern = Regex("(\\d+)\\s+folders?")
+private val fileCountPattern = Regex("(\\d+)\\s+files?")
+
+@Composable
+private fun FileDetailsText(
+    details: String,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 1,
+    textAlign: TextAlign? = null,
+    color: Color = Color.Unspecified
+) {
+    val matches = (folderCountPattern.findAll(details).map { it to "folder" } +
+        fileCountPattern.findAll(details).map { it to "file" })
+        .sortedBy { it.first.range.first }
+        .toList()
+
+    if (matches.isEmpty()) {
+        Text(
+            modifier = modifier,
+            text = details,
+            fontSize = fontSize,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = textAlign,
+            color = color
+        )
+        return
+    }
+
+    val inlineContent = mapOf(
+        "folder-count-icon" to InlineTextContent(
+            placeholder = androidx.compose.ui.text.Placeholder(14.sp, 14.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(Icons.Rounded.Folder, contentDescription = "Folders", modifier = Modifier.size(14.dp))
+        },
+        "file-count-icon" to InlineTextContent(
+            placeholder = androidx.compose.ui.text.Placeholder(14.sp, 14.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(Icons.Rounded.InsertDriveFile, contentDescription = "Files", modifier = Modifier.size(14.dp))
+        }
+    )
+    val annotated = androidx.compose.ui.text.buildAnnotatedString {
+        var cursor = 0
+        matches.forEach { (match, type) ->
+            append(details.substring(cursor, match.range.first))
+            appendInlineContent("$type-count-icon", "[$type icon]")
+            append(" ${match.groupValues[1]}")
+            cursor = match.range.last + 1
+        }
+        append(details.substring(cursor))
+    }
+
+    Text(
+        modifier = modifier,
+        text = annotated,
+        inlineContent = inlineContent,
+        fontSize = fontSize,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = textAlign,
+        color = color
+    )
 }
 
 // `..` parent directory navigation row
@@ -866,19 +933,19 @@ private fun FileDetailsCompact(
             }
         }
 
-        Text(
-            modifier = Modifier.alpha(0.6f),
-            text = details,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            color = if (isHighlighted) {
-                colorScheme.primary
-            } else {
-                colorScheme.onSurfaceVariant
-            }
-        )
+                    FileDetailsText(
+                modifier = Modifier.alpha(0.6f),
+                details = details,
+                fontSize = 10.sp,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+                color = if (isHighlighted) {
+                    colorScheme.primary
+                } else {
+                    colorScheme.onSurfaceVariant
+                }
+            )
+
     }
 }
 
