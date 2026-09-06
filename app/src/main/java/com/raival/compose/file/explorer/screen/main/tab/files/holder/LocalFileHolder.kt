@@ -122,11 +122,11 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 val count = getContentCount(prefs.showHiddenFiles)
                 buildString {
                     if (count.folders > 0) {
-                        append("📁 ${count.folders}")
+                        append("${count.folders} folders")
                         if (count.files > 0) append(" • ")
                     }
                     if (count.files > 0) {
-                        append("📄 ${count.files}")
+                        append("${count.files} files")
                     }
                     if (count.folders == 0 && count.files == 0) {
                         append(globalClass.getString(R.string.empty_folder))

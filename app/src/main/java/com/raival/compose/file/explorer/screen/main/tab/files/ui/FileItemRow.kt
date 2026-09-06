@@ -3,12 +3,17 @@ package com.raival.compose.file.explorer.screen.main.tab.files.ui
 import android.annotation.SuppressLint
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,7 +28,11 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -102,13 +111,9 @@ fun ItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle.isNotEmpty()) {
-                    Text(
-                        modifier = Modifier.alpha(0.7f),
-                        text = subtitle,
-                        fontSize = (fontSize - 4).sp,
-                        maxLines = 1,
-                        lineHeight = (fontSize + 2).sp,
-                        overflow = TextOverflow.Ellipsis
+                    FileDetailsText(
+                        details = subtitle,
+                        fontSize = (fontSize - 4).sp
                     )
                 }
             }
@@ -118,6 +123,62 @@ fun ItemRow(
     }
 }
 
+
+private val folderCountPattern = Regex("(\\d+)\\s+folders?")
+private val fileCountPattern = Regex("(\\d+)\\s+files?")
+
+@Composable
+private fun FileDetailsText(details: String, fontSize: androidx.compose.ui.unit.TextUnit) {
+    val matches = (folderCountPattern.findAll(details).map { it to "folder" } +
+        fileCountPattern.findAll(details).map { it to "file" })
+        .sortedBy { it.first.range.first }
+        .toList()
+
+    if (matches.isEmpty()) {
+        Text(
+            modifier = Modifier.alpha(0.7f),
+            text = details,
+            fontSize = fontSize,
+            maxLines = 1,
+            lineHeight = (fontSize.value + 6).sp,
+            overflow = TextOverflow.Ellipsis
+        )
+        return
+    }
+
+    val inlineContent = mapOf(
+        "folder-count-icon" to InlineTextContent(
+            placeholder = Placeholder(14.sp, 14.sp, PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(Icons.Default.Folder, contentDescription = "Folders", modifier = Modifier.size(14.dp))
+        },
+        "file-count-icon" to InlineTextContent(
+            placeholder = Placeholder(14.sp, 14.sp, PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(Icons.Default.InsertDriveFile, contentDescription = "Files", modifier = Modifier.size(14.dp))
+        }
+    )
+    val annotated = buildAnnotatedString {
+        var cursor = 0
+        matches.forEach { (match, type) ->
+            append(details.substring(cursor, match.range.first))
+            appendInlineContent("$type-count-icon", "[$type icon]")
+            append(" ${match.groupValues[1]}")
+            cursor = match.range.last + 1
+        }
+        append(details.substring(cursor))
+    }
+
+    Text(
+        modifier = Modifier.alpha(0.7f),
+        text = annotated,
+        inlineContent = inlineContent,
+        fontSize = fontSize,
+        maxLines = 1,
+        lineHeight = (fontSize.value + 6).sp,
+        overflow = TextOverflow.Ellipsis
+    )
+}
 
 @Composable
 fun FileIcon(

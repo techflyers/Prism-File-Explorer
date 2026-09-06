@@ -67,10 +67,10 @@ class RemoteFileHolder(
                 val count = getContentCount()
                 buildString {
                     if (count.folders > 0) {
-                        append("📁 ${count.folders}")
+                        append("${count.folders} folders")
                         if (count.files > 0) append(" • ")
                     }
-                    if (count.files > 0) append("📄 ${count.files}")
+                    if (count.files > 0) append("${count.files} files")
                     if (count.folders == 0 && count.files == 0) {
                         append(globalClass.getString(com.raival.compose.file.explorer.R.string.empty_folder))
                     }

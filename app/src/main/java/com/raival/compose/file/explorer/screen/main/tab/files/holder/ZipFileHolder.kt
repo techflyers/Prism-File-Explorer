@@ -318,10 +318,10 @@ class ZipFileHolder(
 
         return buildString {
             if (foldersCount > 0) {
-                append("📁 $foldersCount")
+                append("$foldersCount folders")
                 if (filesCount > 0) append(" • ")
             }
-            if (filesCount > 0) append("📄 $filesCount")
+            if (filesCount > 0) append("$filesCount files")
             if (foldersCount == 0 && filesCount == 0) append(globalClass.getString(R.string.empty_folder))
         }
     }
