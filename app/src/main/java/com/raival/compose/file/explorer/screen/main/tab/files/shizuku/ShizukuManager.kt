@@ -1,19 +1,25 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.shizuku
 
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Bundle
 import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.os.BundleCompat
 import com.raival.compose.file.explorer.App.Companion.globalClass
 import com.raival.compose.file.explorer.App.Companion.logger
+import moe.shizuku.api.BinderContainer
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 
 /**
- * Manages Shizuku and root (su) access for privileged file operations.
+ * Manages Shizuku, modern forks (Shevery, Nightzuku), and root (su) access for privileged file operations.
  */
 object ShizukuManager {
 
@@ -28,7 +34,16 @@ object ShizukuManager {
     var isShizukuGranted by mutableStateOf(false)
         private set
 
+    var isBinderAlive by mutableStateOf(false)
+        private set
+
     var isRootAvailable by mutableStateOf(false)
+        private set
+
+    var detectedManagerPackage by mutableStateOf<String?>(null)
+        private set
+
+    var detectedManagerName by mutableStateOf("Shizuku")
         private set
 
     val isShizukuReady get() = accessMode == AccessMode.SHIZUKU && isShizukuGranted
@@ -37,10 +52,12 @@ object ShizukuManager {
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        isBinderAlive = true
         onShizukuBinderReceived()
     }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        isBinderAlive = false
         if (accessMode == AccessMode.SHIZUKU) {
             accessMode = AccessMode.NONE
             isShizukuGranted = false
@@ -68,26 +85,124 @@ object ShizukuManager {
     // ─── Status ───────────────────────────────────────────────────────────────
 
     fun checkStatus() {
-        // Check if Shizuku package is installed
-        isShizukuInstalled = try {
-            globalClass.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
-            true
-        } catch (_: PackageManager.NameNotFoundException) {
+        // 1. Detect installed manager dynamically (Shevery, Nightzuku, official Shizuku, or any fork)
+        detectManager()
+
+        // 2. Check if Shizuku binder is alive directly (works with any manager, Sui, or root daemon)
+        isBinderAlive = try {
+            Shizuku.pingBinder()
+        } catch (_: Exception) {
             false
         }
 
-        // Check if Shizuku binder is alive
-        if (isShizukuInstalled) {
-            try {
-                if (Shizuku.pingBinder()) {
-                    onShizukuBinderReceived()
-                }
-            } catch (_: Exception) {}
+        // 3. If binder is not yet alive, attempt proactive ContentProvider binder fetch
+        if (!isBinderAlive) {
+            isBinderAlive = tryFetchBinder()
         }
+
+        if (isBinderAlive) {
+            onShizukuBinderReceived()
+        }
+
+        // Marked installed if binder is alive or any compatible manager package is detected
+        isShizukuInstalled = isBinderAlive || detectedManagerPackage != null
 
         // Auto-select Shizuku mode if granted
         if (accessMode == AccessMode.NONE && isShizukuGranted) {
             accessMode = AccessMode.SHIZUKU
+        }
+    }
+
+    /**
+     * Dynamically autodetects any installed Shizuku-compatible manager application
+     * (including official Shizuku, Shevery, Nightzuku, or future community forks)
+     * without hardcoding any package names.
+     */
+    private fun detectManager() {
+        val pm = globalClass.packageManager
+
+        // 1. Dynamic autodetection via permission request Activity intent
+        try {
+            val intent = Intent("moe.shizuku.privileged.api.intent.action.REQUEST_PERMISSION")
+            val resolveInfos = pm.queryIntentActivities(intent, 0)
+            val info = resolveInfos.firstOrNull()?.activityInfo
+            if (info != null && info.packageName != globalClass.packageName) {
+                detectedManagerPackage = info.packageName
+                val label = info.loadLabel(pm)?.toString()
+                detectedManagerName = if (!label.isNullOrBlank()) label else "Shizuku"
+                return
+            }
+        } catch (_: Exception) {}
+
+        // 2. Dynamic autodetection via REQUEST_BINDER BroadcastReceiver intent
+        try {
+            val intent = Intent("rikka.shizuku.intent.action.REQUEST_BINDER")
+            val resolveInfos = pm.queryBroadcastReceivers(intent, 0)
+            val info = resolveInfos.firstOrNull()?.activityInfo
+            if (info != null && info.packageName != globalClass.packageName) {
+                detectedManagerPackage = info.packageName
+                val label = info.loadLabel(pm)?.toString()
+                detectedManagerName = if (!label.isNullOrBlank()) label else "Shizuku"
+                return
+            }
+        } catch (_: Exception) {}
+
+        // 3. Dynamic autodetection via ContentProvider authority
+        try {
+            val providerInfo = pm.resolveContentProvider("moe.shizuku.privileged.api.shizuku", 0)
+            if (providerInfo != null && providerInfo.packageName != globalClass.packageName) {
+                detectedManagerPackage = providerInfo.packageName
+                val label = providerInfo.loadLabel(pm)?.toString()
+                detectedManagerName = if (!label.isNullOrBlank()) label else "Shizuku"
+                return
+            }
+        } catch (_: Exception) {}
+
+        detectedManagerPackage = null
+        detectedManagerName = "Shizuku"
+    }
+
+    /**
+     * Proactively queries Shizuku ContentProvider authorities to retrieve and bind
+     * the server binder directly via IPC without waiting for system broadcasts.
+     */
+    fun tryFetchBinder(): Boolean {
+        try {
+            if (Shizuku.pingBinder()) return true
+        } catch (_: Exception) {}
+
+        val authorities = linkedSetOf(
+            "${globalClass.packageName}.shizuku",
+            "moe.shizuku.privileged.api.shizuku"
+        )
+        detectedManagerPackage?.let { pkg ->
+            authorities.add("$pkg.shizuku")
+        }
+
+        for (authority in authorities) {
+            try {
+                val uri = Uri.parse("content://$authority")
+                val reply = globalClass.contentResolver.call(uri, "getBinder", null, Bundle())
+                if (reply != null) {
+                    reply.classLoader = BinderContainer::class.java.classLoader
+                    val container = BundleCompat.getParcelable(
+                        reply,
+                        "moe.shizuku.privileged.api.intent.extra.BINDER",
+                        BinderContainer::class.java
+                    )
+                    val binder = container?.binder
+                    if (binder != null && binder.pingBinder()) {
+                        Shizuku.onBinderReceived(binder, globalClass.packageName)
+                        return true
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        return try {
+            Shizuku.pingBinder()
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -105,6 +220,7 @@ object ShizukuManager {
 
     private fun onShizukuBinderReceived() {
         try {
+            isBinderAlive = Shizuku.pingBinder()
             isShizukuGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
             if (isShizukuGranted && accessMode == AccessMode.NONE) {
                 accessMode = AccessMode.SHIZUKU
@@ -114,11 +230,43 @@ object ShizukuManager {
 
     fun requestShizukuPermission() {
         try {
-            if (Shizuku.shouldShowRequestPermissionRationale()) return
+            if (!Shizuku.pingBinder()) {
+                tryFetchBinder()
+            }
+            if (!Shizuku.pingBinder()) {
+                logger.logWarning("Cannot request Shizuku permission: Binder is not alive")
+                return
+            }
             Shizuku.requestPermission(1001)
         } catch (e: Exception) {
             logger.logError(e)
         }
+    }
+
+    fun openManagerApp(context: Context): Boolean {
+        val pkg = detectedManagerPackage ?: return false
+        return try {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun openDownloadPage(context: Context) {
+        try {
+            val url = "https://github.com/HmnDev-Tech/shevery/releases"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {}
     }
 
     fun updateAccessMode(mode: AccessMode) {

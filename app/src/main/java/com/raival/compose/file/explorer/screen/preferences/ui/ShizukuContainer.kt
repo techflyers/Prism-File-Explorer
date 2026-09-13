@@ -16,18 +16,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.raival.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
 
 @Composable
 fun ShizukuContainer() {
+    val context = LocalContext.current
+
     LaunchedEffect(Unit) {
+        ShizukuManager.checkStatus()
         ShizukuManager.probeRoot()
     }
 
     Container(title = "Privileged Access") {
+        val managerName = ShizukuManager.detectedManagerName
+
         // Status overview
         val statusText = when (ShizukuManager.accessMode) {
-            ShizukuManager.AccessMode.SHIZUKU -> "Active via Shizuku"
+            ShizukuManager.AccessMode.SHIZUKU -> "Active via $managerName"
             ShizukuManager.AccessMode.ROOT -> "Active via Root (su)"
             ShizukuManager.AccessMode.NONE -> "Not configured"
         }
@@ -47,18 +53,35 @@ fun ShizukuContainer() {
             thickness = 1.dp
         )
 
-        // Shizuku section
+        // Shizuku / Shevery / Fork section
+        val shizukuSupportingText = when {
+            ShizukuManager.isShizukuGranted -> "Connected and granted ($managerName)"
+            ShizukuManager.isBinderAlive -> "Service is running — tap to grant permission"
+            ShizukuManager.isShizukuInstalled -> "$managerName is installed — tap to open and start service"
+            else -> "Not installed — tap to download Shevery or Shizuku"
+        }
+
         PreferenceItem(
-            label = "Shizuku",
-            supportingText = when {
-                !ShizukuManager.isShizukuInstalled -> "Not installed — install Shizuku from Play Store"
-                ShizukuManager.isShizukuGranted -> "Connected and granted"
-                else -> "Installed but permission not granted"
-            },
+            label = managerName,
+            supportingText = shizukuSupportingText,
             icon = Icons.Rounded.PhoneAndroid,
             onClick = {
-                if (!ShizukuManager.isShizukuGranted && ShizukuManager.isShizukuInstalled) {
-                    ShizukuManager.requestShizukuPermission()
+                when {
+                    ShizukuManager.isShizukuGranted -> {
+                        ShizukuManager.checkStatus()
+                    }
+                    ShizukuManager.isBinderAlive -> {
+                        ShizukuManager.requestShizukuPermission()
+                    }
+                    ShizukuManager.isShizukuInstalled -> {
+                        val opened = ShizukuManager.openManagerApp(context)
+                        if (!opened) {
+                            ShizukuManager.requestShizukuPermission()
+                        }
+                    }
+                    else -> {
+                        ShizukuManager.openDownloadPage(context)
+                    }
                 }
             }
         )
@@ -72,8 +95,8 @@ fun ShizukuContainer() {
             // Access mode selector
             val modeLabel = when {
                 ShizukuManager.isShizukuGranted && ShizukuManager.isRootAvailable ->
-                    "Both Shizuku and Root available — tap to switch"
-                ShizukuManager.isShizukuGranted -> "Using Shizuku"
+                    "Both $managerName and Root available — tap to switch"
+                ShizukuManager.isShizukuGranted -> "Using $managerName"
                 else -> "Using Root (su)"
             }
 
