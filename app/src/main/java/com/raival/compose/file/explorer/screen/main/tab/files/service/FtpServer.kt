@@ -178,7 +178,10 @@ class FtpSession(
                 enterActiveMode(arg)
             }
             "LIST" -> {
-                thread { handleList(arg) }
+                thread { handleList(arg, detailed = true) }
+            }
+            "NLST" -> {
+                thread { handleList(arg, detailed = false) }
             }
             "CWD" -> {
                 handleCwd(arg)
@@ -277,7 +280,7 @@ class FtpSession(
         return null
     }
 
-    private fun handleList(arg: String) {
+    private fun handleList(arg: String, detailed: Boolean) {
         val socket = getDataSocket()
         if (socket == null) {
             sendResponse("425 Can't open data connection.")
@@ -285,24 +288,27 @@ class FtpSession(
         }
         sendResponse("150 Opening ASCII mode data connection for file list.")
         try {
-            val targetPath = getAbsolutePath(arg)
-            val dir = File(targetPath)
-            if (dir.exists() && dir.isDirectory) {
-                val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), "UTF-8"))
-                val files = dir.listFiles() ?: emptyArray()
-                val df = SimpleDateFormat("MMM dd HH:mm", Locale.US)
-                for (file in files) {
-                    val name = file.name
-                    if (name.startsWith(".")) continue
-                    val isDir = file.isDirectory
-                    val typeChar = if (isDir) 'd' else '-'
-                    val permissions = if (isDir) "rwxr-xr-x" else "rw-r--r--"
-                    val size = if (isDir) 4096 else file.length()
-                    val dateStr = df.format(Date(file.lastModified()))
-                    writer.write("$typeChar$permissions 1 owner group $size $dateStr $name\r\n")
+            val options = arg.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            val includeHidden = options.any { it.startsWith("-") && it.contains('a') }
+            val requestedPath = options.lastOrNull { !it.startsWith("-") }.orEmpty()
+            val targetPath = getAbsolutePath(requestedPath)
+            val target = File(targetPath)
+            val files = if (target.isDirectory) target.listFiles() ?: emptyArray() else emptyArray()
+            val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), "UTF-8"))
+            val df = SimpleDateFormat("MMM dd HH:mm", Locale.US)
+            for (file in files) {
+                if (file.name.startsWith(".") && !includeHidden) continue
+                if (!detailed) {
+                    writer.write("${file.name}\r\n")
+                    continue
                 }
-                writer.flush()
+                val typeChar = if (file.isDirectory) 'd' else '-'
+                val permissions = if (file.isDirectory) "rwxr-xr-x" else "rw-r--r--"
+                val size = if (file.isDirectory) 4096 else file.length()
+                val dateStr = df.format(Date(file.lastModified()))
+                writer.write("$typeChar$permissions 1 owner group $size $dateStr ${file.name}\r\n")
             }
+            writer.flush()
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {

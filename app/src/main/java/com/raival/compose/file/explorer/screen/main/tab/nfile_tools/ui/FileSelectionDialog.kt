@@ -156,12 +156,18 @@ fun FileSelectionDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            onItemsSelected(selectedFiles.toList())
+                            val selection = selectedFiles.ifEmpty { listOf(currentDir) }
+                            onItemsSelected(selection)
                             onDismissRequest()
-                        },
-                        enabled = selectedFiles.isNotEmpty()
+                        }
                     ) {
-                        Text("Select (${selectedFiles.size})")
+                        Text(
+                            if (selectedFiles.isEmpty()) {
+                                "Select this folder"
+                            } else {
+                                "Select (${selectedFiles.size})"
+                            }
+                        )
                     }
                 }
             }
