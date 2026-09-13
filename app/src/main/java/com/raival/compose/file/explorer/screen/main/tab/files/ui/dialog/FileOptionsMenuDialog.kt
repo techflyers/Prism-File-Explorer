@@ -204,12 +204,16 @@ fun FileOptionsMenuDialog(
                 }
 
                 // Share
-                if (!hasFolders && targetContentHolder is LocalFileHolder) {
+                if (targetContentHolder is LocalFileHolder) {
                     IconButton(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             onDismissRequest()
-                            tab.shareSelectedFiles(context)
+                            if (hasFolders) {
+                                tab.toggleShareFolderCompressDialog(true)
+                            } else {
+                                tab.shareSelectedFiles(context)
+                            }
                         }
                     ) {
                         Icon(imageVector = Icons.Rounded.Share, contentDescription = null)

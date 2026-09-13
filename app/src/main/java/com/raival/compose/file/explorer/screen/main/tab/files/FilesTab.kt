@@ -893,6 +893,10 @@ class FilesTab(
         _dialogsState.update { it.copy(showArchivePasswordDialog = archive != null) }
     }
 
+    fun toggleShareFolderCompressDialog(show: Boolean) {
+        _dialogsState.update { it.copy(showShareFolderCompressDialog = show) }
+    }
+
     /**
      * Restores selected files from the recycle bin to their original locations
      * by reading metadata.json from each timestamped recycle bin subfolder.

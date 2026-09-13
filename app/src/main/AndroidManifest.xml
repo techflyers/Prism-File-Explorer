@@ -498,6 +498,10 @@
             android:exported="true"
             android:theme="@style/Theme.FileExplorer.Transparent"
             android:label="@string/share_to_prism"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:documentLaunchMode="intoExisting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

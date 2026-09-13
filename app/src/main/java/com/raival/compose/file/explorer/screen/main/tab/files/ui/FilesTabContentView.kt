@@ -22,6 +22,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.ImportPr
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.OpenWithAppListDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.RenameDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.SearchDialog
+import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.ShareFolderCompressDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskConflictDialog
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskPanel
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskRunningDialog
@@ -135,6 +136,12 @@ fun Dialogs(tab: FilesTab) {
         show = dialogsState.value.showArchivePasswordDialog,
         tab = tab,
         onDismissRequest = { tab.toggleArchivePasswordDialog(null) }
+    )
+
+    ShareFolderCompressDialog(
+        show = dialogsState.value.showShareFolderCompressDialog && tab.selectedFiles.isNotEmpty(),
+        tab = tab,
+        onDismissRequest = { tab.toggleShareFolderCompressDialog(false) }
     )
 
     TaskRunningDialog()

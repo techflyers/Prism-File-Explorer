@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -71,6 +72,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun BottomOptionsBar(tab: FilesTab) {
+    val context = LocalContext.current
     val state = tab.bottomOptionsBarState.collectAsState().value
 
     if (globalClass.isShareMode && (globalClass.shareUris.isNotEmpty() || !globalClass.shareText.isNullOrEmpty())) {
@@ -157,6 +159,24 @@ fun BottomOptionsBar(tab: FilesTab) {
                     Icon(
                         imageVector = Icons.Rounded.FormatColorText,
                         contentDescription = null
+                    )
+                }
+
+                // Share
+                IconButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        val hasFolders = tab.selectedFiles.values.any { it.isFolder }
+                        if (hasFolders) {
+                            tab.toggleShareFolderCompressDialog(true)
+                        } else {
+                            tab.shareSelectedFiles(context)
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Share,
+                        contentDescription = stringResource(R.string.share)
                     )
                 }
 

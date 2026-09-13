@@ -2,12 +2,15 @@ package com.raival.compose.file.explorer.screen.share
 
 import android.content.ClipData
 import android.content.Intent
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -37,7 +40,6 @@ import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.base.BaseActivity
 import com.raival.compose.file.explorer.common.getUriInfo
 import com.raival.compose.file.explorer.common.showMsg
-import com.raival.compose.file.explorer.common.ui.SafeSurface
 import com.raival.compose.file.explorer.common.ui.autoShowKeyboard
 import com.raival.compose.file.explorer.common.ui.fastScrollbar
 import com.raival.compose.file.explorer.screen.main.MainActivity
@@ -62,7 +64,9 @@ class ShareReceiverActivity : BaseActivity() {
     private var sharedText by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
         extractSharedData()
         checkPermissions()
     }
@@ -70,9 +74,7 @@ class ShareReceiverActivity : BaseActivity() {
     override fun onPermissionGranted() {
         setContent {
             FileExplorerTheme {
-                SafeSurface {
-                    ShareReceiverScreen()
-                }
+                ShareReceiverScreen()
             }
         }
     }
@@ -168,14 +170,22 @@ class ShareReceiverActivity : BaseActivity() {
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.55f))
-                .clickable { finish() },
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { finish() },
             contentAlignment = Alignment.Center
         ) {
             Card(
                 modifier = Modifier
-                    .fillMaxWidth(0.94f)
-                    .fillMaxHeight(0.88f)
-                    .clickable(enabled = false) {},
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.ime)
+                    .fillMaxWidth(0.92f)
+                    .fillMaxHeight(0.86f)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) {},
                 shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
