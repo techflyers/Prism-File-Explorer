@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.HorizontalDivider
@@ -159,6 +160,19 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.OpenInBrowser,
             switchState = prefs.useBuiltInViewer,
             onSwitchChange = { prefs.useBuiltInViewer = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.auto_hide_video_controls),
+            supportingText = stringResource(R.string.auto_hide_video_controls_summary),
+            icon = Icons.Rounded.VideoFile,
+            switchState = prefs.autoHideVideoControls,
+            onSwitchChange = { prefs.autoHideVideoControls = it }
         )
 
         HorizontalDivider(

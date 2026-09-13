@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
@@ -489,29 +490,24 @@ fun ProgressBar(
     onSeek: (Long) -> Unit,
     colorScheme: AudioPlayerColorScheme
 ) {
-    var manualPosition by remember { mutableLongStateOf(0L) }
-    var manualSeek by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    val progress = if (duration > 0) {
-        if (abs(currentPosition - manualPosition) < 1000) {
-            (currentPosition.toFloat() / duration.toFloat()).also {
-                manualPosition = currentPosition
-            }
-        } else manualSeek
-    } else 0f
+    var dragProgress by remember { mutableFloatStateOf(0f) }
+
+    val safeDuration = duration.coerceAtLeast(0L)
+    val currentProgress = if (safeDuration > 0) (currentPosition.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f) else 0f
+    val displayProgress = if (isDragging) dragProgress else currentProgress
+    val displayPosition = if (isDragging) (dragProgress * safeDuration).toLong() else currentPosition.coerceIn(0L, safeDuration)
 
     Column {
         Slider(
-            value = if (isDragging) manualSeek else progress,
+            value = displayProgress,
             onValueChange = {
                 isDragging = true
-                manualSeek = it
+                dragProgress = it
             },
             onValueChangeFinished = {
-                (manualSeek * duration).toLong().let { newPosition ->
-                    manualPosition = newPosition
-                    onSeek(newPosition)
-                }
+                val newPosition = (dragProgress * safeDuration).toLong().coerceIn(0L, safeDuration)
+                onSeek(newPosition)
                 isDragging = false
             },
             colors = SliderDefaults.colors(
@@ -527,14 +523,14 @@ fun ProgressBar(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = (if (isDragging) (manualSeek * duration).toLong() else manualPosition).toFormattedTime(),
+                text = displayPosition.coerceAtLeast(0L).toFormattedTime(),
                 color = colorScheme.tintColor.copy(alpha = 0.8f),
                 fontSize = 12.sp,
                 style = MaterialTheme.typography.bodySmall
             )
 
             Text(
-                text = duration.toFormattedTime(),
+                text = safeDuration.toFormattedTime(),
                 color = colorScheme.tintColor.copy(alpha = 0.8f),
                 fontSize = 12.sp,
                 style = MaterialTheme.typography.bodySmall
@@ -657,10 +653,11 @@ fun AdditionalControls(
             )
         }
 
-        // Repeat control (only two modes: off and all)
+        // Repeat control (off, all, one)
         IconButton(onClick = onRepeatToggle) {
+            val icon = if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
             Icon(
-                Icons.Default.Repeat,
+                icon,
                 contentDescription = null,
                 tint = if (repeatMode == Player.REPEAT_MODE_OFF)
                     colorScheme.tintColor.copy(alpha = 0.5f)
@@ -983,9 +980,13 @@ fun PlaylistSheet(
         ) {
             itemsIndexed(playlist) { index, trackUri ->
                 val isCurrentTrack = index == currentIndex
-                val trackName = trackUri.lastPathSegment
-                    ?.substringAfterLast('/')
-                    ?: "Track ${index + 1}"
+                val rawName = if (trackUri.scheme == "file") {
+                    trackUri.path?.let { java.io.File(it).name }
+                } else {
+                    trackUri.lastPathSegment?.substringAfterLast('/')
+                }
+                val decoded = rawName?.let { android.net.Uri.decode(it) } ?: "Track ${index + 1}"
+                val trackName = decoded.substringBeforeLast('.').ifBlank { decoded }
 
                 Row(
                     modifier = Modifier

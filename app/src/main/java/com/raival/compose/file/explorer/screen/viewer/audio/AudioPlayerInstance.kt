@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -30,6 +32,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import java.io.File
+
 class AudioPlayerInstance(
     override val uri: Uri,
     override val id: String,
@@ -50,13 +54,22 @@ class AudioPlayerInstance(
     private val _colorScheme = MutableStateFlow(AudioPlayerColorScheme())
     val audioPlayerColorScheme: StateFlow<AudioPlayerColorScheme> = _colorScheme.asStateFlow()
 
+    private var defaultColorScheme: AudioPlayerColorScheme = AudioPlayerColorScheme()
     private var exoPlayer: ExoPlayer? = null
     private var positionTrackingJob: Job? = null
 
     @OptIn(UnstableApi::class)
     suspend fun initializePlayer(context: Context, uri: Uri) {
         withContext(Dispatchers.Main) {
-            exoPlayer = ExoPlayer.Builder(context).build().apply {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build()
+
+            exoPlayer = ExoPlayer.Builder(context)
+                .setAudioAttributes(audioAttributes, true)
+                .build().apply {
+                repeatMode = _playerState.value.repeatMode
                 // Add all playlist items (or just the single uri)
                 val uris = playlist.ifEmpty { listOf(uri) }
                 val mediaItems = uris.map { itemUri ->
@@ -88,23 +101,50 @@ class AudioPlayerInstance(
                         if (playbackState == Player.STATE_READY) {
                             _playerState.update {
                                 it.copy(
-                                    duration = duration
+                                    duration = duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                                 )
                             }
                         }
                     }
 
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        // Re-extract metadata for the new track
-                        val currentUri = mediaItem?.localConfiguration?.uri ?: return
+                        val player = exoPlayer ?: return
+                        val currentIndex = player.currentMediaItemIndex
+                        val currentUri = mediaItem?.localConfiguration?.uri ?: uris.getOrNull(currentIndex) ?: uri
                         _playerState.update {
                             it.copy(
-                                currentTrackIndex = currentMediaItemIndex,
-                                totalTracks = mediaItemCount
+                                currentTrackIndex = currentIndex,
+                                totalTracks = player.mediaItemCount,
+                                currentPosition = 0L,
+                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                             )
                         }
                         CoroutineScope(Dispatchers.IO).launch {
                             extractMetadata(context, currentUri)
+                        }
+                    }
+
+                    override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                        val title = mediaMetadata.title?.toString()
+                        val artist = mediaMetadata.artist?.toString()
+                        val album = mediaMetadata.albumTitle?.toString()
+                        val artworkData = mediaMetadata.artworkData
+                        if (!title.isNullOrBlank()) {
+                            val art = artworkData?.let { data ->
+                                runCatching { BitmapFactory.decodeByteArray(data, 0, data.size) }.getOrNull()
+                            }
+                            _metadata.update { current ->
+                                current.copy(
+                                    title = title,
+                                    artist = artist ?: current.artist,
+                                    album = album ?: current.album,
+                                    albumArt = art ?: current.albumArt
+                                )
+                            }
+                            art?.let { bitmap ->
+                                val colorScheme = extractColorsFromBitmap(bitmap, defaultColorScheme)
+                                _colorScheme.value = colorScheme
+                            }
                         }
                     }
                 })
@@ -124,21 +164,39 @@ class AudioPlayerInstance(
     }
 
     fun setDefaultColorScheme(colorScheme: AudioPlayerColorScheme) {
+        defaultColorScheme = colorScheme
         _colorScheme.value = colorScheme
     }
 
     private suspend fun extractMetadata(context: Context, uri: Uri) {
         withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
             try {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(context, uri)
+                val filePath = resolveLocalPath(context, uri)
+                if (!filePath.isNullOrEmpty() && File(filePath).exists()) {
+                    retriever.setDataSource(filePath)
+                } else if (uri.scheme == "file") {
+                    val p = uri.path
+                    if (p != null) retriever.setDataSource(p) else retriever.setDataSource(context, uri)
+                } else if (uri.scheme == "content") {
+                    try {
+                        context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                            retriever.setDataSource(pfd.fileDescriptor)
+                        } ?: retriever.setDataSource(context, uri)
+                    } catch (_: Exception) {
+                        retriever.setDataSource(context, uri)
+                    }
+                } else {
+                    retriever.setDataSource(context, uri)
+                }
 
                 val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-                    ?: globalClass.getString(R.string.unknown_title)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: getFallbackTitle(uri)
                 val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                    ?: globalClass.getString(R.string.unknown_artist)
+                    ?: ""
                 val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-                    ?: globalClass.getString(R.string.unknown_album)
+                    ?: ""
                 val durationStr =
                     retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 val duration = durationStr?.toLongOrNull() ?: 0L
@@ -146,7 +204,7 @@ class AudioPlayerInstance(
                 // Extract album art
                 val albumArtData = retriever.embeddedPicture
                 val albumArt = albumArtData?.let { data ->
-                    BitmapFactory.decodeByteArray(data, 0, data.size)
+                    runCatching { BitmapFactory.decodeByteArray(data, 0, data.size) }.getOrNull()
                 }
 
                 val metadata = AudioMetadata(
@@ -159,21 +217,80 @@ class AudioPlayerInstance(
 
                 _metadata.value = metadata
 
-                // Extract colors from album art if available
-                albumArt?.let { bitmap ->
-                    val colorScheme = extractColorsFromBitmap(bitmap, _colorScheme.value)
+                // Extract colors from album art if available, otherwise revert to default
+                if (albumArt != null) {
+                    val colorScheme = extractColorsFromBitmap(albumArt, defaultColorScheme)
                     _colorScheme.value = colorScheme
+                } else {
+                    _colorScheme.value = defaultColorScheme
                 }
-
-                retriever.release()
             } catch (e: Exception) {
                 logger.logError(e)
                 // Fallback metadata
                 _metadata.value = AudioMetadata(
-                    title = uri.lastPathSegment ?: globalClass.getString(R.string.unknown_title)
+                    title = getFallbackTitle(uri)
                 )
+                _colorScheme.value = defaultColorScheme
+            } finally {
+                runCatching { retriever.release() }
             }
         }
+    }
+
+    private fun getFallbackTitle(uri: Uri): String {
+        val rawName = if (uri.scheme == "file") {
+            uri.path?.let { File(it).name }
+        } else {
+            uri.lastPathSegment
+        }
+        val decoded = rawName?.let { Uri.decode(it) } ?: globalClass.getString(R.string.unknown_title)
+        return decoded.substringBeforeLast('.').ifBlank { decoded }
+    }
+
+    private fun resolveLocalPath(context: Context, uri: Uri): String? {
+        if (uri.scheme == "file") {
+            return uri.path
+        }
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
+                    val pathIndex = cursor.getColumnIndex("_data")
+                    if (pathIndex >= 0 && cursor.moveToFirst()) {
+                        val path = cursor.getString(pathIndex)
+                        if (!path.isNullOrEmpty() && File(path).exists()) {
+                            return path
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            val uriPath = uri.path ?: return null
+            val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
+            val prefixMappings = listOf(
+                "/storage_root/" to "",
+                "/root_path/" to "",
+                "/package_root/" to externalStorage,
+                "/external_files_path/" to externalStorage,
+                "/external-path/" to externalStorage,
+                "/files/" to externalStorage,
+                "/storage/" to "/storage"
+            )
+            for ((prefix, basePath) in prefixMappings) {
+                val idx = uriPath.indexOf(prefix)
+                if (idx >= 0) {
+                    val relativePart = uriPath.substring(idx + prefix.length)
+                    val candidate = if (basePath.isEmpty()) {
+                        if (relativePart.startsWith("/")) relativePart else "/$relativePart"
+                    } else {
+                        "$basePath/$relativePart"
+                    }
+                    if (File(candidate).exists()) {
+                        return candidate
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun startPositionTracking() {
@@ -184,7 +301,7 @@ class AudioPlayerInstance(
                     _playerState.update {
                         it.copy(
                             currentPosition = player.currentPosition,
-                            duration = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
+                            duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                         )
                     }
                 }
@@ -198,6 +315,9 @@ class AudioPlayerInstance(
             if (player.isPlaying) {
                 player.pause()
             } else {
+                if (player.playbackState == Player.STATE_ENDED) {
+                    player.seekToDefaultPosition()
+                }
                 player.play()
             }
         }
@@ -208,13 +328,27 @@ class AudioPlayerInstance(
     }
 
     fun skipNext() {
-        exoPlayer?.seekToNext()
-        exoPlayer?.play()
+        exoPlayer?.let { player ->
+            if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+                player.play()
+            } else if (_playerState.value.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                player.seekTo(0, 0)
+                player.play()
+            }
+        }
     }
 
     fun skipPrevious() {
-        exoPlayer?.seekToPrevious()
-        exoPlayer?.play()
+        exoPlayer?.let { player ->
+            if (player.hasPreviousMediaItem()) {
+                player.seekToPreviousMediaItem()
+                player.play()
+            } else if (_playerState.value.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                player.seekTo(player.mediaItemCount - 1, 0)
+                player.play()
+            }
+        }
     }
 
     /**
@@ -235,6 +369,7 @@ class AudioPlayerInstance(
     fun toggleRepeatMode() {
         val newMode = when (_playerState.value.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
         exoPlayer?.repeatMode = newMode

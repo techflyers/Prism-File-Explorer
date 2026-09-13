@@ -180,6 +180,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var autoHideVideoControls by prefMutableState(
+        keyName = "autoHideVideoControls",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var startupTabs by prefMutableState(
         keyName = "startupTabs",
         defaultValue = StartupTabs.default().toJson(),

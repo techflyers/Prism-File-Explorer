@@ -2,6 +2,8 @@ package com.raival.compose.file.explorer.screen.viewer.video
 
 import android.content.Context
 import android.net.Uri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -23,6 +25,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import java.io.File
+
 class VideoPlayerInstance(
     override val uri: Uri,
     override val id: String,
@@ -43,22 +47,37 @@ class VideoPlayerInstance(
         }
 
         withContext(Dispatchers.Main) {
-            exoPlayer = ExoPlayer.Builder(context).build().apply {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build()
+
+            exoPlayer = ExoPlayer.Builder(context)
+                .setAudioAttributes(audioAttributes, true)
+                .build().apply {
                 val uris = playlist.ifEmpty { listOf(uri) }
                 val mediaItems = uris.map { itemUri ->
                     MediaItem.Builder().setUri(itemUri).build()
                 }
                 setMediaItems(mediaItems)
+                repeatMode = _playerState.value.repeatMode
 
                 val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
                 seekTo(startIndex, 0)
                 prepare()
+                playWhenReady = true
 
                 volume = 1.0f
 
+                val initialTitle = if (uri.scheme == "file") {
+                    uri.path?.let { File(it).name } ?: uri.name
+                } else {
+                    uri.name
+                } ?: globalClass.getString(R.string.unknown)
+
                 _playerState.update { currentState ->
                     currentState.copy(
-                        title = uri.name ?: globalClass.getString(R.string.unknown),
+                        title = initialTitle,
                         currentPlaylistIndex = startIndex,
                         isMuted = false
                     )
@@ -79,7 +98,7 @@ class VideoPlayerInstance(
                         if (playbackState == Player.STATE_READY) {
                             _playerState.update { currentState ->
                                 currentState.copy(
-                                    duration = duration,
+                                    duration = duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L,
                                     isLoading = false,
                                     isReady = true
                                 )
@@ -91,10 +110,17 @@ class VideoPlayerInstance(
                         val player = exoPlayer ?: return
                         val currentIndex = player.currentMediaItemIndex
                         val currentUri = mediaItem?.localConfiguration?.uri ?: uris.getOrNull(currentIndex) ?: uri
+                        val trackTitle = if (currentUri.scheme == "file") {
+                            currentUri.path?.let { File(it).name } ?: currentUri.name
+                        } else {
+                            currentUri.name
+                        } ?: globalClass.getString(R.string.unknown)
                         _playerState.update { currentState ->
                             currentState.copy(
                                 currentPlaylistIndex = currentIndex,
-                                title = currentUri.name ?: globalClass.getString(R.string.unknown)
+                                title = trackTitle,
+                                currentPosition = 0L,
+                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                             )
                         }
                     }
@@ -126,6 +152,9 @@ class VideoPlayerInstance(
             if (player.isPlaying) {
                 player.pause()
             } else {
+                if (player.playbackState == Player.STATE_ENDED) {
+                    player.seekToDefaultPosition()
+                }
                 player.play()
             }
         }
@@ -169,13 +198,18 @@ class VideoPlayerInstance(
         }
     }
 
-    fun toggleRepeatMode() {
-        val newMode = when (_playerState.value.repeatMode) {
+    fun toggleRepeatMode(): Int {
+        val currentMode = _playerState.value.repeatMode
+        val hasMultiple = playlist.size > 1 || (exoPlayer?.mediaItemCount ?: 0) > 1
+        val newMode = when (currentMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
+            Player.REPEAT_MODE_ONE -> if (hasMultiple) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_OFF
             else -> Player.REPEAT_MODE_OFF
         }
         exoPlayer?.repeatMode = newMode
         _playerState.update { it.copy(repeatMode = newMode) }
+        return newMode
     }
 
     fun removePlaylistItem(index: Int): List<Uri> {
@@ -209,6 +243,9 @@ class VideoPlayerInstance(
             if (player.hasNextMediaItem()) {
                 player.seekToNextMediaItem()
                 player.play()
+            } else if (_playerState.value.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                player.seekTo(0, 0)
+                player.play()
             }
         }
     }
@@ -217,6 +254,9 @@ class VideoPlayerInstance(
         exoPlayer?.let { player ->
             if (player.hasPreviousMediaItem()) {
                 player.seekToPreviousMediaItem()
+                player.play()
+            } else if (_playerState.value.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                player.seekTo(player.mediaItemCount - 1, 0)
                 player.play()
             }
         }

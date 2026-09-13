@@ -19,9 +19,10 @@ class AudioPlayerActivity : ViewerActivity() {
         // Scan parent folder for sibling audio files
         val filePath = resolveFilePath(uri)
         android.util.Log.d("AudioPlayerActivity", "onCreateNewInstance: uri=$uri, resolvedPath=$filePath")
-        val playlist = if (filePath != null) buildFolderPlaylist(filePath) else listOf(uri)
+        val initialUri = if (filePath != null) Uri.fromFile(File(filePath)) else uri
+        val playlist = if (filePath != null) buildFolderPlaylist(filePath) else listOf(initialUri)
         android.util.Log.d("AudioPlayerActivity", "Playlist size: ${playlist.size}")
-        return AudioPlayerInstance(uri, uid, playlist)
+        return AudioPlayerInstance(initialUri, uid, playlist)
     }
 
     override fun onReady(instance: ViewerInstance) {
@@ -37,7 +38,7 @@ class AudioPlayerActivity : ViewerActivity() {
 
     /**
      * Scans the parent directory of the resolved file path for audio files,
-     * creating a sorted playlist of content URIs.
+     * creating a sorted playlist of file URIs for reliable internal playback.
      */
     private fun buildFolderPlaylist(filePath: String): List<Uri> {
         return try {
@@ -62,17 +63,7 @@ class AudioPlayerActivity : ViewerActivity() {
 
             if (audioFiles.isEmpty()) return listOf(Uri.fromFile(currentFile))
 
-            audioFiles.map { file ->
-                try {
-                    FileProvider.getUriForFile(
-                        this,
-                        "${packageName}.provider",
-                        file
-                    )
-                } catch (_: Exception) {
-                    Uri.fromFile(file)
-                }
-            }
+            audioFiles.map { Uri.fromFile(it) }
         } catch (e: Exception) {
             android.util.Log.e("AudioPlayerActivity", "buildFolderPlaylist failed: ${e.message}")
             listOf(Uri.fromFile(File(filePath)))
@@ -119,11 +110,14 @@ class AudioPlayerActivity : ViewerActivity() {
             val uriPath = uri.path ?: return null
             val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
 
-            // FileProvider paths configured in file_paths.xml typically use these prefixes
+            // FileProvider paths configured in provider_paths.xml:
+            // <root-path path="." name="storage_root" />
             val prefixMappings = listOf(
+                "/storage_root/" to "",
+                "/root_path/" to "",
+                "/package_root/" to externalStorage,
                 "/external_files_path/" to externalStorage,
                 "/external-path/" to externalStorage,
-                "/root_path/" to "",
                 "/files/" to externalStorage,
                 "/storage/" to "/storage"
             )
@@ -132,7 +126,11 @@ class AudioPlayerActivity : ViewerActivity() {
                 val idx = uriPath.indexOf(prefix)
                 if (idx >= 0) {
                     val relativePart = uriPath.substring(idx + prefix.length)
-                    val candidate = if (basePath.isEmpty()) "/$relativePart" else "$basePath/$relativePart"
+                    val candidate = if (basePath.isEmpty()) {
+                        if (relativePart.startsWith("/")) relativePart else "/$relativePart"
+                    } else {
+                        "$basePath/$relativePart"
+                    }
                     if (File(candidate).exists()) {
                         android.util.Log.d("AudioPlayerActivity", "Path resolved from FileProvider heuristic: $candidate")
                         return candidate
@@ -140,7 +138,6 @@ class AudioPlayerActivity : ViewerActivity() {
                 }
             }
 
-            // 5. Last resort: open input stream and copy to a temp file so we at least have something
             android.util.Log.w("AudioPlayerActivity", "Could not resolve path for URI: $uri")
         }
 

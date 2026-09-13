@@ -53,9 +53,10 @@ class VideoPlayerActivity : ViewerActivity() {
     ): ViewerInstance {
         val filePath = resolveFilePath(uri)
         android.util.Log.d("VideoPlayerActivity", "onCreateNewInstance: uri=$uri, resolvedPath=$filePath")
-        val playlist = if (filePath != null) buildFolderPlaylist(filePath) else listOf(uri)
+        val initialUri = if (filePath != null) Uri.fromFile(File(filePath)) else uri
+        val playlist = if (filePath != null) buildFolderPlaylist(filePath) else listOf(initialUri)
         android.util.Log.d("VideoPlayerActivity", "Playlist size: ${playlist.size}")
-        return VideoPlayerInstance(uri, uid, playlist).also { activeInstance = it }
+        return VideoPlayerInstance(initialUri, uid, playlist).also { activeInstance = it }
     }
 
     override fun onReady(instance: ViewerInstance) {
@@ -172,7 +173,7 @@ class VideoPlayerActivity : ViewerActivity() {
 
     /**
      * Scans the parent directory of the resolved file path for video files,
-     * creating a sorted playlist of content URIs.
+     * creating a sorted playlist of file URIs for direct playback.
      */
     private fun buildFolderPlaylist(filePath: String): List<Uri> {
         return try {
@@ -197,17 +198,7 @@ class VideoPlayerActivity : ViewerActivity() {
 
             if (videoFiles.isEmpty()) return listOf(Uri.fromFile(currentFile))
 
-            videoFiles.map { file ->
-                try {
-                    FileProvider.getUriForFile(
-                        this,
-                        "${packageName}.provider",
-                        file
-                    )
-                } catch (_: Exception) {
-                    Uri.fromFile(file)
-                }
-            }
+            videoFiles.map { Uri.fromFile(it) }
         } catch (e: Exception) {
             android.util.Log.e("VideoPlayerActivity", "buildFolderPlaylist failed: ${e.message}")
             listOf(Uri.fromFile(File(filePath)))
@@ -219,7 +210,7 @@ class VideoPlayerActivity : ViewerActivity() {
      */
     private fun resolveFilePath(uri: Uri): String? {
         val extraPath = intent.getStringExtra("extra_file_path")
-        if (uri == intent.data && !extraPath.isNullOrEmpty() && File(extraPath).exists()) {
+        if (!extraPath.isNullOrEmpty() && File(extraPath).exists()) {
             return extraPath
         }
 
@@ -245,10 +236,14 @@ class VideoPlayerActivity : ViewerActivity() {
             val uriPath = uri.path ?: return null
             val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
 
+            // FileProvider paths configured in provider_paths.xml:
+            // <root-path path="." name="storage_root" />
             val prefixMappings = listOf(
+                "/storage_root/" to "",
+                "/root_path/" to "",
+                "/package_root/" to externalStorage,
                 "/external_files_path/" to externalStorage,
                 "/external-path/" to externalStorage,
-                "/root_path/" to "",
                 "/files/" to externalStorage,
                 "/storage/" to "/storage"
             )
@@ -257,7 +252,11 @@ class VideoPlayerActivity : ViewerActivity() {
                 val idx = uriPath.indexOf(prefix)
                 if (idx >= 0) {
                     val relativePart = uriPath.substring(idx + prefix.length)
-                    val candidate = if (basePath.isEmpty()) "/$relativePart" else "$basePath/$relativePart"
+                    val candidate = if (basePath.isEmpty()) {
+                        if (relativePart.startsWith("/")) relativePart else "/$relativePart"
+                    } else {
+                        "$basePath/$relativePart"
+                    }
                     if (File(candidate).exists()) {
                         return candidate
                     }

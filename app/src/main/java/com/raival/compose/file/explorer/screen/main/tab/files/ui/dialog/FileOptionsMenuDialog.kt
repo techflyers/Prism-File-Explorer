@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
@@ -264,6 +265,29 @@ fun FileOptionsMenuDialog(
                 ) {
                     onDismissRequest()
                     tab.toggleOpenWithDialog(true)
+                }
+            }
+
+            val parentFolder = remember(targetContentHolder) {
+                kotlinx.coroutines.runBlocking { targetContentHolder.getParent() }
+            }
+            if (parentFolder != null && (tab.activeFolder is VirtualFileHolder || parentFolder.uniquePath != tab.activeFolder.uniquePath)) {
+                FileOption(
+                    Icons.Rounded.FolderOpen,
+                    stringResource(R.string.open_parent_folder)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles()
+                    tab.locateFile(targetContentHolder)
+                }
+
+                FileOption(
+                    Icons.AutoMirrored.Rounded.OpenInNew,
+                    stringResource(R.string.open_parent_folder_in_new_tab)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles()
+                    tab.requestNewTab(FilesTab(targetContentHolder))
                 }
             }
 

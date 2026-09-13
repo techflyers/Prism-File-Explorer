@@ -546,4 +546,19 @@
     <string name="theme_vscode_dark">VS Code Dark</string>
     <string name="theme_textmate_light">TextMate Light</string>
     <string name="theme_amoled_black">AMOLED Pure Black</string>
+
+    <!-- Parent Folder Navigation -->
+    <string name="open_parent_folder">Open parent folder</string>
+    <string name="open_parent_folder_in_new_tab">Open parent folder in new tab</string>
+
+    <!-- Video Player Controls -->
+    <string name="loop_video">Loop video</string>
+    <string name="loop_off">Repeat off</string>
+    <string name="loop_one">Repeat current video</string>
+    <string name="loop_all">Repeat all videos</string>
+    <string name="lock_controls">Lock controls</string>
+    <string name="unlock_controls">Unlock controls</string>
+    <string name="controls_locked_hint">Controls are locked. Tap the lock icon to unlock</string>
+    <string name="auto_hide_video_controls">Auto-hide video controls</string>
+    <string name="auto_hide_video_controls_summary">Automatically hide playback controls during playback</string>
 </resources>

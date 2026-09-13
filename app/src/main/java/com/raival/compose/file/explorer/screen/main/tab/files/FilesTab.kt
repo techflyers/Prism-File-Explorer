@@ -655,6 +655,28 @@ class FilesTab(
         }
     }
 
+    /**
+     * Navigates to the parent folder of the given file, highlights it, and scrolls it into view.
+     */
+    fun locateFile(file: ContentHolder) {
+        scope.launch {
+            val parent = file.getParent() ?: return@launch
+            highlightedFiles.apply {
+                clear()
+                add(file.uniquePath)
+            }
+            openFolderImpl(parent) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    val targetIndex =
+                        activeFolderContent.getIndexIf { uniquePath == file.uniquePath }
+                    if (targetIndex >= 0) {
+                        getFileListState().scrollToItem(targetIndex, 0)
+                    }
+                }
+            }
+        }
+    }
+
     fun getFileListState() = contentListStates[activeFolder.uniquePath] ?: LazyGridState().also {
         contentListStates[activeFolder.uniquePath] = it
     }

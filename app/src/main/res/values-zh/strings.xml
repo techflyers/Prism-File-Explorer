@@ -456,4 +456,19 @@
     <string name="folders">文件夹</string>
     <string name="apk">APK</string>
     <string name="no_results_found">未找到结果</string>
+
+    <!-- Parent Folder Navigation -->
+    <string name="open_parent_folder">打开上级文件夹</string>
+    <string name="open_parent_folder_in_new_tab">在新标签页中打开上级文件夹</string>
+
+    <!-- Video Player Controls -->
+    <string name="loop_video">循环播放</string>
+    <string name="loop_off">循环关闭</string>
+    <string name="loop_one">单曲循环</string>
+    <string name="loop_all">列表循环</string>
+    <string name="lock_controls">锁定控制</string>
+    <string name="unlock_controls">解锁控制</string>
+    <string name="controls_locked_hint">控制已锁定。点击锁定图标进行解锁</string>
+    <string name="auto_hide_video_controls">自动隐藏视频控制</string>
+    <string name="auto_hide_video_controls_summary">播放过程中自动隐藏控制界面</string>
 </resources>
