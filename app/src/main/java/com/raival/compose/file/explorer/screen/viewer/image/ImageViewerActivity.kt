@@ -1,5 +1,6 @@
 package com.raival.compose.file.explorer.screen.viewer.image
 
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.setContent
 import androidx.core.content.FileProvider
@@ -16,10 +17,56 @@ class ImageViewerActivity : ViewerActivity() {
     companion object {
         /** Ordered absolute paths of images in the current UI context (Recent, Images, folder, …). */
         const val EXTRA_IMAGE_LIST = "extra_image_list"
+
+        fun resolveFilePath(context: Context, uri: Uri, extraPath: String? = null): String? {
+            if (!extraPath.isNullOrEmpty() && File(extraPath).isFile) {
+                return extraPath
+            }
+
+            if (uri.scheme == "file") {
+                val path = uri.path
+                if (!path.isNullOrEmpty() && File(path).isFile) return path
+            }
+
+            if (uri.scheme == "content") {
+                try {
+                    context.contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
+                        val pathIndex = cursor.getColumnIndex("_data")
+                        if (pathIndex >= 0 && cursor.moveToFirst()) {
+                            val path = cursor.getString(pathIndex)
+                            if (!path.isNullOrEmpty() && File(path).isFile) return path
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+
+                val uriPath = uri.path ?: return null
+                val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
+                val prefixMappings = listOf(
+                    "/storage_root/" to "",
+                    "/root_path/" to "",
+                    "/package_root/" to externalStorage,
+                    "/external_files_path/" to externalStorage,
+                    "/external-path/" to externalStorage,
+                    "/files/" to externalStorage,
+                    "/storage/" to "/storage"
+                )
+                for ((prefix, basePath) in prefixMappings) {
+                    val idx = uriPath.indexOf(prefix)
+                    if (idx >= 0) {
+                        val relativePart = uriPath.substring(idx + prefix.length)
+                        val candidate =
+                            if (basePath.isEmpty()) "/$relativePart" else "$basePath/$relativePart"
+                        if (File(candidate).isFile) return candidate
+                    }
+                }
+            }
+            return null
+        }
     }
 
     override fun onCreateNewInstance(uri: Uri, uid: String): ViewerInstance {
-        val currentPath = resolveFilePath(uri)
+        val currentPath = resolveFilePath(this, uri, intent.getStringExtra("extra_file_path"))
         val contextPaths = intent.getStringArrayListExtra(EXTRA_IMAGE_LIST)
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() && File(it).isFile }
@@ -107,50 +154,5 @@ class ImageViewerActivity : ViewerActivity() {
         } catch (_: Exception) {
             listOf(filePath)
         }
-    }
-
-    private fun resolveFilePath(uri: Uri): String? {
-        val extraPath = intent.getStringExtra("extra_file_path")
-        if (!extraPath.isNullOrEmpty() && File(extraPath).isFile) {
-            return extraPath
-        }
-
-        if (uri.scheme == "file") {
-            val path = uri.path
-            if (!path.isNullOrEmpty() && File(path).isFile) return path
-        }
-
-        if (uri.scheme == "content") {
-            try {
-                contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
-                    val pathIndex = cursor.getColumnIndex("_data")
-                    if (pathIndex >= 0 && cursor.moveToFirst()) {
-                        val path = cursor.getString(pathIndex)
-                        if (!path.isNullOrEmpty() && File(path).isFile) return path
-                    }
-                }
-            } catch (_: Exception) {
-            }
-
-            val uriPath = uri.path ?: return null
-            val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
-            val prefixMappings = listOf(
-                "/external_files_path/" to externalStorage,
-                "/external-path/" to externalStorage,
-                "/root_path/" to "",
-                "/files/" to externalStorage,
-                "/storage/" to "/storage"
-            )
-            for ((prefix, basePath) in prefixMappings) {
-                val idx = uriPath.indexOf(prefix)
-                if (idx >= 0) {
-                    val relativePart = uriPath.substring(idx + prefix.length)
-                    val candidate =
-                        if (basePath.isEmpty()) "/$relativePart" else "$basePath/$relativePart"
-                    if (File(candidate).isFile) return candidate
-                }
-            }
-        }
-        return null
     }
 }

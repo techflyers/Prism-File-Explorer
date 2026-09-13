@@ -92,11 +92,14 @@ import com.raival.compose.file.explorer.App.Companion.logger
 import com.raival.compose.file.explorer.R
 import com.raival.compose.file.explorer.screen.viewer.ViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.image.ImageEditorActivity
+import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerActivity
 import com.raival.compose.file.explorer.screen.viewer.image.ImageViewerInstance
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo
 import com.raival.compose.file.explorer.screen.viewer.image.misc.ImageInfo.Companion.extractImageInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
@@ -112,6 +115,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
     var showControls by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var isDeleting by remember { mutableStateOf(false) }
     var imageInfo by remember { mutableStateOf<ImageInfo?>(null) }
     var rotationAngle by remember { mutableFloatStateOf(0f) }
     var imageDimensions by remember { mutableStateOf("" to "") }
@@ -120,37 +124,48 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 
     val scope = rememberCoroutineScope()
     var imageUris by remember { mutableStateOf(instance.imageList.ifEmpty { listOf(instance.uri) }) }
+    var imagePaths by remember { mutableStateOf(instance.imagePaths) }
     val imageList = imageUris
     val pagerState = rememberPagerState(
         initialPage = instance.initialIndex.coerceIn(0, (imageList.size - 1).coerceAtLeast(0)),
         pageCount = { imageList.size }
     )
 
-    val currentUri = imageList[pagerState.currentPage]
+    val safeIndex = pagerState.currentPage.coerceIn(0, (imageList.size - 1).coerceAtLeast(0))
+    val currentUri = imageList.getOrNull(safeIndex)
 
-    // Shared zoom state is per-page inside the pager; track current page's state
-    // so we can reset zoom when the settled page changes (prevents stuck swipe
-    // after switching between different aspect ratios / dimensions).
-
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
-            .distinctUntilChanged()
-            .collect {
-                rotationAngle = 0f
-                imageDimensions = "" to ""
-                imageInfo = null
-            }
+    if (imageList.isEmpty() || currentUri == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        )
+        return
     }
 
     LaunchedEffect(currentUri) {
         rotationAngle = 0f
-        imageDimensions = "" to ""
-        imageInfo = null
+        val resolvedPath = imagePaths.getOrNull(safeIndex)
+        withContext(Dispatchers.IO) {
+            val info = extractImageInfo(currentUri, explicitPath = resolvedPath)
+            withContext(Dispatchers.Main) {
+                imageInfo = info
+                if (info.dimensions.contains("×")) {
+                    val parts = info.dimensions.split("×").map { it.trim() }
+                    if (parts.size == 2) {
+                        imageDimensions = parts[0] to parts[1]
+                    }
+                }
+            }
+        }
     }
 
-    LaunchedEffect(currentUri, imageDimensions.first) {
-        if (imageDimensions.first.isNotEmpty()) {
-            imageInfo = extractImageInfo(currentUri, imageDimensions.first, imageDimensions.second)
+    LaunchedEffect(imageDimensions) {
+        if (imageDimensions.first.isNotEmpty() && imageDimensions.second.isNotEmpty()) {
+            val newDims = "${imageDimensions.first} × ${imageDimensions.second}"
+            if (imageInfo != null && imageInfo?.dimensions != newDims) {
+                imageInfo = imageInfo?.copy(dimensions = newDims)
+            }
         }
     }
 
@@ -176,9 +191,9 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
             modifier = Modifier.fillMaxSize(),
             userScrollEnabled = true,
             beyondViewportPageCount = 1,
-            key = { page -> imageList[page].toString() }
+            key = { page -> imageList.getOrNull(page)?.toString() ?: page.toString() }
         ) { page ->
-            val pageUri = imageList[page]
+            val pageUri = imageList.getOrNull(page) ?: return@HorizontalPager
             val zoomableState = rememberZoomableState()
             val imageState = rememberZoomableImageState(zoomableState)
 
@@ -211,7 +226,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                                     image = state.image
                                     isLoading = false
                                     if (page == pagerState.currentPage) {
-                                        image?.let {
+                                        state.image?.let {
                                             imageDimensions = "${it.width}" to "${it.height}"
                                         }
                                     }
@@ -238,13 +253,22 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 
                     if (isLoading) LoadingState()
 
-                    LaunchedEffect(image, page) {
+                    LaunchedEffect(image, pagerState.currentPage) {
                         if (image != null && page == pagerState.currentPage) {
+                            image?.let {
+                                imageDimensions = "${it.width}" to "${it.height}"
+                            }
                             try {
-                                val bitmap = image!!.toBitmap().copy(Bitmap.Config.ARGB_8888, false)
-                                val palette = Palette.from(bitmap).generate()
-                                dominantColor = Color(palette.getDominantColor(defaultColor.toArgb()))
-                                secondaryColor = Color(palette.getMutedColor(defaultColor.toArgb()))
+                                withContext(Dispatchers.Default) {
+                                    val bitmap = image!!.toBitmap().copy(Bitmap.Config.ARGB_8888, false)
+                                    val palette = Palette.from(bitmap).generate()
+                                    val dominant = Color(palette.getDominantColor(defaultColor.toArgb()))
+                                    val secondary = Color(palette.getMutedColor(defaultColor.toArgb()))
+                                    withContext(Dispatchers.Main) {
+                                        dominantColor = dominant
+                                        secondaryColor = secondary
+                                    }
+                                }
                             } catch (_: Exception) {
                             }
                         }
@@ -324,7 +348,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                             }
                             if (imageList.size > 1) {
                                 if (isNotEmpty()) append(" • ")
-                                append("${pagerState.currentPage + 1} / ${imageList.size}")
+                                append("${safeIndex + 1} / ${imageList.size}")
                             }
                         }
                         if (subtitle.isNotEmpty()) {
@@ -426,7 +450,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
                     ) {
                         Text(
-                            text = "${pagerState.currentPage + 1} / ${imageList.size}",
+                            text = "${safeIndex + 1} / ${imageList.size}",
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
@@ -438,45 +462,87 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
         }
 
         if (showInfo) {
-            imageInfo?.let { info ->
-                ImageInfoBottomSheet(imageInfo = info, onDismiss = { showInfo = false })
-            }
+            val info = imageInfo ?: extractImageInfo(
+                currentUri,
+                imageDimensions.first,
+                imageDimensions.second,
+                imagePaths.getOrNull(safeIndex)
+            ).also { imageInfo = it }
+            ImageInfoBottomSheet(imageInfo = info, onDismiss = { showInfo = false })
         }
 
         if (showDeleteConfirmation) {
             AlertDialog(
-                onDismissRequest = { showDeleteConfirmation = false },
+                onDismissRequest = {
+                    if (!isDeleting) showDeleteConfirmation = false
+                },
                 title = { Text(stringResource(R.string.delete_confirmation)) },
                 text = { Text(stringResource(R.string.delete_confirmation_message)) },
                 confirmButton = {
-                    TextButton(onClick = {
-                        showDeleteConfirmation = false
-                        val path = imageInfo?.path
-                        val viewerActivity = context as? ViewerActivity
-                        val deleted = if (!path.isNullOrEmpty()) {
-                            java.io.File(path).delete()
-                        } else {
-                            runCatching { context.contentResolver.delete(currentUri, null, null) }.getOrDefault(0) > 0
-                        }
-                        if (deleted) {
-                            viewerActivity?.onFileDeleted(path)
-                            val deletedIndex = pagerState.currentPage
-                            val remaining = imageList.filterIndexed { index, _ -> index != deletedIndex }
-                            imageUris = remaining
-                            if (remaining.isEmpty()) {
-                                viewerActivity?.finish()
+                    TextButton(
+                        enabled = !isDeleting,
+                        onClick = {
+                            val deletedIndex = pagerState.currentPage.coerceIn(0, imageList.lastIndex)
+                            val path = imagePaths.getOrNull(deletedIndex)
+                                ?: imageInfo?.path
+                                ?: ImageViewerActivity.resolveFilePath(context, currentUri)
+                            val uriToDelete = imageList[deletedIndex]
+                            val viewerActivity = context as? ViewerActivity
+
+                            val deleted = if (!path.isNullOrEmpty() && java.io.File(path).exists()) {
+                                java.io.File(path).delete()
                             } else {
-                                scope.launch {
-                                    pagerState.animateScrollToPage(deletedIndex.coerceAtMost(remaining.lastIndex))
+                                runCatching { context.contentResolver.delete(uriToDelete, null, null) }.getOrDefault(0) > 0
+                            }
+
+                            if (deleted) {
+                                viewerActivity?.onFileDeleted(path)
+                                val remainingUris = imageList.filterIndexed { index, _ -> index != deletedIndex }
+                                val remainingPaths = if (imagePaths.size == imageList.size) {
+                                    imagePaths.filterIndexed { index, _ -> index != deletedIndex }
+                                } else {
+                                    imagePaths
                                 }
+
+                                showDeleteConfirmation = false
+
+                                if (remainingUris.isEmpty()) {
+                                    imageUris = emptyList()
+                                    imagePaths = emptyList()
+                                    viewerActivity?.finish()
+                                } else if (deletedIndex == imageList.lastIndex) {
+                                    // At last image: must go back to previous image
+                                    val targetPage = deletedIndex - 1
+                                    isDeleting = true
+                                    scope.launch {
+                                        try {
+                                            pagerState.animateScrollToPage(targetPage)
+                                        } catch (_: Exception) {
+                                            pagerState.scrollToPage(targetPage)
+                                        } finally {
+                                            imageUris = remainingUris
+                                            imagePaths = remainingPaths
+                                            isDeleting = false
+                                        }
+                                    }
+                                } else {
+                                    // Not at last image: advance to next image (which moves into deletedIndex)
+                                    imageUris = remainingUris
+                                    imagePaths = remainingPaths
+                                }
+                            } else {
+                                showDeleteConfirmation = false
                             }
                         }
-                    }) {
+                    ) {
                         Text(stringResource(R.string.confirm))
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirmation = false }) {
+                    TextButton(
+                        enabled = !isDeleting,
+                        onClick = { showDeleteConfirmation = false }
+                    ) {
                         Text(stringResource(R.string.cancel))
                     }
                 }
