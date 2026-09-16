@@ -54,9 +54,13 @@ class AudioPlayerInstance(
     private val _colorScheme = MutableStateFlow(AudioPlayerColorScheme())
     val audioPlayerColorScheme: StateFlow<AudioPlayerColorScheme> = _colorScheme.asStateFlow()
 
+    private val _isSleepTimerVisible = MutableStateFlow(false)
+    val isSleepTimerVisible: StateFlow<Boolean> = _isSleepTimerVisible.asStateFlow()
+
     private var defaultColorScheme: AudioPlayerColorScheme = AudioPlayerColorScheme()
     private var exoPlayer: ExoPlayer? = null
     private var positionTrackingJob: Job? = null
+    private var sleepTimerJob: Job? = null
 
     @OptIn(UnstableApi::class)
     suspend fun initializePlayer(context: Context, uri: Uri) {
@@ -389,8 +393,41 @@ class AudioPlayerInstance(
         _isVolumeVisible.value = !_isVolumeVisible.value
     }
 
+    fun toggleSleepTimerPanel() {
+        _isSleepTimerVisible.value = !_isSleepTimerVisible.value
+    }
+
+    fun toggleShuffle() {
+        val newState = !_playerState.value.isShuffleEnabled
+        exoPlayer?.shuffleModeEnabled = newState
+        _playerState.update { it.copy(isShuffleEnabled = newState) }
+    }
+
+    fun startSleepTimer(durationMs: Long) {
+        sleepTimerJob?.cancel()
+        _playerState.update { it.copy(sleepTimerRemainingMs = durationMs) }
+        sleepTimerJob = CoroutineScope(Dispatchers.Main).launch {
+            var remaining = durationMs
+            while (remaining > 0) {
+                delay(1000L)
+                remaining -= 1000L
+                _playerState.update { it.copy(sleepTimerRemainingMs = remaining.coerceAtLeast(0L)) }
+            }
+            // Timer expired — pause playback
+            exoPlayer?.pause()
+            _playerState.update { it.copy(sleepTimerRemainingMs = 0L) }
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _playerState.update { it.copy(sleepTimerRemainingMs = 0L) }
+    }
+
     override fun onClose() {
         positionTrackingJob?.cancel()
+        sleepTimerJob?.cancel()
         exoPlayer?.release()
         exoPlayer = null
     }

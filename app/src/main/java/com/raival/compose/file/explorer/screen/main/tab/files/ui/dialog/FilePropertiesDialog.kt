@@ -204,12 +204,14 @@ private fun SingleFileContent(details: PropertiesState.SingleContentProperties) 
             PropertyRow(
                 icon = Icons.Default.DriveFileRenameOutline,
                 label = stringResource(R.string.name),
-                value = details.name
+                value = details.name,
+                maxLines = Int.MAX_VALUE
             )
             PropertyRow(
                 icon = Icons.Default.FolderOpen,
                 label = stringResource(R.string.location),
-                value = details.path
+                value = details.path,
+                maxLines = Int.MAX_VALUE
             )
             PropertyRow(
                 icon = Icons.Default.Category,
@@ -288,6 +290,40 @@ private fun MultipleFilesContent(details: PropertiesState.MultipleContentPropert
                 progressFlow = details.countProgress
             )
         }
+
+        PropertySection(title = stringResource(R.string.checksums_and_duplicates)) {
+            AsyncPropertyRow(
+                icon = Icons.Default.Fingerprint,
+                label = stringResource(R.string.md5_checksum),
+                valueFlow = details.checksumStatus,
+                progressFlow = details.checksumProgress
+            )
+            val duplicates by details.duplicateGroups.collectAsState()
+            if (duplicates.isNotEmpty()) {
+                duplicates.forEach { (hash, duplicateNames) ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.duplicate_group, hash.take(8)),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        duplicateNames.forEach { name ->
+                            Text(
+                                text = "• $name",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 8.dp, top = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -328,7 +364,8 @@ private fun PropertySection(
 fun PropertyRow(
     icon: ImageVector,
     label: String,
-    value: String
+    value: String,
+    maxLines: Int = 3
 ) {
     if (value.isNotBlank()) {
         Row(
@@ -352,7 +389,8 @@ fun PropertyRow(
             Space(8.dp)
             CopiableText(
                 text = value,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                maxLines = maxLines
             )
         }
     }
@@ -433,7 +471,8 @@ private fun PulsingDot() {
 fun CopiableText(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.onSurface
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    maxLines: Int = 3
 ) {
     LocalContext.current
     LocalClipboard.current
@@ -451,8 +490,8 @@ fun CopiableText(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = color,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = maxLines,
+            overflow = if (maxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
                 .pointerInput(text) {

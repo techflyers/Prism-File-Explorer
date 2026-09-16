@@ -42,9 +42,14 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TimerOff
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -112,6 +117,7 @@ fun MusicPlayerScreen(
     val metadata by audioPlayerInstance.metadata.collectAsState()
     val isEqualizerVisible by audioPlayerInstance.isEqualizerVisible.collectAsState()
     val isVolumeVisible by audioPlayerInstance.isVolumeVisible.collectAsState()
+    val isSleepTimerVisible by audioPlayerInstance.isSleepTimerVisible.collectAsState()
     val customColorScheme by audioPlayerInstance.audioPlayerColorScheme.collectAsState()
     val defaultScheme = AudioPlayerColorScheme(
         primary = MaterialTheme.colorScheme.primary,
@@ -189,6 +195,10 @@ fun MusicPlayerScreen(
                     onPlaylistClick = { showPlaylist = true },
                     hasPlaylist = audioPlayerInstance.playlist.size > 1,
                     audioPlayerColorScheme = customColorScheme,
+                    isShuffleEnabled = playerState.isShuffleEnabled,
+                    onShuffleClick = { audioPlayerInstance.toggleShuffle() },
+                    sleepTimerRemainingMs = playerState.sleepTimerRemainingMs,
+                    onSleepTimerClick = { audioPlayerInstance.toggleSleepTimerPanel() },
                     onOpenWithClick = {
                         val openIntent = Intent(Intent.ACTION_VIEW).apply {
                             data = audioPlayerInstance.uri
@@ -289,6 +299,27 @@ fun MusicPlayerScreen(
                     colorScheme = customColorScheme
                 )
             }
+
+            // Sleep timer overlay
+            AnimatedVisibility(
+                visible = isSleepTimerVisible,
+                enter = slideInVertically { -it } + fadeIn() + scaleIn(initialScale = 0.6f),
+                exit = slideOutVertically { -it } + fadeOut()
+            ) {
+                SleepTimerView(
+                    remainingMs = playerState.sleepTimerRemainingMs,
+                    onSetTimer = { durationMs ->
+                        audioPlayerInstance.startSleepTimer(durationMs)
+                        audioPlayerInstance.toggleSleepTimerPanel()
+                    },
+                    onCancel = {
+                        audioPlayerInstance.cancelSleepTimer()
+                        audioPlayerInstance.toggleSleepTimerPanel()
+                    },
+                    onDismiss = { audioPlayerInstance.toggleSleepTimerPanel() },
+                    colorScheme = customColorScheme
+                )
+            }
         }
     }
 }
@@ -301,6 +332,10 @@ fun TopControls(
     onPlaylistClick: () -> Unit = {},
     hasPlaylist: Boolean = false,
     audioPlayerColorScheme: AudioPlayerColorScheme,
+    isShuffleEnabled: Boolean = false,
+    onShuffleClick: () -> Unit = {},
+    sleepTimerRemainingMs: Long = 0L,
+    onSleepTimerClick: () -> Unit = {},
     onOpenWithClick: (() -> Unit)? = null,
 ) {
     Row(
@@ -319,6 +354,52 @@ fun TopControls(
         Spacer(Modifier.weight(1f))
 
         Row {
+            // Shuffle
+            IconButton(onClick = onShuffleClick) {
+                Icon(
+                    Icons.Default.Shuffle,
+                    contentDescription = "Shuffle",
+                    tint = if (isShuffleEnabled)
+                        audioPlayerColorScheme.primary
+                    else
+                        audioPlayerColorScheme.tintColor.copy(alpha = 0.5f)
+                )
+            }
+
+            // Sleep timer
+            IconButton(onClick = onSleepTimerClick) {
+                val isTimerActive = sleepTimerRemainingMs > 0
+                if (isTimerActive) {
+                    BadgedBox(
+                        badge = {
+                            Badge(
+                                containerColor = audioPlayerColorScheme.primary
+                            ) {
+                                val minutes = (sleepTimerRemainingMs / 60000).toInt()
+                                val seconds = ((sleepTimerRemainingMs % 60000) / 1000).toInt()
+                                Text(
+                                    text = if (minutes > 0) "${minutes}m" else "${seconds}s",
+                                    fontSize = 9.sp,
+                                    color = audioPlayerColorScheme.tintColor
+                                )
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Timer,
+                            contentDescription = "Sleep Timer",
+                            tint = audioPlayerColorScheme.primary
+                        )
+                    }
+                } else {
+                    Icon(
+                        Icons.Default.Timer,
+                        contentDescription = "Sleep Timer",
+                        tint = audioPlayerColorScheme.tintColor.copy(alpha = 0.5f)
+                    )
+                }
+            }
+
             if (hasPlaylist) {
                 IconButton(onClick = onPlaylistClick) {
                     Icon(
@@ -874,6 +955,129 @@ fun EqualizerView(
                         text = stringResource(R.string.done),
                         color = colorScheme.tintColor
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SleepTimerView(
+    remainingMs: Long,
+    onSetTimer: (Long) -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+    colorScheme: AudioPlayerColorScheme
+) {
+    val isActive = remainingMs > 0
+    val presets = listOf(
+        5L to "5 min",
+        10L to "10 min",
+        15L to "15 min",
+        30L to "30 min",
+        60L to "1 hour"
+    )
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        colors = CardDefaults.cardColors(
+            containerColor = colorScheme.surface.copy(alpha = 0.95f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sleep Timer",
+                    color = colorScheme.tintColor,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = null,
+                        tint = colorScheme.tintColor
+                    )
+                }
+            }
+
+            if (isActive) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val minutes = (remainingMs / 60000).toInt()
+                val seconds = ((remainingMs % 60000) / 1000).toInt()
+                Text(
+                    text = "Playback will pause in ${if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"}",
+                    color = colorScheme.tintColor.copy(alpha = 0.8f),
+                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.primary.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.TimerOff,
+                        contentDescription = null,
+                        tint = colorScheme.tintColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Space(8.dp)
+                    Text(
+                        text = "Cancel Timer",
+                        color = colorScheme.tintColor
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Stop playing after",
+                    color = colorScheme.tintColor.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presets.forEach { (minutes, label) ->
+                        Button(
+                            onClick = { onSetTimer(minutes * 60 * 1000) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.primary.copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Text(
+                                text = label,
+                                color = colorScheme.tintColor,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -4,17 +4,31 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -50,6 +65,13 @@ import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRowIcon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+private enum class OpenWithSort {
+    RECENT,
+    NAME_ASC,
+    NAME_DESC,
+    PACKAGE
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OpenWithAppListDialog(
@@ -70,30 +92,17 @@ fun OpenWithAppListDialog(
             mutableStateOf(true)
         }
 
+        var searchQuery by remember { mutableStateOf("") }
+        var sortOption by remember { mutableStateOf(OpenWithSort.RECENT) }
+
         val scope = rememberCoroutineScope()
 
         fun loadActivities(mimeType: String) {
             loading.value = true
             scope.launch(Dispatchers.IO) {
                 val list = contentHolder.getAppsHandlingFile(mimeType)
-
-                val recentHistory: RecentOpenWithApps =
-                    fromJson(globalClass.preferencesManager.recentOpenWithApps)
-                        ?: RecentOpenWithApps()
-
-                val recentForExt = recentHistory.history
-                    .filter { it.extension == extension }
-                    .mapIndexed { index, entry -> Pair(entry.packageName + "/" + entry.className, index) }
-                    .toMap()
-
-                val sorted = list.sortedWith(
-                    compareBy { item ->
-                        recentForExt[item.packageName + "/" + item.name] ?: Int.MAX_VALUE
-                    }
-                )
-
                 appsList.clear()
-                appsList.addAll(sorted)
+                appsList.addAll(list)
                 loading.value = false
             }
         }
@@ -104,11 +113,40 @@ fun OpenWithAppListDialog(
 
         val recentHistory: RecentOpenWithApps =
             fromJson(globalClass.preferencesManager.recentOpenWithApps) ?: RecentOpenWithApps()
-        val recentKeys = remember(recentHistory.history) {
+        val recentForExt = remember(recentHistory.history, extension) {
             recentHistory.history
                 .filter { it.extension == extension }
-                .map { it.packageName + "/" + it.className }
-                .toSet()
+                .mapIndexed { index, entry -> Pair(entry.packageName + "/" + entry.className, index) }
+                .toMap()
+        }
+        val recentKeys = remember(recentForExt) {
+            recentForExt.keys
+        }
+
+        val filteredAndSortedApps = remember(appsList.toList(), searchQuery, sortOption, recentForExt) {
+            val baseList = if (searchQuery.isBlank()) {
+                appsList.toList()
+            } else {
+                val query = searchQuery.trim().lowercase()
+                appsList.filter {
+                    it.label.lowercase().contains(query) ||
+                    it.packageName.lowercase().contains(query) ||
+                    it.name.lowercase().contains(query)
+                }
+            }
+
+            when (sortOption) {
+                OpenWithSort.RECENT -> {
+                    baseList.sortedWith(
+                        compareBy { item ->
+                            recentForExt[item.packageName + "/" + item.name] ?: Int.MAX_VALUE
+                        }
+                    )
+                }
+                OpenWithSort.NAME_ASC -> baseList.sortedBy { it.label.lowercase() }
+                OpenWithSort.NAME_DESC -> baseList.sortedByDescending { it.label.lowercase() }
+                OpenWithSort.PACKAGE -> baseList.sortedBy { it.packageName.lowercase() }
+            }
         }
 
         BottomSheetDialog(
@@ -120,7 +158,7 @@ fun OpenWithAppListDialog(
                         .padding(horizontal = 16.dp)
                         .fillMaxWidth(),
                     text = stringResource(id = R.string.open_with),
-                    fontSize = 18.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
                 )
@@ -146,6 +184,128 @@ fun OpenWithAppListDialog(
                     }
                 )
 
+                Space(size = 8.dp)
+
+                // Search field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(stringResource(R.string.search)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                // Sort row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.sort_by),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    var showSortMenu by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { showSortMenu = true }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Space(4.dp)
+                            Text(
+                                text = when (sortOption) {
+                                    OpenWithSort.RECENT -> "Recent"
+                                    OpenWithSort.NAME_ASC -> stringResource(R.string.name_a_z)
+                                    OpenWithSort.NAME_DESC -> "Name (Z-A)"
+                                    OpenWithSort.PACKAGE -> stringResource(R.string.package_name)
+                                },
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Recent") },
+                                onClick = {
+                                    sortOption = OpenWithSort.RECENT
+                                    showSortMenu = false
+                                },
+                                trailingIcon = {
+                                    if (sortOption == OpenWithSort.RECENT) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.name_a_z)) },
+                                onClick = {
+                                    sortOption = OpenWithSort.NAME_ASC
+                                    showSortMenu = false
+                                },
+                                trailingIcon = {
+                                    if (sortOption == OpenWithSort.NAME_ASC) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Name (Z-A)") },
+                                onClick = {
+                                    sortOption = OpenWithSort.NAME_DESC
+                                    showSortMenu = false
+                                },
+                                trailingIcon = {
+                                    if (sortOption == OpenWithSort.NAME_DESC) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.package_name)) },
+                                onClick = {
+                                    sortOption = OpenWithSort.PACKAGE
+                                    showSortMenu = false
+                                },
+                                trailingIcon = {
+                                    if (sortOption == OpenWithSort.PACKAGE) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
                 AnimatedVisibility(
                     visible = loading.value
                 ) {
@@ -153,16 +313,17 @@ fun OpenWithAppListDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
-                            .padding(top = 8.dp)
+                            .padding(top = 4.dp)
                     )
                 }
 
                 LazyColumn {
-                    itemsIndexed(appsList, key = { index, item -> item.id }) { index, item ->
+                    itemsIndexed(filteredAndSortedApps, key = { _, item -> item.id }) { index, item ->
                         val itemKey = item.packageName + "/" + item.name
                         val isRecent = itemKey in recentKeys
+                        val showHeaders = sortOption == OpenWithSort.RECENT && searchQuery.isBlank()
 
-                        if (index == 0 && isRecent) {
+                        if (showHeaders && index == 0 && isRecent) {
                             Text(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -174,9 +335,9 @@ fun OpenWithAppListDialog(
                             )
                         }
 
-                        val prevIsRecent = appsList.getOrNull(index - 1)
+                        val prevIsRecent = filteredAndSortedApps.getOrNull(index - 1)
                             ?.let { (it.packageName + "/" + it.name) in recentKeys } == true
-                        if (!isRecent && index > 0 && prevIsRecent) {
+                        if (showHeaders && !isRecent && index > 0 && prevIsRecent) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(
                                     horizontal = 16.dp,

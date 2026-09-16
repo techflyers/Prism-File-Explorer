@@ -45,6 +45,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var enableBottomToolbar by prefMutableState(
+        keyName = "enableBottomToolbar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var homeTabLayout by prefMutableState(
         keyName = "homeTabLayout",
         defaultValue = getDefaultHomeLayout().toJson(),
@@ -53,12 +59,30 @@ class PreferencesManager {
 
     var dateTimeFormat by prefMutableState(
         keyName = "dateTimeFormat",
-        defaultValue = "MMM dd, yyyy HH:mm:ss",
+        defaultValue = "dd/MM/yy • HH:mm",
         getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var showPathBar by prefMutableState(
+        keyName = "showPathBar",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var disableTabBar by prefMutableState(
+        keyName = "disableTabBar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
     var hideToolbar by prefMutableState(
         keyName = "hideToolbar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var autoHideToolbars by prefMutableState(
+        keyName = "autoHideToolbars",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -91,6 +115,12 @@ class PreferencesManager {
 
     var showFolderContentCount by prefMutableState(
         keyName = "showFolderContentCount",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var deepEmptyFolderCheck by prefMutableState(
+        keyName = "deepEmptyFolderCheck",
         defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -501,11 +531,18 @@ class PreferencesManager {
     }
 
     fun setDefaultViewConfigPrefs(prefs: ViewConfigs) {
+        itemSize = prefs.itemSize
         runBlocking {
             globalClass.prefDataStore.edit {
                 it[stringPreferencesKey("viewConfigPrefs")] = prefs.toJson()
             }
         }
+    }
+
+    fun setGlobalItemSize(newSize: Int) {
+        itemSize = newSize
+        val current = getDefaultViewConfigPrefs()
+        setDefaultViewConfigPrefs(current.copy(itemSize = newSize))
     }
 
     fun getViewConfigPrefsFor(content: ContentHolder): ViewConfigs {

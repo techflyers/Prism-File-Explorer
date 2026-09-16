@@ -288,7 +288,7 @@ class ZipFileHolder(
 
     private suspend fun createDetails(): String {
         // Right side: date formatted as DD/MM/YY • HH:MM
-        val rightSide = lastModified.toFormattedDate(customFormat = "dd/MM/yy • HH:mm")
+        val rightSide = lastModified.toFormattedDate()
 
         val prefs = globalClass.preferencesManager
         val leftSide = if (node.isDirectory) {
@@ -309,10 +309,7 @@ class ZipFileHolder(
     private suspend fun getFormattedIconCount(): String {
         if (filesCount == 0 && foldersCount == 0) {
             runBlocking {
-                listContent().forEach {
-                    if (it.node.isDirectory) foldersCount++
-                    else filesCount++
-                }
+                listContent()
             }
         }
 
@@ -322,7 +319,7 @@ class ZipFileHolder(
                 if (filesCount > 0) append(" • ")
             }
             if (filesCount > 0) append("$filesCount files")
-            if (foldersCount == 0 && filesCount == 0) append(globalClass.getString(R.string.empty_folder))
+            if (foldersCount == 0 && filesCount == 0) append("Ø")
         }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
 import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -42,7 +43,7 @@ fun FileListContainer() {
                         globalClass.getString(R.string.extra_large)
                     ),
                     selectedChoice = prefs.itemSize,
-                    onSelect = { prefs.itemSize = it }
+                    onSelect = { prefs.setGlobalItemSize(it) }
                 )
             }
         )
@@ -71,6 +72,19 @@ fun FileListContainer() {
             icon = Icons.Rounded.Numbers,
             switchState = prefs.showFolderContentCount,
             onSwitchChange = { prefs.showFolderContentCount = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Deep empty folder check",
+            supportingText = "Show an unslashed null icon (○) for folders containing subfolders but no files within",
+            icon = Icons.Rounded.RadioButtonUnchecked,
+            switchState = prefs.deepEmptyFolderCheck,
+            onSwitchChange = { prefs.deepEmptyFolderCheck = it }
         )
 
         HorizontalDivider(

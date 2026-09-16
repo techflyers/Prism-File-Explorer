@@ -595,10 +595,11 @@ class FilePickerActivity : BaseActivity() {
                             .padding(32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = stringResource(R.string.empty_folder),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Icon(
+                            imageVector = Icons.Rounded.Block,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp).alpha(0.35f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 } else {

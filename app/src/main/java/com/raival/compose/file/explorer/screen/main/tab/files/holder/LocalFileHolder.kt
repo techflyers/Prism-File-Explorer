@@ -95,7 +95,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
         private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
 
         fun getCachedDetails(file: File, lastModified: Long): String? {
-            val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+            val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}"
             return detailsCache.get(cacheKey)
         }
     }
@@ -103,33 +103,34 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override suspend fun getDetails(): String {
         if (details.isNotEmpty()) return details
 
-        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}"
         val cached = detailsCache.get(cacheKey)
         if (cached != null) {
             details = cached
             return cached
         }
 
-        // Right side: date formatted as DD/MM/YY • HH:MM
-        val rightSide = lastModified.toFormattedDate(
-            customFormat = "dd/MM/yy • HH:mm"
-        )
+        // Right side: date formatted according to preferences
+        val rightSide = lastModified.toFormattedDate()
 
         val prefs = globalClass.preferencesManager
         val leftSide = if (file.isDirectory) {
             if (prefs.showFolderContentCount && file.canRead()) {
-                // Pass showHidden so hidden items are only counted when enabled
-                val count = getContentCount(prefs.showHiddenFiles)
+                val count = getContentCount()
                 buildString {
-                    if (count.folders > 0) {
-                        append("${count.folders} folders")
-                        if (count.files > 0) append(" • ")
-                    }
-                    if (count.files > 0) {
-                        append("${count.files} files")
-                    }
-                    if (count.folders == 0 && count.files == 0) {
-                        append(globalClass.getString(R.string.empty_folder))
+                    if (prefs.deepEmptyFolderCheck && count.folders > 0 && count.files == 0 &&
+                        com.raival.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker.isFolderEmptyWithin(file)) {
+                        append("○")
+                    } else if (count.folders == 0 && count.files == 0) {
+                        append("Ø")
+                    } else {
+                        if (count.folders > 0) {
+                            append("${count.folders} folders")
+                            if (count.files > 0) append(" • ")
+                        }
+                        if (count.files > 0) {
+                            append("${count.files} files")
+                        }
                     }
                 }
             } else ""
@@ -233,6 +234,8 @@ class LocalFileHolder(file: File) : ContentHolder() {
                             combinedList.add(LocalFileHolder(child))
                         }
                     }
+                } else if (subDir.isFile && subDir.name != "metadata.json") {
+                    combinedList.add(LocalFileHolder(subDir))
                 }
             }
             combinedList.forEach {
@@ -317,10 +320,8 @@ class LocalFileHolder(file: File) : ContentHolder() {
         }
     }
 
-    override suspend fun getContentCount(): ContentCount = getContentCount(globalClass.preferencesManager.showHiddenFiles)
-
-    suspend fun getContentCount(showHidden: Boolean): ContentCount {
-        val cacheKey = "${file.absolutePath}:$lastModified:$showHidden"
+    override suspend fun getContentCount(): ContentCount {
+        val cacheKey = "${file.absolutePath}:$lastModified"
         val cached = contentCountCache.get(cacheKey)
         if (cached != null) return cached
 
@@ -331,10 +332,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 if (subDir.isDirectory) {
                     subDir.listFiles()?.forEach { child ->
                         if (child.name != "metadata.json") {
-                            val hidden = child.name.startsWith(".")
-                            if (showHidden || !hidden) {
-                                if (child.isDirectory) folders++ else files++
-                            }
+                            if (child.isDirectory) folders++ else files++
                         }
                     }
                 }
@@ -346,16 +344,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
             return count
         }
 
-        // Count with the current showHidden value
         fileCount = 0
         folderCount = 0
         file.listFiles()?.let { list ->
             list.forEach {
                 if (it.name != "metadata.json") {
-                    val hidden = it.name.startsWith(".")
-                    if (showHidden || !hidden) {
-                        if (it.isFile) fileCount++ else folderCount++
-                    }
+                    if (it.isFile) fileCount++ else folderCount++
                 }
             }
         }
@@ -364,6 +358,8 @@ class LocalFileHolder(file: File) : ContentHolder() {
         contentCountCache.put(cacheKey, count)
         return count
     }
+
+    suspend fun getContentCount(showHidden: Boolean): ContentCount = getContentCount()
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
         File(file, name).let { newFile ->

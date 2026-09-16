@@ -129,7 +129,7 @@ abstract class ContentHolder {
     suspend fun getFormattedFileCount(filesCount: Int, foldersCount: Int): String {
         return buildString {
             if (foldersCount == 0 && filesCount == 0) {
-                append(globalClass.getString(R.string.empty_folder))
+                append("Ø")
             } else {
                 if (foldersCount > 0) {
                     append(

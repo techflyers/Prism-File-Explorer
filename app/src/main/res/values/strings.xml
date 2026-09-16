@@ -31,6 +31,7 @@
     <string name="install">Install</string>
     <string name="bookmarks">Bookmarks</string>
     <string name="delete">Delete</string>
+    <string name="cut">Cut</string>
     <string name="empty">Empty</string>
     <string name="task">Task</string>
     <string name="search">Search</string>
@@ -67,15 +68,22 @@
     <string name="sort_by">Sort by</string>
     <string name="apply_to_this_folder_only">Apply to this folder only</string>
     <string name="name_a_z">Name (A-Z)</string>
+    <string name="name_z_a">Name (Z-A)</string>
     <string name="date_newer">Date (newer)</string>
+    <string name="date_older">Date (older)</string>
     <string name="size_smaller">Size (smaller)</string>
+    <string name="size_larger">Size (larger)</string>
     <string name="folders_first">Folders first</string>
     <string name="reverse">Reverse</string>
+    <string name="custom_format">Custom format…</string>
+    <string name="custom_date_format">Custom Date Format</string>
+    <string name="enter_date_format_pattern">Enter date format pattern (e.g. dd/MM/yy • HH:mm:ss):</string>
     <string name="mime_type">MIME Type</string>
     <string name="close">Close</string>
     <string name="close_others">Close others</string>
     <string name="rename">Rename</string>
     <string name="copy_path">Copy path</string>
+    <string name="restore">Restore</string>
     <string name="locate">Locate</string>
     <string name="results">Results</string>
     <string name="search_query">Search Query</string>
@@ -144,6 +152,8 @@
     <string name="large">Large</string>
     <string name="extra_large">Extra large</string>
     <string name="file_list_size_desc">Select a suitable size for the file list</string>
+    <string name="enable_bottom_toolbar">Bottom toolbar</string>
+    <string name="enable_bottom_toolbar_desc">Show persistent bottom toolbar with quick actions</string>
     <string name="show_bottom_bar_labels">Show bottom options bar labels</string>
     <string name="move_toolbar_to_bottom">Move toolbar to bottom</string>
     <string name="move_tabs_to_bottom">Move tabs to bottom</string>
@@ -561,4 +571,12 @@
     <string name="controls_locked_hint">Controls are locked. Tap the lock icon to unlock</string>
     <string name="auto_hide_video_controls">Auto-hide video controls</string>
     <string name="auto_hide_video_controls_summary">Automatically hide playback controls during playback</string>
+
+    <!-- Checksums and Duplicates -->
+    <string name="checksums_and_duplicates">Checksums &amp; Duplicates</string>
+    <string name="all_files_distinct">All files are distinct</string>
+    <string name="duplicates_found">%1$d duplicate group(s) found</string>
+    <string name="no_applicable_files">No files to compare</string>
+    <string name="duplicate_group">Duplicates (%1$s)</string>
+    <string name="deselect_all">Deselect All</string>
 </resources>

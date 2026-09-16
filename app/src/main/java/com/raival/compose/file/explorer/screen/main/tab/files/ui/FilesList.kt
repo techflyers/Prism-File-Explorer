@@ -30,11 +30,14 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -230,29 +233,45 @@ private fun EmptyFolderContent(tab: FilesTab) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            modifier = Modifier
-                .fillMaxWidth()
-                .alpha(0.4f),
-            text = stringResource(
-                when {
-                    !tab.activeFolder.canRead -> R.string.cant_access_content
-                    else -> R.string.empty
-                }
-            ),
-            fontSize = 24.sp,
-            textAlign = TextAlign.Center
-        )
-        if (tab.activeFolder.canRead && !preferencesManager.showHiddenFiles) {
-            Space(12.dp)
+        if (!tab.activeFolder.canRead) {
             Text(
                 modifier = Modifier
                     .fillMaxWidth()
                     .alpha(0.4f),
-                text = stringResource(R.string.empty_without_hidden_files),
-                fontSize = 16.sp,
+                text = stringResource(R.string.cant_access_content),
+                fontSize = 20.sp,
                 textAlign = TextAlign.Center
             )
+        } else {
+            val hasHiddenItems = tab.foldersCount + tab.filesCount > 0
+            if (!hasHiddenItems) {
+                Icon(
+                    imageVector = Icons.Rounded.Block,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .alpha(0.35f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (!preferencesManager.showHiddenFiles) {
+                Icon(
+                    imageVector = Icons.Rounded.VisibilityOff,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .alpha(0.35f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Space(12.dp)
+                Text(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(0.4f),
+                    text = stringResource(R.string.empty_without_hidden_files),
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -401,6 +420,7 @@ private fun ColumnFileItem(
             tab.lastSelectedFileIndex = index
             onSelection(true)
         }
+        tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
     }
 
@@ -467,12 +487,13 @@ private fun ColumnFileItem(
                     item.displayName
                 }
 
-                Text(
+                MiddleEllipsisText(
                     text = displayText,
+                    isFolder = item.isFolder || (prefs.hideFileExtensions && item.isFile()),
+                    isSelected = isSelected || tab.highlightedFiles.contains(currentItemPath),
                     fontSize = fontSize.sp,
                     maxLines = 1,
                     lineHeight = (fontSize + 2).sp,
-                    overflow = TextOverflow.Ellipsis,
                     color = if (isSelected || tab.highlightedFiles.contains(currentItemPath)) {
                         colorScheme.primary
                     } else {
@@ -524,6 +545,7 @@ private fun GridFileItem(
             tab.lastSelectedFileIndex = index
             onSelection(true)
         }
+        tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
     }
 
@@ -624,13 +646,14 @@ private fun GridFileItem(
                             .padding(4.dp)
                     ) {
                         val fontSize = getFileListFontSize(tab.activeFolder) * 0.8
-                        Text(
+                        MiddleEllipsisText(
                             text = item.displayName,
+                            isFolder = item.isFolder,
+                            isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
                             fontSize = fontSize.sp,
                             fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
                             maxLines = 2,
                             lineHeight = (fontSize + 2).sp,
-                            overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
                             color = if (tab.highlightedFiles.contains(itemPath)) {
                                 colorScheme.primary
@@ -644,13 +667,14 @@ private fun GridFileItem(
             }
             if (!viewConfigs.galleryMode) {
                 Space(size = 4.dp)
-                Text(
+                MiddleEllipsisText(
                     text = item.displayName,
+                    isFolder = item.isFolder,
+                    isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
                     fontSize = (getFileListFontSize(tab.activeFolder) - 3).sp,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    color = if (isSelected) {
+                    color = if (isSelected || tab.highlightedFiles.contains(itemPath)) {
                         colorScheme.primary
                     } else {
                         colorScheme.onSurface
@@ -815,6 +839,8 @@ private fun FileDetails(
 
 private val folderCountPattern = Regex("(\\d+)\\s+folders?")
 private val fileCountPattern = Regex("(\\d+)\\s+files?")
+private val nullPattern = Regex("Ø")
+private val nullNoStrikePattern = Regex("○")
 
 @Composable
 private fun FileDetailsText(
@@ -826,7 +852,9 @@ private fun FileDetailsText(
     color: Color = Color.Unspecified
 ) {
     val matches = (folderCountPattern.findAll(details).map { it to "folder" } +
-        fileCountPattern.findAll(details).map { it to "file" })
+        fileCountPattern.findAll(details).map { it to "file" } +
+        nullPattern.findAll(details).map { it to "null" } +
+        nullNoStrikePattern.findAll(details).map { it to "null_no_strike" })
         .sortedBy { it.first.range.first }
         .toList()
 
@@ -853,14 +881,40 @@ private fun FileDetailsText(
             placeholder = androidx.compose.ui.text.Placeholder(14.sp, 14.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)
         ) {
             Icon(Icons.Rounded.InsertDriveFile, contentDescription = "Files", modifier = Modifier.size(14.dp))
+        },
+        "null-count-icon" to InlineTextContent(
+            placeholder = androidx.compose.ui.text.Placeholder(11.sp, 11.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Block,
+                contentDescription = "Empty",
+                modifier = Modifier.size(11.dp),
+                tint = color.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        },
+        "null-no-strike-icon" to InlineTextContent(
+            placeholder = androidx.compose.ui.text.Placeholder(11.sp, 11.sp, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.RadioButtonUnchecked,
+                contentDescription = "Empty within",
+                modifier = Modifier.size(11.dp),
+                tint = color.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
         }
     )
     val annotated = androidx.compose.ui.text.buildAnnotatedString {
         var cursor = 0
         matches.forEach { (match, type) ->
             append(details.substring(cursor, match.range.first))
-            appendInlineContent("$type-count-icon", "[$type icon]")
-            append(" ${match.groupValues[1]}")
+            when (type) {
+                "null" -> appendInlineContent("null-count-icon", "[empty]")
+                "null_no_strike" -> appendInlineContent("null-no-strike-icon", "[empty within]")
+                else -> {
+                    appendInlineContent("$type-count-icon", "[$type icon]")
+                    append(" ${match.groupValues[1]}")
+                }
+            }
             cursor = match.range.last + 1
         }
         append(details.substring(cursor))
@@ -984,5 +1038,6 @@ private fun handleLongClick(
         }
     }
     tab.lastSelectedFileIndex = index
+    tab.selectedFilesCount = tab.selectedFiles.size
     tab.quickReloadFiles()
 }

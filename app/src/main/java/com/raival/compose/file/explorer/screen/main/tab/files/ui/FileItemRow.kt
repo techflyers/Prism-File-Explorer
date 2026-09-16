@@ -71,6 +71,7 @@ fun FileItemRow(
             )
         },
         ignoreSizePreferences = ignoreSizePreferences,
+        isFolder = item.isFolder,
         onItemClick = onItemClick
     )
 }
@@ -81,6 +82,7 @@ fun ItemRow(
     subtitle: String,
     icon: @Composable () -> Unit = { },
     ignoreSizePreferences: Boolean = false,
+    isFolder: Boolean = false,
     onItemClick: (() -> Unit)? = null,
 ) {
     Column(
@@ -103,12 +105,12 @@ fun ItemRow(
             ) {
                 val fontSize = if (ignoreSizePreferences) FontSize.MEDIUM else getFileListFontSize()
 
-                Text(
+                MiddleEllipsisText(
                     text = title,
+                    isFolder = isFolder,
                     fontSize = fontSize.sp,
                     maxLines = 1,
-                    lineHeight = (fontSize + 2).sp,
-                    overflow = TextOverflow.Ellipsis
+                    lineHeight = (fontSize + 2).sp
                 )
                 if (subtitle.isNotEmpty()) {
                     FileDetailsText(

@@ -117,6 +117,7 @@ fun FileViewConfigDialog(
             } else {
                 prefs.setDefaultViewConfigPrefs(configs)
             }
+            tab.viewConfig = configs
         }
 
         BottomSheetDialog(

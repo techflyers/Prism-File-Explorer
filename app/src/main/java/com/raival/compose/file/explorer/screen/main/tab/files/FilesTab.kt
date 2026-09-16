@@ -10,6 +10,7 @@ import android.os.Environment
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -111,8 +112,11 @@ class FilesTab(
 
     var isLoading by mutableStateOf(false)
 
-    private var foldersCount = 0
-    private var filesCount = 0
+    var foldersCount by mutableIntStateOf(0)
+        private set
+    var filesCount by mutableIntStateOf(0)
+        private set
+    var selectedFilesCount by mutableIntStateOf(0)
 
     init {
         // If the tab point to a file, open it immediately without waiting for its parent content to be loaded
@@ -166,6 +170,7 @@ class FilesTab(
             detectFileChanges()
             // Check for display mode change
             updateDisplayConfig()
+            quickReloadFiles()
         }
     }
 
@@ -181,36 +186,23 @@ class FilesTab(
     }
 
     private suspend fun createSubtitle(): String {
-        var selectedFolders = 0
-        var selectedFiles = 0
-
-        this.selectedFiles.values.forEach {
-            if (it.isFolder) selectedFolders++
-            else selectedFiles++
+        if (selectedFiles.isNotEmpty()) {
+            val selectedFolders = selectedFiles.values.count { it.isFolder }
+            val selectedFilesCount = selectedFiles.size - selectedFolders
+            val parts = mutableListOf<String>()
+            if (selectedFolders > 0) parts.add("📁 $selectedFolders")
+            if (selectedFilesCount > 0) parts.add("📄 $selectedFilesCount")
+            return parts.joinToString("  ")
         }
-
-        return buildString {
-            if (foldersCount + filesCount == 0) {
-                append(globalClass.getString(R.string.empty_folder))
-                return@buildString
-            }
-
-            if (foldersCount > 0) {
-                append(activeFolder.getFormattedFileCount(0, foldersCount))
-                if (selectedFolders > 0) {
-                    append(globalClass.getString(R.string.files_selected).format(selectedFolders))
-                }
-            }
-
-            if (filesCount > 0 && foldersCount > 0) append(", ")
-
-            if (filesCount > 0) {
-                append(activeFolder.getFormattedFileCount(filesCount, 0))
-                if (selectedFiles > 0) {
-                    append(globalClass.getString(R.string.files_selected).format(selectedFiles))
-                }
+        if (foldersCount + filesCount == 0) {
+            return "Ø"
+        }
+        if (globalClass.preferencesManager.deepEmptyFolderCheck && foldersCount > 0 && filesCount == 0 && activeFolder is LocalFileHolder) {
+            if (com.raival.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker.isFolderEmptyWithin((activeFolder as LocalFileHolder).file)) {
+                return "○"
             }
         }
+        return "📁 $foldersCount   📄 $filesCount"
     }
 
     private suspend fun createTitle() = when (activeFolder) {
@@ -251,6 +243,7 @@ class FilesTab(
 
     fun unselectAllFiles(quickReload: Boolean = true) {
         selectedFiles.clear()
+        selectedFilesCount = 0
         lastSelectedFileIndex = -1
         if (quickReload) quickReloadFiles()
     }
@@ -312,6 +305,9 @@ class FilesTab(
             // Otherwise, validate the selection
             selectedFiles.removeIf { key, value -> runBlocking { !value.isValid() } }
             if (selectedFiles.isEmpty()) lastSelectedFileIndex = -1
+        }
+        withContext(Dispatchers.Main) {
+            selectedFilesCount = selectedFiles.size
         }
 
         // Update the bottom bar options to fit the new folder
@@ -569,6 +565,8 @@ class FilesTab(
             }
 
             withContext(Dispatchers.Main) {
+                selectedFilesCount = selectedFiles.size
+
                 // Reload the list
                 activeFolderContent.clear()
                 activeFolderContent.addAll(temp)
@@ -598,6 +596,10 @@ class FilesTab(
                             ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                                     activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
                 )
+            }
+
+            withContext(Dispatchers.Main) {
+                selectedFilesCount = selectedFiles.size
             }
 
             // Update title and subtitle

@@ -57,7 +57,7 @@ class RemoteFileHolder(
         if (details.isNotEmpty()) return details
 
         val rightSide = if (lastModified > 0L) {
-            lastModified.toFormattedDate(customFormat = "dd/MM/yy • HH:mm")
+            lastModified.toFormattedDate()
         } else {
             connection.type
         }
@@ -72,7 +72,7 @@ class RemoteFileHolder(
                     }
                     if (count.files > 0) append("${count.files} files")
                     if (count.folders == 0 && count.files == 0) {
-                        append(globalClass.getString(com.raival.compose.file.explorer.R.string.empty_folder))
+                        append("Ø")
                     }
                 }
             } else connection.host

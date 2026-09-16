@@ -10,7 +10,9 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BookmarkAdd
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FileCopy
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Merge
 import androidx.compose.material.icons.rounded.OpenInNewOff
 import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,6 +61,7 @@ import com.raival.compose.file.explorer.screen.main.tab.files.task.ApksMergeTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.ApksMergeTaskParameters
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CompressTask
 import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.raival.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.FileIcon
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.ItemRow
 import android.content.Intent
@@ -84,6 +88,10 @@ fun FileOptionsMenuDialog(
         val isMultipleSelection = selectedFilesCount > 1
         val isSingleFile = !isMultipleSelection && targetContentHolder.isFile()
         val isSingleFolder = !isMultipleSelection && targetContentHolder.isFolder
+
+        val isRecycleBin = tab.activeFolder is LocalFileHolder &&
+                ((tab.activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
+                        tab.activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
 
         var hasFolders = false
         tab.selectedFiles.forEach {
@@ -140,102 +148,239 @@ fun FileOptionsMenuDialog(
             Space(size = 6.dp)
 
             Row {
-                // Delete
-                IconButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        onDismissRequest()
-                        tab.toggleDeleteConfirmationDialog(true)
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                // Cut
-                IconButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        onDismissRequest()
-                        tab.unselectAllFiles()
-                        globalClass.taskManager.addTask(
-                            CopyTask(
-                                targetFiles,
-                                deleteSourceFiles = true
-                            )
-                        )
-                    }
-                ) {
-                    Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
-                }
-
-                // Copy
-                IconButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        onDismissRequest()
-                        tab.unselectAllFiles()
-                        globalClass.taskManager.addTask(
-                            CopyTask(
-                                targetFiles,
-                                deleteSourceFiles = false
-                            )
-                        )
-                    }
-                ) {
-                    Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
-                }
-
-                // Rename
-                IconButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        onDismissRequest()
-                        tab.toggleRenameDialog(true)
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.FormatColorText,
-                        contentDescription = null
-                    )
-                }
-
-                // Share
-                if (targetContentHolder is LocalFileHolder) {
+                if (isRecycleBin) {
+                    // Restore
                     IconButton(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             onDismissRequest()
-                            if (hasFolders) {
-                                tab.toggleShareFolderCompressDialog(true)
-                            } else {
-                                tab.shareSelectedFiles(context)
-                            }
+                            tab.restoreSelectedFiles()
                         }
                     ) {
-                        Icon(imageVector = Icons.Rounded.Share, contentDescription = null)
+                        Icon(
+                            imageVector = Icons.Rounded.RestoreFromTrash,
+                            contentDescription = stringResource(R.string.restore)
+                        )
                     }
-                }
 
-                // Properties
-                IconButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        onDismissRequest()
-                        tab.toggleFilePropertiesDialog(true)
+                    // Empty Recycle Bin
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles(false)
+                            tab.activeFolderContent.forEach {
+                                tab.selectedFiles[it.uniquePath] = it
+                            }
+                            tab.quickReloadFiles()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteSweep,
+                            contentDescription = stringResource(R.string.empty),
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
-                ) {
-                    Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+
+                    // Delete (Permanent)
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // Cut
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = true
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
+                    }
+
+                    // Copy
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = false
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
+                    }
+
+                    // Properties
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleFilePropertiesDialog(true)
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    }
+                } else {
+                    // Delete
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // Cut
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = true
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
+                    }
+
+                    // Copy
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = false
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
+                    }
+
+                    // Rename
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleRenameDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FormatColorText,
+                            contentDescription = null
+                        )
+                    }
+
+                    // Share
+                    if (targetContentHolder is LocalFileHolder) {
+                        IconButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                onDismissRequest()
+                                if (hasFolders) {
+                                    tab.toggleShareFolderCompressDialog(true)
+                                } else {
+                                    tab.shareSelectedFiles(context)
+                                }
+                            }
+                        ) {
+                            Icon(imageVector = Icons.Rounded.Share, contentDescription = null)
+                        }
+                    }
+
+                    // Properties
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleFilePropertiesDialog(true)
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    }
                 }
             }
 
             Space(size = 6.dp)
             HorizontalDivider()
 
-            if (isSingleFolder) {
+            if (isRecycleBin) {
+                FileOption(
+                    Icons.Rounded.RestoreFromTrash,
+                    stringResource(R.string.restore)
+                ) {
+                    onDismissRequest()
+                    tab.restoreSelectedFiles()
+                }
+
+                FileOption(
+                    Icons.Rounded.DeleteSweep,
+                    stringResource(R.string.empty)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles(false)
+                    tab.activeFolderContent.forEach {
+                        tab.selectedFiles[it.uniquePath] = it
+                    }
+                    tab.quickReloadFiles()
+                    tab.toggleDeleteConfirmationDialog(true)
+                }
+
+                val version = globalClass.taskManager.pendingTasksVersion
+                val mostRecentCopyTask = remember(version) {
+                    globalClass.taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+                }
+                if (mostRecentCopyTask != null) {
+                    FileOption(
+                        Icons.Rounded.ContentPaste,
+                        stringResource(if (mostRecentCopyTask.deleteSourceFiles) R.string.move_here else R.string.paste_here)
+                    ) {
+                        onDismissRequest()
+                        globalClass.taskManager.runTask(
+                            mostRecentCopyTask.id,
+                            CopyTaskParameters(tab.activeFolder)
+                        )
+                        tab.unselectAllFiles()
+                    }
+                }
+            }
+
+            if (!isRecycleBin && isSingleFolder) {
                 FileOption(
                     Icons.AutoMirrored.Rounded.OpenInNew,
                     stringResource(R.string.open_in_new_tab)

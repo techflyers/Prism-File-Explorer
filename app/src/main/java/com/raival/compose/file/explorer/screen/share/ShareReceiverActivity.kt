@@ -437,10 +437,11 @@ class ShareReceiverActivity : BaseActivity() {
                                                 .padding(vertical = 32.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = getString(R.string.empty_folder),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            Icon(
+                                                imageVector = Icons.Rounded.Block,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(48.dp).alpha(0.35f),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
@@ -701,7 +702,6 @@ class ShareReceiverActivity : BaseActivity() {
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .autoShowKeyboard()
         )
     }
 

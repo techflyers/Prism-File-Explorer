@@ -38,7 +38,7 @@ android {
                 localPropertiesFile.inputStream().use { localProperties.load(it) }
             }
             val storeFilePath = localProperties.getProperty("signing.storeFilePath")
-            if (!storeFilePath.isNullOrEmpty()) {
+            if (!storeFilePath.isNullOrEmpty() && file(storeFilePath).exists()) {
                 storeFile = file(storeFilePath)
                 storePassword = localProperties.getProperty("signing.storePassword")
                 keyAlias = localProperties.getProperty("signing.keyAlias")
@@ -50,7 +50,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile != null) {
+                releaseSigning
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

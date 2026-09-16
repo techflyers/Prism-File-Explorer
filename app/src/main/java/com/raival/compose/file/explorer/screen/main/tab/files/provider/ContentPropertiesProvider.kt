@@ -58,6 +58,9 @@ sealed interface PropertiesState {
         val totalSize: StateFlow<String>,
         val countProgress: StateFlow<CalculationProgress>,
         val sizeProgress: StateFlow<CalculationProgress>,
+        val checksumStatus: StateFlow<String>,
+        val checksumProgress: StateFlow<CalculationProgress>,
+        val duplicateGroups: StateFlow<List<Pair<String, List<String>>>> = MutableStateFlow(emptyList()),
     ) : PropertiesState
 }
 
@@ -206,6 +209,9 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         val totalSizeFlow = MutableStateFlow(globalClass.getString(R.string.calculating))
         val countProgressFlow = MutableStateFlow(CalculationProgress())
         val sizeProgressFlow = MutableStateFlow(CalculationProgress())
+        val checksumStatusFlow = MutableStateFlow(globalClass.getString(R.string.calculating))
+        val checksumProgressFlow = MutableStateFlow(CalculationProgress())
+        val duplicateGroupsFlow = MutableStateFlow<List<Pair<String, List<String>>>>(emptyList())
 
         _uiState.update {
             it.copy(
@@ -214,7 +220,10 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     totalFileCount = totalFileCountFlow,
                     totalSize = totalSizeFlow,
                     countProgress = countProgressFlow,
-                    sizeProgress = sizeProgressFlow
+                    sizeProgress = sizeProgressFlow,
+                    checksumStatus = checksumStatusFlow,
+                    checksumProgress = checksumProgressFlow,
+                    duplicateGroups = duplicateGroupsFlow
                 )
             )
         }
@@ -275,6 +284,46 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             }
         }
         activeJobs.add(job)
+
+        val checksumJob = calculationScope.launch {
+            val localFiles = files.filterIsInstance<LocalFileHolder>().filter { !it.isFolder }
+            if (localFiles.isEmpty()) {
+                checksumStatusFlow.value = globalClass.getString(R.string.no_applicable_files)
+                return@launch
+            }
+            checksumProgressFlow.value =
+                CalculationProgress(isCalculating = true, total = localFiles.size.toLong())
+            val checksumMap = mutableMapOf<String, MutableList<String>>()
+            var processed = 0L
+            try {
+                for (file in localFiles) {
+                    if (!isActive) return@launch
+                    processed++
+                    checksumProgressFlow.value = CalculationProgress(
+                        isCalculating = true,
+                        current = processed,
+                        total = localFiles.size.toLong()
+                    )
+                    val md5 = calculateMD5WithProgress(file) { _, _ -> }
+                    if (md5.isNotBlank() && md5 != globalClass.getString(R.string.error_calculating)) {
+                        checksumMap.getOrPut(md5) { mutableListOf() }.add(file.displayName)
+                    }
+                    yield()
+                }
+                val duplicates = checksumMap.filter { it.value.size > 1 }.map { it.key to it.value.toList() }
+                duplicateGroupsFlow.value = duplicates
+                if (duplicates.isEmpty()) {
+                    checksumStatusFlow.value = globalClass.getString(R.string.all_files_distinct)
+                } else {
+                    checksumStatusFlow.value = globalClass.getString(R.string.duplicates_found, duplicates.size)
+                }
+            } catch (_: Exception) {
+                checksumStatusFlow.value = globalClass.getString(R.string.error_calculating)
+            } finally {
+                checksumProgressFlow.value = CalculationProgress(isCalculating = false)
+            }
+        }
+        activeJobs.add(checksumJob)
     }
 
     private fun determineFileType(file: ContentHolder): String {

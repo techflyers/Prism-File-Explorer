@@ -1,10 +1,12 @@
 package com.raival.compose.file.explorer.screen.main.tab.files.ui
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.raival.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.raival.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
@@ -27,14 +29,22 @@ import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskConf
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskPanel
 import com.raival.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskRunningDialog
 
+import com.raival.compose.file.explorer.App.Companion.globalClass
+
 @Composable
 fun ColumnScope.FilesTabContentView(tab: FilesTab) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Dialogs(tab)
-    BreadcrumbBar(tab)
+    // In landscape, breadcrumb is shown inline in the toolbar instead
+    if (!isLandscape && globalClass.preferencesManager.showPathBar) {
+        BreadcrumbBar(tab)
+    }
     InfoRow()
     HorizontalDivider(modifier = Modifier, thickness = 1.dp)
     FilesList(tab)
-    BottomOptionsBar(tab)
+    BottomOptionsBar(tab, forceLandscapeOverride = isLandscape)
 }
 
 

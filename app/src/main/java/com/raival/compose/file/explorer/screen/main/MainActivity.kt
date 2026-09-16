@@ -6,9 +6,13 @@ import android.os.Environment
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -30,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -181,39 +186,115 @@ class MainActivity : BaseActivity() {
                                 globalClass.preferencesManager.moveToolbarToBottom
                             val moveTabsToBottom =
                                 globalClass.preferencesManager.moveTabsToBottom
+                            val autoHideToolbars =
+                                globalClass.preferencesManager.autoHideToolbars
+
+                            // Track scroll direction for auto-hide
+                            var toolbarsVisible by remember { mutableStateOf(true) }
+                            val autoHideScrollConnection = remember(autoHideToolbars) {
+                                object : NestedScrollConnection {
+                                    private var accumulatedDelta = 0f
+                                    private val threshold = 8f
+                                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                                        if (!autoHideToolbars) return Offset.Zero
+                                        accumulatedDelta += available.y
+                                        if (accumulatedDelta < -threshold) {
+                                            toolbarsVisible = false
+                                            accumulatedDelta = 0f
+                                        } else if (accumulatedDelta > threshold) {
+                                            toolbarsVisible = true
+                                            accumulatedDelta = 0f
+                                        }
+                                        return Offset.Zero
+                                    }
+                                }
+                            }
+
+                            // Animation spec for toolbar hide/show
+                            val toolbarEnter = slideInVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                initialOffsetY = { -it }
+                            )
+                            val toolbarExit = slideOutVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                targetOffsetY = { -it }
+                            )
+                            val tabEnter = slideInVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                initialOffsetY = { -it }
+                            )
+                            val tabExit = slideOutVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                targetOffsetY = { -it }
+                            )
+                            val bottomTabEnter = slideInVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                initialOffsetY = { it }
+                            )
+                            val bottomTabExit = slideOutVertically(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                targetOffsetY = { it }
+                            )
 
                             if (!moveToolbarToBottom) {
-                                MainToolbarView(
-                                    state = mainActivityState,
-                                    drawerScope = drawerScope,
-                                    drawerState = drawerState
-                                )
+                                AnimatedVisibility(
+                                    visible = !autoHideToolbars || toolbarsVisible,
+                                    enter = toolbarEnter,
+                                    exit = toolbarExit
+                                ) {
+                                    MainToolbarView(
+                                        state = mainActivityState,
+                                        drawerScope = drawerScope,
+                                        drawerState = drawerState
+                                    )
+                                }
                             }
 
                             if (!moveTabsToBottom) {
-                                MainTabsView(
-                                    state = mainActivityState,
-                                    mainActivityManager = mainActivityManager,
-                                    isAtBottom = false
-                                )
+                                AnimatedVisibility(
+                                    visible = !autoHideToolbars || toolbarsVisible,
+                                    enter = tabEnter,
+                                    exit = tabExit
+                                ) {
+                                    MainTabsView(
+                                        state = mainActivityState,
+                                        mainActivityManager = mainActivityManager,
+                                        isAtBottom = false
+                                    )
+                                }
                             }
 
-                            TabsPager(mainActivityState)
+                            TabsPager(
+                                state = mainActivityState,
+                                extraNestedScrollConnection = autoHideScrollConnection
+                            )
 
                             if (moveTabsToBottom) {
-                                MainTabsView(
-                                    state = mainActivityState,
-                                    mainActivityManager = mainActivityManager,
-                                    isAtBottom = true
-                                )
+                                AnimatedVisibility(
+                                    visible = !autoHideToolbars || toolbarsVisible,
+                                    enter = bottomTabEnter,
+                                    exit = bottomTabExit
+                                ) {
+                                    MainTabsView(
+                                        state = mainActivityState,
+                                        mainActivityManager = mainActivityManager,
+                                        isAtBottom = true
+                                    )
+                                }
                             }
 
                             if (moveToolbarToBottom) {
-                                MainToolbarView(
-                                    state = mainActivityState,
-                                    drawerScope = drawerScope,
-                                    drawerState = drawerState
-                                )
+                                AnimatedVisibility(
+                                    visible = !autoHideToolbars || toolbarsVisible,
+                                    enter = bottomTabEnter,
+                                    exit = bottomTabExit
+                                ) {
+                                    MainToolbarView(
+                                        state = mainActivityState,
+                                        drawerScope = drawerScope,
+                                        drawerState = drawerState
+                                    )
+                                }
                             }
                         }
                     }
@@ -246,18 +327,25 @@ class MainActivity : BaseActivity() {
         mainActivityManager: MainActivityManager,
         isAtBottom: Boolean
     ) {
-        TabLayout(
-            tabLayoutState = state.tabLayoutState,
-            tabs = state.tabs,
-            selectedTabIndex = state.selectedTabIndex,
-            onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-            onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() },
-            isAtBottom = isAtBottom
-        )
+        val configuration = LocalConfiguration.current
+        val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (!globalClass.preferencesManager.disableTabBar && !isLandscape) {
+            TabLayout(
+                tabLayoutState = state.tabLayoutState,
+                tabs = state.tabs,
+                selectedTabIndex = state.selectedTabIndex,
+                onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+                onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() },
+                isAtBottom = isAtBottom
+            )
+        }
     }
 
     @Composable
-    fun ColumnScope.TabsPager(state: MainActivityState) {
+    fun ColumnScope.TabsPager(
+        state: MainActivityState,
+        extraNestedScrollConnection: NestedScrollConnection? = null
+    ) {
         val manager = globalClass.mainActivityManager
 
         if (state.tabs.isEmpty()) {
@@ -286,7 +374,26 @@ class MainActivity : BaseActivity() {
                     if (page isNot state.selectedTabIndex) {
                         manager.selectTabAt(page, true)
                     }
-                    state.tabLayoutState.animateScrollToItem(page)
+                    if (!globalClass.preferencesManager.disableTabBar) {
+                        val layoutInfo = state.tabLayoutState.layoutInfo
+                        val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
+                        if (visibleItem == null) {
+                            val viewportWidth = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+                            val scrollOffset = -((viewportWidth - 200).coerceAtLeast(0) / 2)
+                            state.tabLayoutState.animateScrollToItem(page, scrollOffset)
+                        } else {
+                            val viewportStart = layoutInfo.viewportStartOffset
+                            val viewportEnd = layoutInfo.viewportEndOffset
+                            val itemStart = visibleItem.offset
+                            val itemEnd = visibleItem.offset + visibleItem.size
+                            if (itemStart < viewportStart) {
+                                state.tabLayoutState.animateScrollToItem(page)
+                            } else if (itemEnd > viewportEnd) {
+                                val scrollDelta = (itemEnd - viewportEnd).toFloat()
+                                state.tabLayoutState.animateScrollBy(scrollDelta)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -360,7 +467,12 @@ class MainActivity : BaseActivity() {
                 userScrollEnabled = gesturesEnabled,
                 modifier = Modifier
                     .weight(1f)
-                    .nestedScroll(nestedScrollConnection),
+                    .nestedScroll(nestedScrollConnection)
+                    .then(
+                        if (extraNestedScrollConnection != null)
+                            Modifier.nestedScroll(extraNestedScrollConnection)
+                        else Modifier
+                    ),
                 key = { state.tabs[it].id }
             ) { index ->
                 key(index) {

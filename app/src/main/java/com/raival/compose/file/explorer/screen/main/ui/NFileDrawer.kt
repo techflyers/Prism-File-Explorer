@@ -31,6 +31,12 @@ import com.raival.compose.file.explorer.screen.main.tab.files.holder.StorageDevi
 import com.raival.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.raival.compose.file.explorer.screen.main.tab.nfile_tools.*
 import com.raival.compose.file.explorer.screen.preferences.PreferencesActivity
+import com.raival.compose.file.explorer.common.toFormattedSize
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.REMOTE_STORAGE
+import com.raival.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.ROOT
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.sp
 import android.content.Intent
 import java.io.File
 
@@ -100,10 +106,7 @@ fun NFileDrawerContent(
             if (storageList.isNotEmpty()) {
                 DrawerSectionHeader("Storage Devices")
                 for (device in storageList) {
-                    DrawerItem(
-                        icon = Icons.Rounded.SdCard,
-                        label = device.title
-                    ) {
+                    StorageDrawerItem(device = device) {
                         manager.replaceCurrentTabWith(FilesTab(device.contentHolder))
                         onNavigate()
                     }
@@ -264,5 +267,68 @@ private fun DrawerItem(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Composable
+private fun StorageDrawerItem(
+    device: StorageDevice,
+    onClick: () -> Unit
+) {
+    val progress = if (device.totalSize > 0) {
+        (device.usedSize.toFloat() / device.totalSize).coerceIn(0f, 1f)
+    } else 0f
+    val freeSize = (device.totalSize - device.usedSize).coerceAtLeast(0L)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(vertical = 10.dp, horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = when (device.type) {
+                INTERNAL_STORAGE -> Icons.Rounded.FolderOpen
+                ROOT -> Icons.Rounded.Dns
+                REMOTE_STORAGE -> Icons.Rounded.Cloud
+                else -> Icons.Rounded.SdStorage
+            },
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = device.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (device.totalSize > 0) {
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp),
+                    strokeCap = StrokeCap.Round,
+                    color = if (progress > 0.85f) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    }
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${device.usedSize.toFormattedSize()} used • ${freeSize.toFormattedSize()} free",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }

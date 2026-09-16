@@ -11,5 +11,7 @@ data class PlayerState(
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val volume: Float = 1.0f,
     val currentTrackIndex: Int = 0,
-    val totalTracks: Int = 1
+    val totalTracks: Int = 1,
+    val isShuffleEnabled: Boolean = false,
+    val sleepTimerRemainingMs: Long = 0L
 )

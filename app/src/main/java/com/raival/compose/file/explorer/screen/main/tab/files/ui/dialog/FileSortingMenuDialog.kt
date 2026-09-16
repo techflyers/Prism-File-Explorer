@@ -14,8 +14,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.DateRange
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,16 +58,16 @@ fun FileSortingMenuDialog(
         val prefs = globalClass.preferencesManager
         val specificOptions = prefs.getSortingPrefsFor(tab.activeFolder)
 
-        var applyForThisFileOnly by remember(tab.activeFolder.uniquePath) {
+        var applyForThisFileOnly by remember(show, tab.activeFolder.uniquePath) {
             mutableStateOf(specificOptions.applyForThisFileOnly)
         }
-        var sortingMethod by remember(tab.activeFolder.uniquePath) {
+        var sortingMethod by remember(show, tab.activeFolder.uniquePath) {
             mutableIntStateOf(specificOptions.sortMethod)
         }
-        var showFoldersFirst by remember(tab.activeFolder.uniquePath) {
+        var showFoldersFirst by remember(show, tab.activeFolder.uniquePath) {
             mutableStateOf(specificOptions.showFoldersFirst)
         }
-        var reverseOrder by remember(tab.activeFolder.uniquePath) {
+        var reverseOrder by remember(show, tab.activeFolder.uniquePath) {
             mutableStateOf(specificOptions.reverseSorting)
         }
 
@@ -84,15 +86,9 @@ fun FileSortingMenuDialog(
         BottomSheetDialog(
             onDismissRequest = {
                 if (applyForThisFileOnly) {
-                    if (showFoldersFirst != prefs.showFoldersFirst
-                        || reverseOrder != prefs.reverse
-                        || sortingMethod != prefs.defaultSortMethod
-                    ) {
-                        updateForThisFolder()
-                    } else {
-                        prefs.deleteSortingPrefsFor(tab.activeFolder)
-                    }
+                    updateForThisFolder()
                 } else {
+                    prefs.deleteSortingPrefsFor(tab.activeFolder)
                     prefs.showFoldersFirst = showFoldersFirst
                     prefs.reverse = reverseOrder
                     prefs.defaultSortMethod = sortingMethod
@@ -139,7 +135,7 @@ fun FileSortingMenuDialog(
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     SwitchSettingItem(
-                        icon = Icons.Rounded.ArrowDownward,
+                        icon = Icons.Rounded.FolderSpecial,
                         title = stringResource(R.string.apply_to_this_folder_only),
                         checked = applyForThisFileOnly,
                         onCheckedChange = { applyForThisFileOnly = it }
@@ -170,9 +166,15 @@ fun FileSortingMenuDialog(
                     ) {
                         RadioButtonItem(
                             icon = Icons.Rounded.SortByAlpha,
-                            text = stringResource(R.string.name_a_z),
+                            text = if (reverseOrder) stringResource(R.string.name_z_a) else stringResource(R.string.name_a_z),
                             selected = sortingMethod == SortingMethod.SORT_BY_NAME,
-                            onClick = { sortingMethod = SortingMethod.SORT_BY_NAME }
+                            onClick = {
+                                if (sortingMethod == SortingMethod.SORT_BY_NAME) {
+                                    reverseOrder = !reverseOrder
+                                } else {
+                                    sortingMethod = SortingMethod.SORT_BY_NAME
+                                }
+                            }
                         )
 
                         HorizontalDivider(
@@ -182,9 +184,15 @@ fun FileSortingMenuDialog(
 
                         RadioButtonItem(
                             icon = Icons.Rounded.DateRange,
-                            text = stringResource(R.string.date_newer),
+                            text = if (reverseOrder) stringResource(R.string.date_older) else stringResource(R.string.date_newer),
                             selected = sortingMethod == SortingMethod.SORT_BY_DATE,
-                            onClick = { sortingMethod = SortingMethod.SORT_BY_DATE }
+                            onClick = {
+                                if (sortingMethod == SortingMethod.SORT_BY_DATE) {
+                                    reverseOrder = !reverseOrder
+                                } else {
+                                    sortingMethod = SortingMethod.SORT_BY_DATE
+                                }
+                            }
                         )
 
                         HorizontalDivider(
@@ -194,9 +202,15 @@ fun FileSortingMenuDialog(
 
                         RadioButtonItem(
                             icon = Icons.AutoMirrored.Rounded.Sort,
-                            text = stringResource(R.string.size_smaller),
+                            text = if (reverseOrder) stringResource(R.string.size_larger) else stringResource(R.string.size_smaller),
                             selected = sortingMethod == SortingMethod.SORT_BY_SIZE,
-                            onClick = { sortingMethod = SortingMethod.SORT_BY_SIZE }
+                            onClick = {
+                                if (sortingMethod == SortingMethod.SORT_BY_SIZE) {
+                                    reverseOrder = !reverseOrder
+                                } else {
+                                    sortingMethod = SortingMethod.SORT_BY_SIZE
+                                }
+                            }
                         )
 
                         HorizontalDivider(
@@ -208,7 +222,13 @@ fun FileSortingMenuDialog(
                             icon = Icons.AutoMirrored.Rounded.InsertDriveFile,
                             text = stringResource(R.string.type),
                             selected = sortingMethod == SortingMethod.SORT_BY_TYPE,
-                            onClick = { sortingMethod = SortingMethod.SORT_BY_TYPE }
+                            onClick = {
+                                if (sortingMethod == SortingMethod.SORT_BY_TYPE) {
+                                    reverseOrder = !reverseOrder
+                                } else {
+                                    sortingMethod = SortingMethod.SORT_BY_TYPE
+                                }
+                            }
                         )
                     }
                 }
@@ -244,7 +264,7 @@ fun FileSortingMenuDialog(
                         )
 
                         SwitchSettingItem(
-                            icon = Icons.AutoMirrored.Rounded.InsertDriveFile,
+                            icon = if (reverseOrder) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward,
                             title = stringResource(R.string.reverse),
                             checked = reverseOrder,
                             onCheckedChange = { reverseOrder = it }
