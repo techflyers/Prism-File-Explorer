@@ -1,0 +1,151 @@
+package com.techflyers.compose.file.explorer.screen.main.tab.apps
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.common.emptyString
+import com.techflyers.compose.file.explorer.screen.main.tab.Tab
+import com.techflyers.compose.file.explorer.screen.main.tab.apps.holder.AppHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.apps.provider.getInstalledApps
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class AppsTab : Tab() {
+    override val id = globalClass.generateUid()
+    override val header = globalClass.getString(R.string.apps_tab_header)
+
+    private val scope = CoroutineScope(Dispatchers.IO)
+
+    val appsList = mutableStateListOf<AppHolder>()
+    val systemApps = ArrayList<AppHolder>()
+    val userApps = ArrayList<AppHolder>()
+
+    var selectedChoice by mutableIntStateOf(0)
+    var previewAppDialog by mutableStateOf<AppHolder?>(null)
+    var isSearchPanelOpen by mutableStateOf(false)
+    var searchQuery by mutableStateOf(emptyString)
+    var isSearching by mutableStateOf(false)
+    var isLoading by mutableStateOf(false)
+    var sortOption by mutableStateOf(SortOption.NAME)
+
+    enum class SortOption {
+        NAME, SIZE, INSTALL_DATE, UPDATE_DATE
+    }
+
+    override suspend fun getSubtitle() = emptyString
+
+    override suspend fun getTitle() = globalClass.getString(R.string.apps_tab_title)
+
+    override fun onTabResumed() {
+        super.onTabResumed()
+        requestHomeToolbarUpdate()
+    }
+
+    override fun onTabStarted() {
+        super.onTabStarted()
+        requestHomeToolbarUpdate()
+    }
+
+    override fun onBackPressed(): Boolean {
+        if (isSearchPanelOpen) {
+            isSearchPanelOpen = false
+            searchQuery = emptyString
+            updateAppsList()
+            return true
+        }
+        return false
+    }
+
+    fun fetchInstalledApps() {
+        isLoading = true
+        scope.launch {
+            try {
+                val apps = getInstalledApps(globalClass)
+                val newSystemApps = ArrayList<AppHolder>()
+                val newUserApps = ArrayList<AppHolder>()
+                apps.forEach { app ->
+                    if (app.isSystemApp) newSystemApps.add(app)
+                    else newUserApps.add(app)
+                }
+                withContext(Dispatchers.Main) {
+                    systemApps.clear()
+                    systemApps.addAll(newSystemApps)
+                    userApps.clear()
+                    userApps.addAll(newUserApps)
+                    updateAppsList()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    fun updateAppsList() {
+        val filteredApps = when (selectedChoice) {
+            0 -> userApps
+            1 -> systemApps
+            2 -> (userApps + systemApps).distinctBy { it.packageName to it.uid }
+            else -> emptyList()
+        }
+
+        val sortedApps = when (sortOption) {
+            SortOption.NAME -> filteredApps.sortedBy { it.name.lowercase() }
+            SortOption.SIZE -> filteredApps.sortedByDescending { it.size }
+            SortOption.INSTALL_DATE -> filteredApps.sortedByDescending { it.installDate }
+            SortOption.UPDATE_DATE -> filteredApps.sortedByDescending { it.lastUpdateDate }
+        }
+
+        appsList.clear()
+        appsList.addAll(sortedApps)
+    }
+
+    fun performSearch() {
+        if (searchQuery.isBlank()) {
+            updateAppsList()
+            return
+        }
+
+        isSearching = true
+        scope.launch {
+            try {
+                val baseList = when (selectedChoice) {
+                    0 -> userApps
+                    1 -> systemApps
+                    2 -> (userApps + systemApps).distinctBy { it.packageName to it.uid }
+                    else -> emptyList()
+                }
+
+                val filteredApps = baseList.filter { app ->
+                    app.name.contains(searchQuery, ignoreCase = true) ||
+                            app.packageName.contains(searchQuery, ignoreCase = true)
+                }
+
+                val sortedApps = when (sortOption) {
+                    SortOption.NAME -> filteredApps.sortedBy { it.name.lowercase() }
+                    SortOption.SIZE -> filteredApps.sortedByDescending { it.size }
+                    SortOption.INSTALL_DATE -> filteredApps.sortedByDescending { it.installDate }
+                    SortOption.UPDATE_DATE -> filteredApps.sortedByDescending { it.lastUpdateDate }
+                }
+
+                withContext(Dispatchers.Main) {
+                    appsList.clear()
+                    appsList.addAll(sortedApps)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isSearching = false
+                }
+            }
+        }
+    }
+}

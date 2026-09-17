@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.raival.compose.file.baselineprofile"
+    namespace = "com.techflyers.compose.file.baselineprofile"
     compileSdk = 34
 
     compileOptions {

@@ -25,7 +25,7 @@
 -keep class org.apache.harmony.** { *; }
 -dontwarn org.apache.commons.compress.**
 -dontwarn com.github.luben.zstd.**
--keep class com.raival.compose.file.explorer.** { *; }
+-keep class com.techflyers.compose.file.explorer.** { *; }
 -keep class org.eclipse.tm4e.** { *; }
 -keep class org.joni.** { *; }
 -keep class android.content.** { *; }

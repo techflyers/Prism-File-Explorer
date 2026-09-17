@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Prism File Explorer</string>
+    <string name="app_name">Prism File Explorer +</string>
     <string name="title_activity_comic_viewer">Comic Viewer</string>
     <string name="title_activity_epub_viewer">E-Book Reader</string>
     <string name="title_activity_djvu_viewer">DjVu Viewer</string>
@@ -7,7 +7,7 @@
     <string name="internal_storage">Internal Storage</string>
     <string name="storage_permission_required">Storage access permission is required</string>
     <string name="title_activity_text_editor">TextEditorActivity</string>
-    <string name="main_activity_title">Prism File Explorer</string>
+    <string name="main_activity_title">Prism File Explorer +</string>
     <string name="jump_to_path">Jump to path</string>
     <string name="destination_path">Destination path</string>
     <string name="open">Open</string>
@@ -489,7 +489,7 @@
     <string name="share_files_saved">Files saved successfully</string>
     <string name="share_failed_to_save">Failed to save files</string>
     <string name="share_no_files_found">No shareable files found</string>
-    <string name="share_to_prism">Prism File Explorer</string>
+    <string name="share_to_prism">Prism File Explorer +</string>
 
     <string name="hide_root_storage">Hide root storage</string>
     <string name="hide_root_storage_desc">Hide the root storage directory from the storage devices list</string>

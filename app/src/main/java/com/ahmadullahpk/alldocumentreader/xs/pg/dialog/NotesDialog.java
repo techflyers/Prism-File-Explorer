@@ -8,7 +8,7 @@ package   com.ahmadullahpk.alldocumentreader.xs.pg.dialog;
 
 import java.util.Vector;
 
-import   com.raival.compose.file.explorer.R;
+import   com.techflyers.compose.file.explorer.R;
 import   com.ahmadullahpk.alldocumentreader.xs.system.IControl;
 import   com.ahmadullahpk.alldocumentreader.xs.system.IDialogAction;
 import   com.ahmadullahpk.alldocumentreader.xs.system.beans.ADialog;

@@ -1,0 +1,20 @@
+package com.techflyers.compose.file.explorer.screen.main.tab.files.coil
+
+import coil3.map.Mapper
+import coil3.request.Options
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder
+import java.io.File
+
+class DocumentFileMapper : Mapper<ContentHolder, Any> {
+    override fun map(data: ContentHolder, options: Options): Any? {
+        return when {
+            data is LocalFileHolder && canUseCoil(data) -> data.file
+            data is ShizukuFileHolder && canUseCoil(data) -> File(data.uniquePath)
+            data is ZipFileHolder && !data.isFolder -> data
+            else -> null
+        }
+    }
+}

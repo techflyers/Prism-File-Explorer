@@ -8,17 +8,17 @@ plugins {
 }
 
 android {
-    namespace = "com.raival.compose.file.explorer"
+    namespace = "com.techflyers.compose.file.explorer"
     compileSdk = 36
     compileSdkExtension = 19
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.raival.compose.file.explorer"
+        applicationId = "com.techflyers.compose.file.explorer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "2.2"
+        versionCode = 15
+        versionName = "2.3"
     }
 
     dependenciesInfo {

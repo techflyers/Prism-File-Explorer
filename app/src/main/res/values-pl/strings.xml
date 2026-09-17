@@ -1,10 +1,10 @@
 <resources>
-    <string name="app_name">Prism Eksplorator Plików</string>
+    <string name="app_name">Prism Eksplorator Plików +</string>
     <string name="root_dir">Katalog główny</string>
     <string name="internal_storage">Pamięć wewnętrzna</string>
     <string name="storage_permission_required">Wymagane jest zezwolenie na dostęp do pamięci</string>
     <string name="title_activity_text_editor">EdytorTekstuActivity</string>
-    <string name="main_activity_title">Prism Eksplorator Plików</string>
+    <string name="main_activity_title">Prism Eksplorator Plików +</string>
     <string name="jump_to_path">Przejdź do ścieżki</string>
     <string name="destination_path">Ścieżka docelowa</string>
     <string name="open">Otwórz</string>

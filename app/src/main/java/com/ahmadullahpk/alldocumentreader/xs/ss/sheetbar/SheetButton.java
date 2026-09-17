@@ -14,7 +14,7 @@ import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
 
-import com.raival.compose.file.explorer.R;
+import com.techflyers.compose.file.explorer.R;
 
 
 /**

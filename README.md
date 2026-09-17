@@ -1,12 +1,12 @@
 > [!NOTE]  
-> **This repository is a feature-rich fork of the original [Prism File Explorer](https://github.com/Raival-e/Prism-File-Explorer) project.** 
+> **This repository is a feature-rich fork of the original [Prism File Explorer](https://github.com/techflyers/Prism-File-Explorer) project.** 
 > It integrates premium companion features from [`NFile`](https://github.com/Senzme/NFile) (including a Private Wallet, Local FTP Server, and Web Sharing with port-forwarding), replaces the PDF viewer with Jetpack's native `androidx.pdf:pdf-viewer-fragment`, introduces a custom Compose Excel spreadsheet viewer, integrates the office document layout engine from [`all-documents-reader`](https://github.com/ahmadullahpk/all-documents-reader), implements split APK bundle installation, a built-in terminal emulator inspired by [`Xed-Editor`](https://github.com/Xed-Editor/Xed-Editor), and adds support for Shizuku/root privileged file access.
 
 <div align="center">
 
-<img src="assets/app_icon.png" width="120" alt="Prism File Explorer Logo"/>
+<img src="assets/app_icon.png" width="120" alt="Prism File Explorer + Logo"/>
 
-# Prism File Explorer
+# Prism File Explorer +
 
 [![Platform](https://img.shields.io/badge/Platform-Android-brightgreen.svg?logo=android)](https://www.android.com/)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -156,7 +156,7 @@
 
 ## 🛡️ Play Protect & Security Scanner Information
 
-Prism File Explorer is distributed directly via GitHub Releases (sideloaded APK). Security scanners or Google Play Protect may present warnings on newly published builds due to advanced developer tools:
+Prism File Explorer + is distributed directly via GitHub Releases (sideloaded APK). Security scanners or Google Play Protect may present warnings on newly published builds due to advanced developer tools:
 
 * **In-App Linux Terminal (PRoot)**: An optional user-space Linux environment powered by PRoot (the same class of engine used by Termux). Antivirus engines may flag this with dual-use labels such as `Tool.Linux.Proot.1` or `hacktool.proot`. This is an intentional power-user utility, not a root exploit or trojan.
 * **APK Bundle Merge & Install**: Merging split APK bundles (`.apks` / `.xapk`) produces an installable APK signed on-device with a unique, app-local cryptographic key (never the public AOSP testkey).
@@ -185,8 +185,8 @@ Prism File Explorer is distributed directly via GitHub Releases (sideloaded APK)
 This project is licensed under the **GNU General Public License v3.0**.
 
 ```
-Prism File Explorer - A modern Android file manager
-Copyright (C) 2024 Raival-e
+Prism File Explorer + - A modern Android file manager
+Copyright (C) 2024 techflyers
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

@@ -1,0 +1,878 @@
+package com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Done
+import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.common.block
+import com.techflyers.compose.file.explorer.common.copyToClipboard
+import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.common.ui.fastScrollbar
+import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchFileFilter
+import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchManager
+import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchOptions
+import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchResult
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FileItemRow
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun SearchDialog(
+    show: Boolean,
+    tab: FilesTab,
+    onDismissRequest: () -> Unit
+) {
+    val searchManager = globalClass.searchManager
+    val scope = rememberCoroutineScope()
+
+    if (show) {
+        val context = LocalContext.current
+        val useDarkIcons = !isSystemInDarkTheme()
+        var showAdvancedOptions by remember { mutableStateOf(false) }
+
+        // Auto-trigger search on type or filter change with debounce
+        LaunchedEffect(searchManager.searchQuery, searchManager.searchOptions.selectedFormats) {
+            val hasFormats = searchManager.searchOptions.selectedFormats.isNotEmpty()
+            val hasQuery = searchManager.searchQuery.length >= 2
+            if ((hasQuery || hasFormats) && !searchManager.isAiMode) {
+                if (searchManager.isSearching) {
+                    searchManager.stopSearch()
+                }
+                delay(300)
+                searchManager.startSearch(tab)
+            } else if (!hasQuery && !hasFormats) {
+                searchManager.stopSearch()
+                searchManager.clearResults()
+            }
+        }
+
+        Dialog(
+            onDismissRequest = onDismissRequest,
+            properties = DialogProperties(
+                dismissOnClickOutside = false,
+                decorFitsSystemWindows = false,
+                usePlatformDefaultWidth = false
+            )
+        ) {
+            // Status bar color fix
+            val color = MaterialTheme.colorScheme.surfaceContainerHigh
+            val systemUiController = rememberSystemUiController()
+            DisposableEffect(systemUiController, useDarkIcons) {
+                systemUiController.setStatusBarColor(color = color, darkIcons = useDarkIcons)
+                onDispose {}
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .statusBarsPadding()
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                        RoundedCornerShape(0.dp)
+                    )
+            ) {
+                // Search Header
+                SearchHeader(
+                    searchManager = searchManager,
+                    onBackClick = onDismissRequest,
+                    onSearchClick = { searchManager.startSearch(tab) },
+                    onAdvancedToggle = { showAdvancedOptions = !showAdvancedOptions },
+                    onAiToggle = { searchManager.toggleAiMode(tab) }
+                )
+
+                // Format Tag Filters
+                SearchFilterTagsRow(
+                    selectedFormats = searchManager.searchOptions.selectedFormats,
+                    onFilterToggled = { filter ->
+                        val current = searchManager.searchOptions.selectedFormats
+                        val newFormats = if (current.contains(filter)) {
+                            current - filter
+                        } else {
+                            current + filter
+                        }
+                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = newFormats)
+                    },
+                    onClearAll = {
+                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = emptySet())
+                    }
+                )
+
+                // Advanced Options
+                AnimatedVisibility(
+                    visible = showAdvancedOptions,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    AdvancedOptionsPanel(
+                        options = searchManager.searchOptions,
+                        onOptionsChange = { searchManager.searchOptions = it }
+                    )
+                }
+
+                // Search Progress
+                AnimatedVisibility(
+                    visible = searchManager.isSearching || searchManager.isIndexing,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    SearchProgressPanel(searchManager = searchManager)
+                }
+
+                // Results Section
+                SearchResultsSection(
+                    searchManager = searchManager,
+                    tab = tab,
+                    context = context,
+                    onExpandClick = {
+                        searchManager.onExpand()
+                        onDismissRequest()
+                    },
+                    onDismissRequest = onDismissRequest
+                )
+            }
+
+            // AI Model Choice and Download Dialogs
+            if (com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelChoiceDialog(
+                    onChoose = { variant ->
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog = false
+                        scope.launch {
+                            com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.downloadModel(context, variant)
+                        }
+                    },
+                    onDismiss = {
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.showModelChoiceDialog = false
+                        searchManager.isAiMode = false
+                    }
+                )
+            }
+
+            if (com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.isDownloading) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadProgressDialog(
+                    onCancel = {
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.ModelDownloadManager.cancelDownload()
+                        searchManager.isAiMode = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchHeader(
+    searchManager: SearchManager,
+    onBackClick: () -> Unit,
+    onSearchClick: () -> Unit,
+    onAdvancedToggle: () -> Unit,
+    onAiToggle: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .block(
+                    borderSize = 0.dp,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextField(
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+                value = searchManager.searchQuery,
+                onValueChange = { searchManager.searchQuery = it },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                placeholder = {
+                    Text(
+                        text = stringResource(R.string.search_query),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                },
+                leadingIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                trailingIcon = {
+                    Row {
+                        if (searchManager.isSearching) {
+                            IconButton(
+                                onClick = {
+                                    if (searchManager.isSearching) {
+                                        searchManager.stopSearch()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Stop,
+                                    contentDescription = null,
+                                )
+                            }
+                        } else {
+                            IconButton(onClick = onSearchClick) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                )
+                            }
+                        }
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearchClick() }),
+                singleLine = true,
+            )
+
+            IconButton(onClick = onAiToggle) {
+                Icon(
+                    imageVector = Icons.Rounded.AutoAwesome,
+                    contentDescription = "AI Mode",
+                    tint = if (searchManager.isAiMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            IconButton(onClick = onAdvancedToggle) {
+                Icon(
+                    imageVector = Icons.Rounded.Tune,
+                    contentDescription = null,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedOptionsPanel(
+    options: SearchOptions,
+    onOptionsChange: (SearchOptions) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp, horizontal = 16.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.advanced_options),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        Space(size = 12.dp)
+
+        // Search Options Row 1
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OptionSwitch(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.ignore_case),
+                checked = options.ignoreCase,
+                onCheckedChange = { onOptionsChange(options.copy(ignoreCase = it)) },
+                icon = Icons.Rounded.TextFields
+            )
+
+            OptionSwitch(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.use_regex),
+                checked = options.useRegex,
+                onCheckedChange = { onOptionsChange(options.copy(useRegex = it)) },
+                icon = Icons.Rounded.Code
+            )
+        }
+
+        Space(size = 8.dp)
+
+        // Search Options Row 2
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OptionSwitch(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.by_extension),
+                checked = options.searchByExtension,
+                onCheckedChange = { onOptionsChange(options.copy(searchByExtension = it)) },
+                icon = Icons.Rounded.Extension
+            )
+
+            OptionSwitch(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.in_content),
+                checked = options.searchInFileContent,
+                onCheckedChange = { onOptionsChange(options.copy(searchInFileContent = it)) },
+                icon = Icons.Rounded.Description
+            )
+        }
+
+        Space(size = 12.dp)
+
+        // Max Results Options
+        Column {
+            Text(
+                text = stringResource(
+                    R.string.max_results,
+                    if (options.maxResults == -1) globalClass.getString(R.string.unlimited) else options.maxResults.toString()
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Space(size = 8.dp)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val maxResultsOptions = listOf(10, 100, 1000, 5000, 10000)
+                val labels = listOf("10", "100", "1K", "5k", "10K")
+
+                maxResultsOptions.forEachIndexed { index, value ->
+                    TextButton(
+                        onClick = { onOptionsChange(options.copy(maxResults = value)) },
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            containerColor = if (options.maxResults == value)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceContainer,
+                            contentColor = if (options.maxResults == value)
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text(
+                            text = labels[index],
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (options.maxResults == value) FontWeight.Medium else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OptionSwitch(
+    modifier: Modifier = Modifier,
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    icon: ImageVector
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onCheckedChange(!checked) },
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (checked) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (checked) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.graphicsLayer { scaleX = 0.8f; scaleY = 0.8f },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchProgressPanel(searchManager: SearchManager) {
+    val title = if (searchManager.isIndexing) {
+        "AI Semantic Indexing: ${searchManager.indexingPhase}"
+    } else {
+        stringResource(R.string.searching)
+    }
+
+    val progress = if (searchManager.isIndexing) {
+        if (searchManager.indexingTotal > 0) {
+            searchManager.indexingCurrent.toFloat() / searchManager.indexingTotal.toFloat()
+        } else {
+            -1f
+        }
+    } else {
+        searchManager.searchProgress
+    }
+
+    val currentFile = if (searchManager.isIndexing) {
+        if (searchManager.indexingTotal > 0) {
+            "File ${searchManager.indexingCurrent} of ${searchManager.indexingTotal}"
+        } else {
+            ""
+        }
+    } else {
+        searchManager.currentSearchingFile
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+
+            if (progress > 0) {
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Space(size = 8.dp)
+
+        if (progress > -1f) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            )
+        }
+
+        if (currentFile.isNotEmpty()) {
+            Space(size = 8.dp)
+            Text(
+                text = currentFile,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchResultsSection(
+    searchManager: SearchManager,
+    tab: FilesTab,
+    context: android.content.Context,
+    onExpandClick: () -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        // Results Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(color = MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(bottom = if (searchManager.searchResults.isEmpty()) 12.dp else 8.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.search_results, searchManager.searchResults.size),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            if (searchManager.searchResults.isNotEmpty()) {
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = { searchManager.clearResults() }
+                ) {
+                    Text(stringResource(R.string.clear))
+                }
+                if (!searchManager.isSearching) {
+                    Space(8.dp)
+                    TextButton(onClick = onExpandClick) {
+                        Text(stringResource(R.string.expand))
+                    }
+                }
+            }
+        }
+
+        // Results List
+        val resultsListState = rememberLazyListState()
+        if (searchManager.searchResults.isEmpty() && !searchManager.isSearching &&
+            (searchManager.searchQuery.isNotEmpty() || searchManager.searchOptions.selectedFormats.isNotEmpty())
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+                Space(12.dp)
+                Text(
+                    text = stringResource(R.string.no_results_found),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                state = resultsListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .fastScrollbar(resultsListState),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                itemsIndexed(
+                    searchManager.searchResults,
+                    key = { index, item -> "${item.file.uniquePath}_${item.matchType}_$index" }
+                ) { index, searchResult ->
+                    SearchResultItem(
+                        searchResult = searchResult,
+                        onItemClick = {
+                            if (searchResult.file.isFile()) {
+                                tab.openFile(context, searchResult.file)
+                            } else {
+                                tab.openFolder(searchResult.file, rememberListState = false)
+                            }
+                        },
+                        onLocateClick = {
+                            onDismissRequest()
+                            globalClass.mainActivityManager.replaceCurrentTabWith(
+                                tab = FilesTab(source = searchResult.file)
+                            )
+                        },
+                        onCopyPathClick = {
+                            searchResult.file.uniquePath.copyToClipboard()
+                            globalClass.showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultItem(
+    searchResult: SearchResult,
+    onItemClick: () -> Unit,
+    onLocateClick: () -> Unit,
+    onCopyPathClick: () -> Unit
+) {
+    var showMoreOptionsMenu by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onItemClick,
+                onLongClick = { showMoreOptionsMenu = true }
+            ),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(6.dp)
+        ) {
+            // File item row
+            FileItemRow(
+                item = searchResult.file,
+                fileDetails = if (searchResult.file is LocalFileHolder)
+                    searchResult.file.basePath else searchResult.file.uniquePath,
+            )
+
+            // Content preview for content matches
+            if (searchResult.matchType == SearchResult.MatchType.CONTENT &&
+                !searchResult.matchedLine.isNullOrEmpty()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(R.string.line, searchResult.lineNumber!!),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(color = MaterialTheme.colorScheme.surfaceContainer),
+                    ) {
+                        Text(
+                            text = searchResult.matchedLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(8.dp),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                }
+            }
+        }
+
+        // Context menu
+        DropdownMenu(
+            expanded = showMoreOptionsMenu,
+            onDismissRequest = { showMoreOptionsMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text(text = stringResource(R.string.locate)) },
+                onClick = {
+                    showMoreOptionsMenu = false
+                    onLocateClick()
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.MyLocation,
+                        contentDescription = null
+                    )
+                }
+            )
+            DropdownMenuItem(
+                text = { Text(text = stringResource(R.string.copy_path)) },
+                onClick = {
+                    showMoreOptionsMenu = false
+                    onCopyPathClick()
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentCopy,
+                        contentDescription = null
+                    )
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchFilterTagsRow(
+    selectedFormats: Set<SearchFileFilter>,
+    onFilterToggled: (SearchFileFilter) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // "All" chip
+        item(key = "all") {
+            val isAllSelected = selectedFormats.isEmpty()
+            FilterChip(
+                selected = isAllSelected,
+                onClick = onClearAll,
+                label = {
+                    Text(
+                        text = stringResource(R.string.all),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                leadingIcon = if (isAllSelected) {
+                    {
+                        Icon(
+                            imageVector = Icons.Rounded.Done,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else null,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(8.dp)
+            )
+        }
+
+        // Format tag chips
+        items(SearchFileFilter.entries.toTypedArray(), key = { it.name }) { filter ->
+            val isSelected = selectedFormats.contains(filter)
+            FilterChip(
+                selected = isSelected,
+                onClick = { onFilterToggled(filter) },
+                label = {
+                    Text(
+                        text = stringResource(filter.labelRes),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Rounded.Done else filter.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(8.dp)
+            )
+        }
+    }
+}

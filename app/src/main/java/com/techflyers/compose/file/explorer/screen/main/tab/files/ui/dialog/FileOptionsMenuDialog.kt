@@ -1,0 +1,723 @@
+package com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Compress
+import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.FormatColorText
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Merge
+import androidx.compose.material.icons.rounded.OpenInNewOff
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.RestoreFromTrash
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.common.emptyString
+import com.techflyers.compose.file.explorer.common.fromJson
+import com.techflyers.compose.file.explorer.common.isNot
+import com.techflyers.compose.file.explorer.common.toJson
+import com.techflyers.compose.file.explorer.common.ui.BottomSheetDialog
+import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DefaultOpeningMethods
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkBundleFileType
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApksMergeTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApksMergeTaskParameters
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CompressTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FileIcon
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.ItemRow
+import android.content.Intent
+import androidx.compose.material.icons.rounded.Terminal
+import com.techflyers.compose.file.explorer.screen.terminal.TerminalActivity
+import com.techflyers.compose.file.explorer.screen.terminal.openFolderInTerminal
+
+@Composable
+fun FileOptionsMenuDialog(
+    show: Boolean,
+    tab: FilesTab,
+    onDismissRequest: () -> Unit
+) {
+    if (show) {
+        val context = LocalContext.current
+
+        val targetFiles by remember {
+            mutableStateOf(tab.selectedFiles.map { it.value }.toList())
+        }
+
+        val targetContentHolder = tab.targetFile!!
+
+        val selectedFilesCount = targetFiles.size
+        val isMultipleSelection = selectedFilesCount > 1
+        val isSingleFile = !isMultipleSelection && targetContentHolder.isFile()
+        val isSingleFolder = !isMultipleSelection && targetContentHolder.isFolder
+
+        val isRecycleBin = tab.activeFolder is LocalFileHolder &&
+                ((tab.activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
+                        tab.activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
+
+        var hasFolders = false
+        tab.selectedFiles.forEach {
+            if (it.component2().isFolder) {
+                hasFolders = true
+                return@forEach
+            }
+        }
+
+        BottomSheetDialog(onDismissRequest = { tab.toggleFileOptionsMenu(null) }) {
+            var details by remember {
+                mutableStateOf(
+                    if (selectedFilesCount > 1) {
+                        "and %d more".format(selectedFilesCount - 1)
+                    } else {
+                        emptyString
+                    }
+                )
+            }
+
+            LaunchedEffect(Unit) {
+                if (details.isEmpty()) details = targetContentHolder.getDetails()
+            }
+
+            val formattedSubtitle = remember(details) {
+                if (details.contains("\t")) {
+                    val parts = details.split("\t", limit = 2)
+                    val left = parts.getOrNull(0)?.trim().orEmpty()
+                    val right = parts.getOrNull(1)?.trim().orEmpty()
+                    if (left.isNotEmpty() && right.isNotEmpty()) {
+                        "$left $right"
+                    } else {
+                        left.ifEmpty { right }
+                    }
+                } else {
+                    details
+                }
+            }
+
+            ItemRow(
+                title = targetContentHolder.displayName,
+                subtitle = formattedSubtitle,
+                ignoreSizePreferences = true,
+                icon = {
+                    FileIcon(
+                        contentHolder = targetContentHolder,
+                        ignoreSizePreferences = true
+                    )
+                }
+            )
+
+            Space(size = 6.dp)
+            HorizontalDivider()
+            Space(size = 6.dp)
+
+            Row {
+                if (isRecycleBin) {
+                    // Restore
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.restoreSelectedFiles()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.RestoreFromTrash,
+                            contentDescription = stringResource(R.string.restore)
+                        )
+                    }
+
+                    // Empty Recycle Bin
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles(false)
+                            tab.activeFolderContent.forEach {
+                                tab.selectedFiles[it.uniquePath] = it
+                            }
+                            tab.quickReloadFiles()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteSweep,
+                            contentDescription = stringResource(R.string.empty),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // Delete (Permanent)
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // Cut
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = true
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
+                    }
+
+                    // Copy
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = false
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
+                    }
+
+                    // Properties
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleFilePropertiesDialog(true)
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    }
+                } else {
+                    // Delete
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleDeleteConfirmationDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // Cut
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = true
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
+                    }
+
+                    // Copy
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.unselectAllFiles()
+                            globalClass.taskManager.addTask(
+                                CopyTask(
+                                    targetFiles,
+                                    deleteSourceFiles = false
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
+                    }
+
+                    // Rename
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleRenameDialog(true)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FormatColorText,
+                            contentDescription = null
+                        )
+                    }
+
+                    // Share
+                    if (targetContentHolder is LocalFileHolder) {
+                        IconButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                onDismissRequest()
+                                if (hasFolders) {
+                                    tab.toggleShareFolderCompressDialog(true)
+                                } else {
+                                    tab.shareSelectedFiles(context)
+                                }
+                            }
+                        ) {
+                            Icon(imageVector = Icons.Rounded.Share, contentDescription = null)
+                        }
+                    }
+
+                    // Properties
+                    IconButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onDismissRequest()
+                            tab.toggleFilePropertiesDialog(true)
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    }
+                }
+            }
+
+            Space(size = 6.dp)
+            HorizontalDivider()
+
+            if (isRecycleBin) {
+                FileOption(
+                    Icons.Rounded.RestoreFromTrash,
+                    stringResource(R.string.restore)
+                ) {
+                    onDismissRequest()
+                    tab.restoreSelectedFiles()
+                }
+
+                FileOption(
+                    Icons.Rounded.DeleteSweep,
+                    stringResource(R.string.empty)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles(false)
+                    tab.activeFolderContent.forEach {
+                        tab.selectedFiles[it.uniquePath] = it
+                    }
+                    tab.quickReloadFiles()
+                    tab.toggleDeleteConfirmationDialog(true)
+                }
+
+                val version = globalClass.taskManager.pendingTasksVersion
+                val mostRecentCopyTask = remember(version) {
+                    globalClass.taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+                }
+                if (mostRecentCopyTask != null) {
+                    FileOption(
+                        Icons.Rounded.ContentPaste,
+                        stringResource(if (mostRecentCopyTask.deleteSourceFiles) R.string.move_here else R.string.paste_here)
+                    ) {
+                        onDismissRequest()
+                        globalClass.taskManager.runTask(
+                            mostRecentCopyTask.id,
+                            CopyTaskParameters(tab.activeFolder)
+                        )
+                        tab.unselectAllFiles()
+                    }
+                }
+            }
+
+            if (!isRecycleBin && isSingleFolder) {
+                FileOption(
+                    Icons.AutoMirrored.Rounded.OpenInNew,
+                    stringResource(R.string.open_in_new_tab)
+                ) {
+                    onDismissRequest()
+                    tab.requestNewTab(FilesTab(targetContentHolder))
+                    tab.unselectAllFiles()
+                }
+
+                // Open in Terminal
+                if (targetContentHolder is LocalFileHolder) {
+                    FileOption(
+                        Icons.Rounded.Terminal,
+                        "Open in Terminal"
+                    ) {
+                        onDismissRequest()
+                        openFolderInTerminal(context, targetContentHolder.file.absolutePath)
+                        val intent = Intent(context, TerminalActivity::class.java).apply {
+                            putExtra("cwd", targetContentHolder.file.absolutePath)
+                        }
+                        context.startActivity(intent)
+                        tab.unselectAllFiles()
+                    }
+                }
+            }
+
+            if (isSingleFile && targetContentHolder is LocalFileHolder) {
+                FileOption(
+                    Icons.AutoMirrored.Rounded.OpenInNew,
+                    stringResource(R.string.open_with)
+                ) {
+                    onDismissRequest()
+                    tab.toggleOpenWithDialog(true)
+                }
+            }
+
+            val parentFolder = remember(targetContentHolder) {
+                kotlinx.coroutines.runBlocking { targetContentHolder.getParent() }
+            }
+            if (parentFolder != null && (tab.activeFolder is VirtualFileHolder || parentFolder.uniquePath != tab.activeFolder.uniquePath)) {
+                FileOption(
+                    Icons.Rounded.FolderOpen,
+                    stringResource(R.string.open_parent_folder)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles()
+                    tab.locateFile(targetContentHolder)
+                }
+
+                FileOption(
+                    Icons.AutoMirrored.Rounded.OpenInNew,
+                    stringResource(R.string.open_parent_folder_in_new_tab)
+                ) {
+                    onDismissRequest()
+                    tab.unselectAllFiles()
+                    tab.requestNewTab(FilesTab(targetContentHolder))
+                }
+            }
+
+            if (tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type == VirtualFileHolder.BOOKMARKS) {
+                FileOption(
+                    Icons.Rounded.BookmarkAdd,
+                    stringResource(R.string.remove_from_bookmarks)
+                ) {
+                    onDismissRequest()
+                    val toRemove = targetFiles.map { it.uniquePath }
+                    val newBookmarks = globalClass.preferencesManager.bookmarks.filter {
+                        !toRemove.contains(it)
+                    }
+                    globalClass.preferencesManager.bookmarks = newBookmarks.toSet()
+                    tab.unselectAllFiles()
+                    tab.reloadFiles()
+                }
+            }
+
+            if (tab.activeFolder is LocalFileHolder ||
+                (tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type isNot VirtualFileHolder.BOOKMARKS)
+            ) {
+                FileOption(Icons.Rounded.BookmarkAdd, stringResource(R.string.add_to_bookmarks)) {
+                    onDismissRequest()
+                    globalClass.preferencesManager.bookmarks += targetFiles.map { it.uniquePath }
+                    globalClass.showMsg(R.string.added_to_bookmarks)
+                    tab.unselectAllFiles()
+                }
+            }
+
+            val isPinable = targetFiles.isNotEmpty() && targetFiles.all { it is LocalFileHolder }
+            if (isPinable) {
+                val pinnedFiles = globalClass.preferencesManager.pinnedFiles
+                val allPinned = targetFiles.all { it.uniquePath in pinnedFiles }
+                if (allPinned) {
+                    FileOption(
+                        Icons.Rounded.PushPin,
+                        stringResource(R.string.unpin_from_home_tab)
+                    ) {
+                        onDismissRequest()
+                        val oldList = globalClass.preferencesManager.pinnedFiles
+                        globalClass.preferencesManager.pinnedFiles = oldList - targetFiles.map { it.uniquePath }.toSet()
+                        globalClass.showMsg(R.string.done)
+                        tab.unselectAllFiles()
+                    }
+                } else {
+                    FileOption(Icons.Rounded.PushPin, stringResource(R.string.pin_to_home_tab)) {
+                        onDismissRequest()
+                        val oldList = globalClass.preferencesManager.pinnedFiles
+                        globalClass.preferencesManager.pinnedFiles =
+                            oldList + targetFiles.map { it.uniquePath }.filter { it !in oldList }
+                        globalClass.showMsg(R.string.done)
+                        tab.unselectAllFiles()
+                    }
+                }
+            }
+
+            if (isRequestPinShortcutSupported(context) && tab.activeFolder is LocalFileHolder && (isSingleFile || isSingleFolder)) {
+                FileOption(Icons.Rounded.Home, stringResource(R.string.add_to_home_screen)) {
+                    onDismissRequest()
+                    tab.addToHomeScreen(context, targetContentHolder as LocalFileHolder)
+                    tab.unselectAllFiles()
+                }
+            }
+
+            if (isSingleFile && targetContentHolder is LocalFileHolder) {
+                FileOption(Icons.Rounded.EditNote, stringResource(R.string.edit_with_text_editor)) {
+                    onDismissRequest()
+                    globalClass.textEditorManager.openTextEditor(targetContentHolder, context)
+                    tab.unselectAllFiles()
+                }
+
+                if (apkBundleFileType.contains(targetContentHolder.file.extension)) {
+                    FileOption(Icons.Rounded.Merge, stringResource(R.string.convert_to_apk)) {
+                        onDismissRequest()
+                        globalClass.taskManager.addTaskAndRun(
+                            ApksMergeTask(targetContentHolder),
+                            ApksMergeTaskParameters(
+                                globalClass.preferencesManager.signMergedApkBundleFiles
+                            )
+                        )
+                        tab.unselectAllFiles()
+                    }
+                }
+            }
+
+            if (tab.activeFolder !is ZipFileHolder) {
+                FileOption(Icons.Rounded.Compress, stringResource(R.string.compress)) {
+                    CompressTask(targetFiles).let { task ->
+                        globalClass.taskManager.addTask(task, false)
+                        tab.toggleCompressTaskDialog(task)
+                    }
+                    onDismissRequest()
+                    tab.unselectAllFiles()
+                }
+
+                val isArchive = targetFiles.isNotEmpty() && targetFiles.all {
+                    it is LocalFileHolder && (
+                        it.file.extension.lowercase() == "zip" ||
+                        it.file.extension.lowercase() == "rar" ||
+                        it.file.extension.lowercase() == "7z" ||
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isNativeArchive(it.file.extension.lowercase())
+                    )
+                }
+
+                if (isArchive) {
+                    var showPasswordPrompt by remember { mutableStateOf(false) }
+
+                    FileOption(Icons.Rounded.Merge, "Extract") {
+                        val hasEncryptedZip = targetFiles.any { file ->
+                            file is LocalFileHolder && file.file.extension.lowercase() == "zip" && try {
+                                net.lingala.zip4j.ZipFile(file.file).isEncrypted
+                            } catch (e: Exception) {
+                                false
+                            }
+                        }
+                        if (hasEncryptedZip) {
+                            showPasswordPrompt = true
+                        } else {
+                            onDismissRequest()
+                            val task = com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
+                            globalClass.taskManager.addTaskAndRun(task, com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters())
+                            tab.unselectAllFiles()
+                        }
+                    }
+
+                    if (showPasswordPrompt) {
+                        com.techflyers.compose.file.explorer.screen.viewer.pdf.ui.PdfPasswordDialog(
+                            onPasswordSubmit = { password ->
+                                showPasswordPrompt = false
+                                onDismissRequest()
+                                val task = com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
+                                globalClass.taskManager.addTaskAndRun(task, com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters(password))
+                                tab.unselectAllFiles()
+                            },
+                            onDismiss = {
+                                showPasswordPrompt = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            val isAllImages = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+            }
+
+            if (isAllImages) {
+                var showMergeImagesDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Images") {
+                    showMergeImagesDialog = true
+                }
+
+                if (showMergeImagesDialog) {
+                    MergeImagesDialog(
+                        show = showMergeImagesDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeImagesDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val isAllPdfs = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() == "pdf"
+            }
+
+            if (isAllPdfs) {
+                var showMergePdfDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge PDFs") {
+                    showMergePdfDialog = true
+                }
+
+                if (showMergePdfDialog) {
+                    MergePdfDialog(
+                        show = showMergePdfDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergePdfDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val audioExtensions = listOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "wma")
+            val isAllAudio = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in audioExtensions
+            }
+
+            if (isAllAudio) {
+                var showMergeAudioDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Audio") {
+                    showMergeAudioDialog = true
+                }
+
+                if (showMergeAudioDialog) {
+                    MergeAudioDialog(
+                        show = showMergeAudioDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeAudioDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val videoExtensions = listOf("mp4", "mkv", "mov", "webm", "3gp", "avi", "ts")
+            val isAllVideo = selectedFilesCount >= 2 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in videoExtensions
+            }
+
+            if (isAllVideo) {
+                var showMergeVideoDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.Merge, "Merge Videos") {
+                    showMergeVideoDialog = true
+                }
+
+                if (showMergeVideoDialog) {
+                    MergeVideoDialog(
+                        show = showMergeVideoDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showMergeVideoDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            if (isSingleFile && targetContentHolder is LocalFileHolder) {
+                FileOption(
+                    Icons.Rounded.OpenInNewOff,
+                    stringResource(R.string.remove_default_opening_method)
+                ) {
+                    fromJson<DefaultOpeningMethods>(globalClass.preferencesManager.defaultOpeningMethods)?.let {
+                        globalClass.preferencesManager.defaultOpeningMethods =
+                            DefaultOpeningMethods(
+                                it.openingMethods.filter { it.extension != targetContentHolder.file.extension }
+                            ).toJson()
+                    }
+                    onDismissRequest()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FileOption(
+    icon: ImageVector,
+    text: String,
+    highlight: Color = Color.Unspecified,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable {
+                onClick()
+            }
+            .padding(vertical = 16.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            modifier = Modifier.size(21.dp),
+            imageVector = icon,
+            tint = if (highlight == Color.Unspecified) MaterialTheme.colorScheme.onSurface else highlight,
+            contentDescription = null
+        )
+        Space(size = 12.dp)
+        Text(
+            text = text,
+            color = if (highlight == Color.Unspecified) MaterialTheme.colorScheme.onSurface else highlight
+        )
+    }
+}
