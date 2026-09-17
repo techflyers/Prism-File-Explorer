@@ -1,5 +1,8 @@
 package com.techflyers.compose.file.explorer.screen.main.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +19,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -36,10 +40,15 @@ fun StorageDeviceView(
     onClick: () -> Unit = {}
 ) {
     val progress = if (storageDevice.totalSize > 0) {
-        storageDevice.usedSize.toFloat() / storageDevice.totalSize
+        (storageDevice.usedSize.toFloat() / storageDevice.totalSize).coerceIn(0f, 1f)
     } else {
         0f
     }
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+        label = "storageProgress"
+    )
 
     Row(
         modifier = Modifier
@@ -71,7 +80,7 @@ fun StorageDeviceView(
                         modifier = Modifier
                             .weight(1f)
                             .height(8.dp),
-                        progress = { progress },
+                        progress = { animatedProgress },
                         strokeCap = StrokeCap.Round,
                         color = if (progress > 0.85f) {
                             MaterialTheme.colorScheme.error

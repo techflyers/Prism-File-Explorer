@@ -1,6 +1,7 @@
 package com.techflyers.compose.file.explorer.screen.preferences.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ShortText
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
@@ -98,6 +99,38 @@ fun FileListContainer() {
             icon = Icons.Rounded.HideSource,
             switchState = prefs.hideFileExtensions,
             onSwitchChange = { prefs.hideFileExtensions = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.filename_end_characters),
+            supportingText = if (prefs.filenameEndCharsCount <= 0) {
+                stringResource(R.string.filename_end_characters_none)
+            } else {
+                stringResource(R.string.filename_end_characters_n, prefs.filenameEndCharsCount)
+            },
+            icon = Icons.AutoMirrored.Rounded.ShortText,
+            onClick = {
+                val counts = listOf(0, 3, 4, 5, 6, 8, 10, 12, 15)
+                val choices = counts.map { count ->
+                    if (count == 0) globalClass.getString(R.string.filename_end_characters_none)
+                    else globalClass.getString(R.string.filename_end_characters_n, count)
+                }
+                val selectedIndex = counts.indexOf(prefs.filenameEndCharsCount).let { if (it >= 0) it else 0 }
+                prefs.singleChoiceDialog.show(
+                    title = globalClass.getString(R.string.filename_end_characters),
+                    description = globalClass.getString(R.string.filename_end_characters_desc),
+                    choices = choices,
+                    selectedChoice = selectedIndex,
+                    onSelect = { index ->
+                        prefs.filenameEndCharsCount = counts.getOrElse(index) { 0 }
+                    }
+                )
+            }
         )
 
         HorizontalDivider(

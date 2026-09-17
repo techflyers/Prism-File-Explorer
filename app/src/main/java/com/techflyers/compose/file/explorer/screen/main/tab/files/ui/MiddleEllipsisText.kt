@@ -16,6 +16,36 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+
+fun computeMiddleEllipsisParts(
+    text: String,
+    isFolder: Boolean = false,
+    endCharsCount: Int = 0
+): Pair<String, String>? {
+    val dotIndex = if (!isFolder) text.lastIndexOf('.') else -1
+    val hasExtension = !isFolder && dotIndex > 0 && dotIndex < text.length - 1
+
+    return if (hasExtension) {
+        val baseName = text.substring(0, dotIndex)
+        val ext = text.substring(dotIndex)
+        if (endCharsCount > 0 && baseName.length > endCharsCount) {
+            val p = baseName.substring(0, baseName.length - endCharsCount)
+            val s = baseName.substring(baseName.length - endCharsCount) + ext
+            Pair(p, s)
+        } else {
+            Pair(baseName, ext)
+        }
+    } else {
+        if (endCharsCount > 0 && text.length > endCharsCount) {
+            val p = text.substring(0, text.length - endCharsCount)
+            val s = text.substring(text.length - endCharsCount)
+            Pair(p, s)
+        } else {
+            null
+        }
+    }
+}
 
 @Composable
 fun MiddleEllipsisText(
@@ -30,71 +60,76 @@ fun MiddleEllipsisText(
     textAlign: TextAlign = TextAlign.Start,
     maxLines: Int = 1,
     enableMarquee: Boolean = true,
-    marqueeVelocity: Dp = 30.dp
+    marqueeVelocity: Dp = 90.dp,
+    endCharsCount: Int = globalClass.preferencesManager.filenameEndCharsCount
 ) {
     val shouldMarquee = enableMarquee && isSelected
-    val dotIndex = if (!isFolder) text.lastIndexOf('.') else -1
 
-    if (!isFolder && dotIndex > 0 && dotIndex < text.length - 1 && maxLines == 1) {
-        val baseName = text.substring(0, dotIndex)
-        val ext = text.substring(dotIndex)
-
-        Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (textAlign == TextAlign.Center) Arrangement.Center else Arrangement.Start
-        ) {
-            Text(
-                text = baseName,
-                fontSize = fontSize,
-                color = color,
-                fontWeight = fontWeight,
-                maxLines = 1,
-                softWrap = false,
-                lineHeight = lineHeight,
-                overflow = if (shouldMarquee) TextOverflow.Clip else TextOverflow.Ellipsis,
-                textAlign = textAlign,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .then(
-                        if (shouldMarquee) {
-                            Modifier.basicMarquee(
-                                iterations = Int.MAX_VALUE,
-                                animationMode = MarqueeAnimationMode.Immediately,
-                                velocity = marqueeVelocity
-                            )
-                        } else Modifier
-                    )
-            )
-            Text(
-                text = ext,
-                fontSize = fontSize,
-                color = color,
-                fontWeight = fontWeight,
-                maxLines = 1,
-                lineHeight = lineHeight
-            )
-        }
-    } else {
+    if (shouldMarquee) {
         Text(
             text = text,
             fontSize = fontSize,
             color = color,
             fontWeight = fontWeight,
-            maxLines = if (shouldMarquee) 1 else maxLines,
-            softWrap = if (shouldMarquee) false else (maxLines > 1),
+            maxLines = 1,
+            softWrap = false,
             lineHeight = lineHeight,
-            overflow = if (shouldMarquee) TextOverflow.Clip else TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
             textAlign = textAlign,
-            modifier = modifier.then(
-                if (shouldMarquee) {
-                    Modifier.basicMarquee(
-                        iterations = Int.MAX_VALUE,
-                        animationMode = MarqueeAnimationMode.Immediately,
-                        velocity = marqueeVelocity
-                    )
-                } else Modifier
+            modifier = modifier.basicMarquee(
+                iterations = Int.MAX_VALUE,
+                animationMode = MarqueeAnimationMode.Immediately,
+                velocity = marqueeVelocity
             )
         )
+        return
     }
+
+    if (maxLines == 1) {
+        val parts = computeMiddleEllipsisParts(text, isFolder, endCharsCount)
+        if (parts != null) {
+            val (prefix, suffix) = parts
+            Row(
+                modifier = modifier,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (textAlign == TextAlign.Center) Arrangement.Center else Arrangement.Start
+            ) {
+                Text(
+                    text = prefix,
+                    fontSize = fontSize,
+                    color = color,
+                    fontWeight = fontWeight,
+                    maxLines = 1,
+                    softWrap = false,
+                    lineHeight = lineHeight,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = textAlign,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Text(
+                    text = suffix,
+                    fontSize = fontSize,
+                    color = color,
+                    fontWeight = fontWeight,
+                    maxLines = 1,
+                    softWrap = false,
+                    lineHeight = lineHeight
+                )
+            }
+            return
+        }
+    }
+
+    Text(
+        text = text,
+        fontSize = fontSize,
+        color = color,
+        fontWeight = fontWeight,
+        maxLines = maxLines,
+        softWrap = (maxLines > 1),
+        lineHeight = lineHeight,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = textAlign,
+        modifier = modifier
+    )
 }

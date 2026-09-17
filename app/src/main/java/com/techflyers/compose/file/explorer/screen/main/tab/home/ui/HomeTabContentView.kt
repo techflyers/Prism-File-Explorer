@@ -85,9 +85,14 @@ import com.techflyers.compose.file.explorer.screen.main.ui.SimpleNewTabViewItem
 import com.techflyers.compose.file.explorer.screen.main.ui.StorageDeviceView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import androidx.compose.foundation.LocalOverscrollConfiguration
+import androidx.compose.foundation.OverscrollConfiguration
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -104,7 +109,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -112,12 +122,30 @@ import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ColumnScope.HomeTabContentView(tab: HomeTab) {
     val mainActivityManager = globalClass.mainActivityManager
+    val preferencesManager = globalClass.preferencesManager
     val scope = rememberCoroutineScope()
     val enabledSections = remember { mutableStateListOf<HomeSectionConfig>() }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    val refreshHome: () -> Unit = {
+        isRefreshing = true
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val d1 = async { tab.refreshRecentFiles() }
+                val d2 = async { tab.getPinnedFiles() }
+                val d3 = async { mainActivityManager.updateStorageDevices() }
+                d1.await()
+                d2.await()
+                d3.await()
+            }
+            delay(150)
+            isRefreshing = false
+        }
+    }
 
     LaunchedEffect(tab.id) {
         withContext(Dispatchers.IO) {
@@ -126,6 +154,9 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
             }
             async {
                 tab.getPinnedFiles()
+            }
+            async {
+                mainActivityManager.updateStorageDevices()
             }
             async {
                 val config = try {
@@ -138,8 +169,14 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                     getDefaultHomeLayout()
                 }.getSections().filter { it.isEnabled }.sortedBy { it.order }
 
+                enabledSections.clear()
                 enabledSections.addAll(config)
             }
+        }
+        // Auto-update storage stats periodically while Home tab is active
+        while (isActive) {
+            delay(3000)
+            mainActivityManager.updateStorageDevices()
         }
     }
 
@@ -183,42 +220,77 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
     }
 
     val homeScroll = rememberScrollState()
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(homeScroll)
-            .fastScrollbar(homeScroll),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        enabledSections.forEach { section ->
-            when (section.type) {
-                HomeSectionType.RECENT_FILES -> {
-                    RecentFilesSection(tab = tab, mainActivityManager = mainActivityManager)
-                }
+    val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
 
-                HomeSectionType.CATEGORIES -> {
-                    CategoriesSection(tab = tab)
-                }
+    val homeSectionsContent = @Composable {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(homeScroll)
+                .fastScrollbar(homeScroll),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            enabledSections.forEach { section ->
+                when (section.type) {
+                    HomeSectionType.RECENT_FILES -> {
+                        RecentFilesSection(tab = tab, mainActivityManager = mainActivityManager)
+                    }
 
-                HomeSectionType.STORAGE -> {
-                    StorageSection(mainActivityManager = mainActivityManager)
-                }
+                    HomeSectionType.CATEGORIES -> {
+                        CategoriesSection(tab = tab)
+                    }
 
-                HomeSectionType.BOOKMARKS -> {
-                    BookmarksSection(mainActivityManager = mainActivityManager)
-                }
+                    HomeSectionType.STORAGE -> {
+                        StorageSection(mainActivityManager = mainActivityManager)
+                    }
 
-                HomeSectionType.RECYCLE_BIN -> {
-                    RecycleBinSection(mainActivityManager = mainActivityManager)
-                }
+                    HomeSectionType.BOOKMARKS -> {
+                        BookmarksSection(mainActivityManager = mainActivityManager)
+                    }
 
-                HomeSectionType.JUMP_TO_PATH -> {
-                    JumpToPathSection(mainActivityManager = mainActivityManager)
-                }
+                    HomeSectionType.RECYCLE_BIN -> {
+                        RecycleBinSection(mainActivityManager = mainActivityManager)
+                    }
 
-                HomeSectionType.PINNED_FILES -> {
-                    PinnedFilesSection(tab = tab, mainActivityManager = mainActivityManager)
+                    HomeSectionType.JUMP_TO_PATH -> {
+                        JumpToPathSection(mainActivityManager = mainActivityManager)
+                    }
+
+                    HomeSectionType.PINNED_FILES -> {
+                        PinnedFilesSection(tab = tab, mainActivityManager = mainActivityManager)
+                    }
                 }
+            }
+        }
+    }
+
+    CompositionLocalProvider(LocalOverscrollConfiguration provides overscrollConfig) {
+        if (preferencesManager.disablePullDownToRefresh) {
+            homeSectionsContent()
+        } else if (preferencesManager.disableSpringEffect) {
+            val noSpringState = rememberPullToRefreshState()
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = refreshHome,
+                modifier = Modifier.fillMaxSize(),
+                state = noSpringState,
+                indicator = {
+                    PullToRefreshDefaults.Indicator(
+                        state = noSpringState,
+                        isRefreshing = isRefreshing,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+            ) {
+                homeSectionsContent()
+            }
+        } else {
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = refreshHome,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                homeSectionsContent()
             }
         }
     }
@@ -581,7 +653,7 @@ private fun CategoriesSection(
                     contentDescription = null
                 )
                 Text(
-                    modifier = Modifier.basicMarquee(),
+                    modifier = Modifier.basicMarquee(velocity = 90.dp),
                     text = it.name,
                     maxLines = 1
                 )
@@ -594,43 +666,42 @@ private fun CategoriesSection(
 private fun StorageSection(
     mainActivityManager: MainActivityManager
 ) {
-    val storageList = remember { mutableStateListOf<StorageDevice>() }
+    val mainActivityState by mainActivityManager.state.collectAsState()
+    val storageList = mainActivityState.storageDevices
 
-    LaunchedEffect(Unit) {
-        storageList.addAll(StorageProvider.getStorageDevices(globalClass))
-    }
+    if (storageList.isNotEmpty()) {
+        // Storage options
+        Text(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(top = 12.dp),
+            text = stringResource(R.string.storage),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
 
-    // Storage options
-    Text(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(top = 12.dp),
-        text = stringResource(R.string.storage),
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .background(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow
-            )
-            .border(
-                width = 0.5.dp,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = RoundedCornerShape(12.dp)
-            )
-            .clip(RoundedCornerShape(12.dp))
-    ) {
-        storageList.forEachIndexed { index, device ->
-            StorageDeviceView(storageDevice = device) {
-                mainActivityManager.replaceCurrentTabWith(FilesTab(device.contentHolder))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .background(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                )
+                .border(
+                    width = 0.5.dp,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            storageList.forEachIndexed { index, device ->
+                StorageDeviceView(storageDevice = device) {
+                    mainActivityManager.replaceCurrentTabWith(FilesTab(device.contentHolder))
+                }
+                if (index != storageList.lastIndex) HorizontalDivider(thickness = 0.5.dp)
             }
-            if (index != storageList.lastIndex) HorizontalDivider(thickness = 0.5.dp)
         }
     }
 }

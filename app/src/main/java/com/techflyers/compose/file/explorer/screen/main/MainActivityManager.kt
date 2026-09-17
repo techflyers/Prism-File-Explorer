@@ -49,14 +49,21 @@ class MainActivityManager {
     /**\
      * Loads available storage devices (Internal Storage, SD cards, etc)
      */
-    fun setup() {
-        managerScope.launch {
-            _state.update {
-                it.copy(
-                    storageDevices = StorageProvider.getStorageDevices(globalClass)
-                )
-            }
+    suspend fun updateStorageDevices() {
+        val devices = StorageProvider.getStorageDevices(globalClass)
+        _state.update {
+            it.copy(storageDevices = devices)
         }
+    }
+
+    fun refreshStorageDevices() {
+        managerScope.launch {
+            updateStorageDevices()
+        }
+    }
+
+    fun setup() {
+        refreshStorageDevices()
     }
 
     /**
@@ -250,6 +257,7 @@ class MainActivityManager {
 
     fun onResume() {
         resumeActiveTab()
+        refreshStorageDevices()
     }
 
     fun onStop() {

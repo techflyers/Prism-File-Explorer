@@ -579,4 +579,10 @@
     <string name="no_applicable_files">No files to compare</string>
     <string name="duplicate_group">Duplicates (%1$s)</string>
     <string name="deselect_all">Deselect All</string>
+
+    <!-- Filename Truncation -->
+    <string name="filename_end_characters">Filename end characters</string>
+    <string name="filename_end_characters_desc">Number of characters from the end of the filename to show before the extension when truncated (e.g. Beginning...end.ext)</string>
+    <string name="filename_end_characters_none">None (Default)</string>
+    <string name="filename_end_characters_n">%1$d characters</string>
 </resources>

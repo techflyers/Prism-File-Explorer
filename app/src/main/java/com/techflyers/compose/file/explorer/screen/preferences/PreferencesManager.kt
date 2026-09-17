@@ -32,6 +32,13 @@ import kotlinx.coroutines.runBlocking
 class PreferencesManager {
     val singleChoiceDialog = SingleChoiceDialog()
 
+    //---------- Onboarding -------------//
+    var hasShownOnboarding by prefMutableState(
+        keyName = "hasShownOnboarding",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     //---------- Appearance -------------//
     var theme by prefMutableState(
         keyName = "theme",
@@ -121,7 +128,7 @@ class PreferencesManager {
 
     var deepEmptyFolderCheck by prefMutableState(
         keyName = "deepEmptyFolderCheck",
-        defaultValue = true,
+        defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -137,6 +144,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var filenameEndCharsCount by prefMutableState(
+        keyName = "filenameEndCharsCount",
+        defaultValue = 0,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
     var showParentDirectoryEntry by prefMutableState(
         keyName = "showParentDirectoryEntry",
         defaultValue = true,
@@ -145,7 +158,7 @@ class PreferencesManager {
 
     var showSourceBadges by prefMutableState(
         keyName = "showSourceBadges",
-        defaultValue = true,
+        defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 

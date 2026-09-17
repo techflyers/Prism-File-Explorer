@@ -7,6 +7,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -59,6 +61,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.techflyers.compose.file.explorer.screen.main.tab.home.ui.HomeTabContentView
 import com.techflyers.compose.file.explorer.screen.main.ui.AppInfoDialog
 import com.techflyers.compose.file.explorer.screen.main.ui.JumpToPathDialog
+import com.techflyers.compose.file.explorer.screen.main.ui.OnboardingScreen
 import com.techflyers.compose.file.explorer.screen.main.ui.SaveTextEditorFilesDialog
 import com.techflyers.compose.file.explorer.screen.main.ui.StartupTabsSettingsScreen
 import com.techflyers.compose.file.explorer.screen.main.ui.TabLayout
@@ -92,6 +95,21 @@ class MainActivity : BaseActivity() {
         setContent {
             FileExplorerTheme {
                 SafeSurface {
+                    // Show onboarding carousel on first install; never again after that.
+                    var onboardingDone by remember {
+                        mutableStateOf(globalClass.preferencesManager.hasShownOnboarding)
+                    }
+
+                    if (!onboardingDone) {
+                        OnboardingScreen(
+                            onFinish = {
+                                globalClass.preferencesManager.hasShownOnboarding = true
+                                onboardingDone = true
+                            }
+                        )
+                        return@SafeSurface
+                    }
+
                     val coroutineScope = rememberCoroutineScope()
                     val mainActivityManager = globalClass.mainActivityManager
                     val mainActivityState by mainActivityManager.state.collectAsState()

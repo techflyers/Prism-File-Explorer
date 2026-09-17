@@ -47,11 +47,13 @@ class HomeTab : Tab() {
     override fun onTabStarted() {
         super.onTabStarted()
         requestHomeToolbarUpdate()
+        globalClass.mainActivityManager.refreshStorageDevices()
     }
 
     override fun onTabResumed() {
         super.onTabResumed()
         requestHomeToolbarUpdate()
+        globalClass.mainActivityManager.refreshStorageDevices()
     }
 
     override suspend fun getSubtitle() = emptyString

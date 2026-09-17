@@ -1,5 +1,11 @@
 package com.techflyers.compose.file.explorer.screen.main.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
+import androidx.compose.foundation.OverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +16,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,8 +47,15 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDe
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.sp
 import android.content.Intent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun NFileDrawerContent(
     drawerState: DrawerState,
@@ -47,21 +63,41 @@ fun NFileDrawerContent(
 ) {
     val context = LocalContext.current
     val manager = globalClass.mainActivityManager
+    val preferencesManager = globalClass.preferencesManager
     val scope = rememberCoroutineScope()
 
-    val storageList = remember { mutableStateListOf<StorageDevice>() }
+    val mainActivityState by manager.state.collectAsState()
+    val storageList = mainActivityState.storageDevices
     var remoteConnections by remember {
         mutableStateOf(NetworkConnectionsService.getConnections(context))
     }
+    var isRefreshing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        storageList.addAll(StorageProvider.getStorageDevices(globalClass))
+    val refreshDrawer: () -> Unit = {
+        isRefreshing = true
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val d1 = async { manager.updateStorageDevices() }
+                val d2 = async { remoteConnections = NetworkConnectionsService.getConnections(context) }
+                d1.await()
+                d2.await()
+            }
+            delay(150)
+            isRefreshing = false
+        }
     }
 
-    // Refresh connections list when drawer opens
+    // Refresh connections & storage when drawer opens, and auto-update storage periodically while open
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen) {
-            remoteConnections = NetworkConnectionsService.getConnections(context)
+            withContext(Dispatchers.IO) {
+                remoteConnections = NetworkConnectionsService.getConnections(context)
+                manager.updateStorageDevices()
+            }
+            while (isActive && drawerState.isOpen) {
+                delay(3000)
+                manager.updateStorageDevices()
+            }
         }
     }
 
@@ -70,158 +106,194 @@ fun NFileDrawerContent(
             .fillMaxHeight()
             .width(320.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-        ) {
-            // Section 1: Dashboard Navigation
-            DrawerSectionHeader("Navigation")
+        val drawerScroll = rememberScrollState()
+        val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
 
-            DrawerItem(
-                icon = Icons.Rounded.Home,
-                label = "Dashboard Home"
+        val drawerContent = @Composable {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(drawerScroll)
             ) {
-                manager.replaceCurrentTabWith(HomeTab())
-                onNavigate()
-            }
+                // Section 1: Dashboard Navigation
+                DrawerSectionHeader("Navigation")
 
-            DrawerItem(
-                icon = Icons.Rounded.Dns,
-                label = "System Root"
-            ) {
-                manager.replaceCurrentTabWith(FilesTab(LocalFileHolder(File("/"))))
-                onNavigate()
-            }
-
-            DrawerItem(
-                icon = Icons.Rounded.DeleteSweep,
-                label = "Recycle Bin"
-            ) {
-                manager.replaceCurrentTabWith(FilesTab(globalClass.recycleBinDir))
-                onNavigate()
-            }
-
-            // Section 2: Storage Devices
-            if (storageList.isNotEmpty()) {
-                DrawerSectionHeader("Storage Devices")
-                for (device in storageList) {
-                    StorageDrawerItem(device = device) {
-                        manager.replaceCurrentTabWith(FilesTab(device.contentHolder))
-                        onNavigate()
-                    }
+                DrawerItem(
+                    icon = Icons.Rounded.Home,
+                    label = "Dashboard Home"
+                ) {
+                    manager.replaceCurrentTabWith(HomeTab())
+                    onNavigate()
                 }
-            }
 
-            // Section 3: Servers & Tools
-            DrawerSectionHeader("Servers & Tools")
+                DrawerItem(
+                    icon = Icons.Rounded.Dns,
+                    label = "System Root"
+                ) {
+                    manager.replaceCurrentTabWith(FilesTab(LocalFileHolder(File("/"))))
+                    onNavigate()
+                }
 
-            DrawerItem(
-                icon = Icons.Rounded.VpnKey,
-                label = "Private Wallet"
-            ) {
-                manager.replaceCurrentTabWith(VaultTab())
-                onNavigate()
-            }
+                DrawerItem(
+                    icon = Icons.Rounded.DeleteSweep,
+                    label = "Recycle Bin"
+                ) {
+                    manager.replaceCurrentTabWith(FilesTab(globalClass.recycleBinDir))
+                    onNavigate()
+                }
 
-            DrawerItem(
-                icon = Icons.Rounded.SettingsEthernet,
-                label = "FTP Server"
-            ) {
-                manager.replaceCurrentTabWith(FtpServerTab())
-                onNavigate()
-            }
-
-            DrawerItem(
-                icon = Icons.Rounded.Share,
-                label = "Web Sharing"
-            ) {
-                manager.replaceCurrentTabWith(WebSharingTab())
-                onNavigate()
-            }
-
-            // Section 4: Remote Connections
-            DrawerSectionHeader("Remote Connections")
-
-            for (conn in remoteConnections) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            manager.replaceCurrentTabWith(FilesTab(RemoteFileHolder.rootHolder(conn)))
+                // Section 2: Storage Devices
+                if (storageList.isNotEmpty()) {
+                    DrawerSectionHeader("Storage Devices")
+                    for (device in storageList) {
+                        StorageDrawerItem(device = device) {
+                            manager.replaceCurrentTabWith(FilesTab(device.contentHolder))
                             onNavigate()
                         }
-                        .padding(vertical = 10.dp, horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = when (conn.type) {
-                            "FTP" -> Icons.Rounded.SettingsEthernet
-                            "SFTP" -> Icons.Rounded.Dns
-                            "WebDav" -> Icons.Rounded.Cloud
-                            else -> Icons.Rounded.NetworkWifi
-                        },
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = conn.name,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    // Delete Connection Icon
-                    IconButton(
-                        onClick = {
-                            NetworkConnectionsService.deleteConnection(context, conn.id)
-                            remoteConnections = NetworkConnectionsService.getConnections(context)
-                        },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Delete,
-                            contentDescription = "Delete Connection",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                            modifier = Modifier.size(20.dp)
-                        )
                     }
                 }
-            }
 
-            // Add Remote Connection button
-            DrawerItem(
-                icon = Icons.Rounded.AddLink,
-                label = "Add Remote Connection",
-                tint = MaterialTheme.colorScheme.secondary
-            ) {
-                manager.replaceCurrentTabWith(NetworkConnectionWizardTab())
-                onNavigate()
-            }
+                // Section 3: Servers & Tools
+                DrawerSectionHeader("Servers & Tools")
 
-            // Settings / Preferences button
-            DrawerItem(
-                icon = Icons.Rounded.Settings,
-                label = stringResource(R.string.preferences),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            ) {
-                context.startActivity(Intent(context, PreferencesActivity::class.java))
-                onNavigate()
-            }
+                DrawerItem(
+                    icon = Icons.Rounded.VpnKey,
+                    label = "Private Wallet"
+                ) {
+                    manager.replaceCurrentTabWith(VaultTab())
+                    onNavigate()
+                }
 
-            // About button
-            DrawerItem(
-                icon = Icons.Rounded.Info,
-                label = "About App",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            ) {
-                manager.toggleAppInfoDialog(true)
-                onNavigate()
-            }
+                DrawerItem(
+                    icon = Icons.Rounded.SettingsEthernet,
+                    label = "FTP Server"
+                ) {
+                    manager.replaceCurrentTabWith(FtpServerTab())
+                    onNavigate()
+                }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                DrawerItem(
+                    icon = Icons.Rounded.Share,
+                    label = "Web Sharing"
+                ) {
+                    manager.replaceCurrentTabWith(WebSharingTab())
+                    onNavigate()
+                }
+
+                // Section 4: Remote Connections
+                DrawerSectionHeader("Remote Connections")
+
+                for (conn in remoteConnections) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                manager.replaceCurrentTabWith(FilesTab(RemoteFileHolder.rootHolder(conn)))
+                                onNavigate()
+                            }
+                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = when (conn.type) {
+                                "FTP" -> Icons.Rounded.SettingsEthernet
+                                "SFTP" -> Icons.Rounded.Dns
+                                "WebDav" -> Icons.Rounded.Cloud
+                                else -> Icons.Rounded.NetworkWifi
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = conn.name,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        // Delete Connection Icon
+                        IconButton(
+                            onClick = {
+                                NetworkConnectionsService.deleteConnection(context, conn.id)
+                                remoteConnections = NetworkConnectionsService.getConnections(context)
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Delete,
+                                contentDescription = "Delete Connection",
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Add Remote Connection button
+                DrawerItem(
+                    icon = Icons.Rounded.AddLink,
+                    label = "Add Remote Connection",
+                    tint = MaterialTheme.colorScheme.secondary
+                ) {
+                    manager.replaceCurrentTabWith(NetworkConnectionWizardTab())
+                    onNavigate()
+                }
+
+                // Settings / Preferences button
+                DrawerItem(
+                    icon = Icons.Rounded.Settings,
+                    label = stringResource(R.string.preferences),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    context.startActivity(Intent(context, PreferencesActivity::class.java))
+                    onNavigate()
+                }
+
+                // About button
+                DrawerItem(
+                    icon = Icons.Rounded.Info,
+                    label = "About App",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    manager.toggleAppInfoDialog(true)
+                    onNavigate()
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        CompositionLocalProvider(LocalOverscrollConfiguration provides overscrollConfig) {
+            if (preferencesManager.disablePullDownToRefresh) {
+                drawerContent()
+            } else if (preferencesManager.disableSpringEffect) {
+                val noSpringState = rememberPullToRefreshState()
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = refreshDrawer,
+                    modifier = Modifier.fillMaxSize(),
+                    state = noSpringState,
+                    indicator = {
+                        PullToRefreshDefaults.Indicator(
+                            state = noSpringState,
+                            isRefreshing = isRefreshing,
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    }
+                ) {
+                    drawerContent()
+                }
+            } else {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = refreshDrawer,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    drawerContent()
+                }
+            }
         }
     }
 }
@@ -278,6 +350,11 @@ private fun StorageDrawerItem(
     val progress = if (device.totalSize > 0) {
         (device.usedSize.toFloat() / device.totalSize).coerceIn(0f, 1f)
     } else 0f
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+        label = "storageProgress"
+    )
     val freeSize = (device.totalSize - device.usedSize).coerceAtLeast(0L)
 
     Row(
@@ -310,7 +387,7 @@ private fun StorageDrawerItem(
             if (device.totalSize > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 LinearProgressIndicator(
-                    progress = { progress },
+                    progress = { animatedProgress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(5.dp),

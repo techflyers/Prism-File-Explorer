@@ -11,6 +11,9 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Required by TerminalSessionService which runs as android:foregroundServiceType="specialUse".
+         On Android 14+ (API 34+) the OS requires this permission when a foreground service
+         declares the specialUse type (used here for the built-in terminal emulator). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
         tools:targetApi="34" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -21,11 +24,23 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Required to read the device's local IP address for the built-in
+         FTP Server and Web Sharing Portal features (no data sent externally). -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- Required by the mDNS/network-discovery stack used to locate SMB/LAN
+         servers on the local network when using the Remote Connection Wizard. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Acquired by TerminalSessionService to keep terminal sessions alive
+         when the screen turns off (prevents the shell process from being killed). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Shizuku binder permission -->
+    <!-- Required to bind to the Shizuku privileged binder API (rikka.shizuku.ShizukuProvider).
+         Shizuku enables root/adb-level file access for reading system directories without
+         requiring a fully rooted device. This is NOT a Google permission; it belongs to
+         the open-source Shizuku project (https://github.com/RikkaApps/Shizuku). -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <queries>
@@ -56,6 +71,25 @@
         android:extractNativeLibs="true"
         android:theme="@style/Theme.FileExplorer"
         tools:targetApi="34" >
+
+        <!--
+            ML Kit (com.google.mlkit) is used exclusively for on-device AI Semantic Search
+            and OCR (MlKitOcrEngine). ML Kit does NOT send any data to Google servers when
+            called with on-device models.
+
+            The library auto-merges MlKitComponentDiscoveryService and MlKitInitProvider into
+            every app's manifest via its own AAR manifests. Since Prism calls the ML Kit API
+            explicitly (not through auto-init), these entries are redundant here.
+            We suppress them with tools:node="remove" so they don't appear in the merged
+            manifest and don't raise privacy concerns for users or downstream reviewers.
+        -->
+        <service
+            android:name="com.google.mlkit.common.internal.MlKitComponentDiscoveryService"
+            tools:node="remove" />
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
 
         <activity
             android:name=".screen.textEditor.TextEditorActivity"
