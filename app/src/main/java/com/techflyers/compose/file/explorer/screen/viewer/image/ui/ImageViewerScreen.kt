@@ -103,6 +103,7 @@ import kotlinx.coroutines.withContext
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -133,6 +134,14 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 
     val safeIndex = pagerState.currentPage.coerceIn(0, (imageList.size - 1).coerceAtLeast(0))
     val currentUri = imageList.getOrNull(safeIndex)
+
+    val archiveSession = remember { (context as? ImageViewerActivity)?.intent?.let { ArchiveMediaQueueManager.getOrCreateSession(it) } }
+
+    LaunchedEffect(pagerState.currentPage, archiveSession) {
+        archiveSession?.let { session ->
+            ArchiveMediaQueueManager.prefetchWindow(session, pagerState.currentPage, windowSize = 3)
+        }
+    }
 
     if (imageList.isEmpty() || currentUri == null) {
         Box(
@@ -211,16 +220,31 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
-                var image by remember(pageUri) { mutableStateOf<Image?>(null) }
-                var isError by remember(pageUri) { mutableStateOf(false) }
-                var isLoading by remember(pageUri) { mutableStateOf(true) }
+                val targetPath = imagePaths.getOrNull(page)
+                var isExtracted by remember(pageUri, targetPath) {
+                    mutableStateOf(targetPath == null || ArchiveMediaQueueManager.isExtracted(targetPath))
+                }
 
-                if (isError) {
-                    ErrorState(onClose = { (context as? ViewerActivity)?.finish() })
+                LaunchedEffect(pageUri, isExtracted) {
+                    if (!isExtracted && targetPath != null && archiveSession != null) {
+                        ArchiveMediaQueueManager.ensureExtracted(archiveSession, page)
+                        isExtracted = ArchiveMediaQueueManager.isExtracted(targetPath)
+                    }
+                }
+
+                if (!isExtracted) {
+                    LoadingState(text = stringResource(R.string.extracting_media))
                 } else {
-                    ZoomableAsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(pageUri)
+                    var image by remember(pageUri) { mutableStateOf<Image?>(null) }
+                    var isError by remember(pageUri) { mutableStateOf(false) }
+                    var isLoading by remember(pageUri) { mutableStateOf(true) }
+
+                    if (isError) {
+                        ErrorState(onClose = { (context as? ViewerActivity)?.finish() })
+                    } else {
+                        ZoomableAsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(pageUri)
                             .listener(
                                 onSuccess = { _, state ->
                                     image = state.image
@@ -258,6 +282,11 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                             image?.let {
                                 imageDimensions = "${it.width}" to "${it.height}"
                             }
+                        }
+                    }
+
+                    LaunchedEffect(image) {
+                        if (image != null && page == pagerState.currentPage) {
                             try {
                                 withContext(Dispatchers.Default) {
                                     val bitmap = image!!.toBitmap().copy(Bitmap.Config.ARGB_8888, false)
@@ -276,6 +305,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                 }
             }
         }
+    }
 
         AnimatedVisibility(
             visible = showControls,
@@ -552,7 +582,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 }
 
 @Composable
-private fun LoadingState() {
+private fun LoadingState(text: String = stringResource(R.string.loading_image)) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(
@@ -562,7 +592,7 @@ private fun LoadingState() {
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = stringResource(R.string.loading_image),
+                text = text,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )

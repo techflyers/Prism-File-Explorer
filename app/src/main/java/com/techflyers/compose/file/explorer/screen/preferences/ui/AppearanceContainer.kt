@@ -5,12 +5,16 @@ import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.CalendarToday
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Nightlight
+import androidx.compose.material.icons.rounded.Tab
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.UnfoldLess
 import androidx.compose.material.icons.rounded.VerticalAlignBottom
 import androidx.compose.material.icons.rounded.VerticalAlignTop
-import androidx.compose.material.icons.rounded.UnfoldLess
 import androidx.compose.material.icons.rounded.ViewHeadline
+import androidx.compose.material.icons.rounded.ViewStream
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
@@ -32,6 +36,7 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SelectionRibbonSettingsDialog
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -39,6 +44,8 @@ import java.util.Locale
 @Composable
 fun AppearanceContainer() {
     val prefs = globalClass.preferencesManager
+    var showDateFormatDialog by remember { mutableStateOf(false) }
+    var showSelectionRibbonSettingsDialog by remember { mutableStateOf(false) }
 
     Container(title = stringResource(R.string.appearance)) {
         PreferenceItem(
@@ -88,6 +95,32 @@ fun AppearanceContainer() {
             icon = Icons.Rounded.ViewHeadline,
             switchState = prefs.disableTabBar,
             onSwitchChange = { prefs.disableTabBar = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.show_tabs_in_drawer),
+            supportingText = stringResource(R.string.show_tabs_in_drawer_desc),
+            icon = Icons.Rounded.Tab,
+            switchState = prefs.showTabsInDrawer,
+            onSwitchChange = { prefs.showTabsInDrawer = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.show_bookmarks_in_drawer),
+            supportingText = stringResource(R.string.show_bookmarks_in_drawer_desc),
+            icon = Icons.Rounded.Bookmark,
+            switchState = prefs.showBookmarksInDrawer,
+            onSwitchChange = { prefs.showBookmarksInDrawer = it }
         )
 
         HorizontalDivider(
@@ -275,6 +308,34 @@ fun AppearanceContainer() {
                 switchState = prefs.showBottomBarLabels,
                 onSwitchChange = { prefs.showBottomBarLabels = it }
             )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+            )
+        }
+
+        PreferenceItem(
+                label = stringResource(R.string.selection_ribbon_two_rows),
+                supportingText = stringResource(R.string.selection_ribbon_two_rows_desc),
+                icon = Icons.Rounded.ViewStream,
+                switchState = prefs.selectionRibbonTwoRows,
+                onSwitchChange = { prefs.selectionRibbonTwoRows = it }
+        )
+
+        HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+        )
+
+        PreferenceItem(
+                label = stringResource(R.string.customize_selection_ribbon),
+                supportingText = stringResource(R.string.customize_selection_ribbon_desc),
+                icon = Icons.Rounded.Tune,
+                onClick = { showSelectionRibbonSettingsDialog = true }
+        )
+        if (showSelectionRibbonSettingsDialog) {
+            SelectionRibbonSettingsDialog(onDismiss = { showSelectionRibbonSettingsDialog = false })
         }
     }
 }

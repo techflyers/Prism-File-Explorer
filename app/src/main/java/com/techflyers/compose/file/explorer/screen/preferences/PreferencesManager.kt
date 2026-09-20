@@ -58,6 +58,18 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var selectionRibbonTwoRows by prefMutableState(
+        keyName = "selectionRibbonTwoRows",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var selectionRibbonActions by prefMutableState(
+        keyName = "selectionRibbonActions",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
     var homeTabLayout by prefMutableState(
         keyName = "homeTabLayout",
         defaultValue = getDefaultHomeLayout().toJson(),
@@ -112,6 +124,18 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var showTabsInDrawer by prefMutableState(
+        keyName = "showTabsInDrawer",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showBookmarksInDrawer by prefMutableState(
+        keyName = "showBookmarksInDrawer",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
 
     //---------- File List -------------//
     var itemSize by prefMutableState(
@@ -150,6 +174,19 @@ class PreferencesManager {
         getPreferencesKey = { intPreferencesKey(it) }
     )
 
+    // -1 means "same as portrait" (inherits filenameEndCharsCount)
+    var filenameEndCharsCountLandscape by prefMutableState(
+        keyName = "filenameEndCharsCountLandscape",
+        defaultValue = -1,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
+    var filenameMaxLines by prefMutableState(
+        keyName = "filenameMaxLines",
+        defaultValue = 1,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
     var showParentDirectoryEntry by prefMutableState(
         keyName = "showParentDirectoryEntry",
         defaultValue = true,
@@ -166,6 +203,12 @@ class PreferencesManager {
     var showFileOptionMenuOnLongClick by prefMutableState(
         keyName = "showFileOptionMenuOnLongClick",
         defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showVideoDuration by prefMutableState(
+        keyName = "showVideoDuration",
+        defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -238,6 +281,13 @@ class PreferencesManager {
     var bookmarks by prefMutableState(
         keyName = "bookmarks",
         defaultValue = emptySet(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
+    // Stores the IDs of sidebar drawer sections that have been collapsed by the user.
+    var drawerCollapsedSections by prefMutableState(
+        keyName = "drawerCollapsedSections",
+        defaultValue = emptySet<String>(),
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
 
@@ -556,6 +606,28 @@ class PreferencesManager {
         itemSize = newSize
         val current = getDefaultViewConfigPrefs()
         setDefaultViewConfigPrefs(current.copy(itemSize = newSize))
+        try {
+            globalClass.mainActivityManager.state.value.tabs.forEach { tab ->
+                if (tab is com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab) {
+                    val folderConfig = getViewConfigPrefsFor(tab.activeFolder)
+                    tab.viewConfig = folderConfig.copy(itemSize = newSize)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun reloadFromDataStore() {
+        runBlocking {
+            val currentPrefs = globalClass.prefDataStore.data.first()
+            com.techflyers.compose.file.explorer.screen.preferences.misc.reloadAllPrefMutableStates(currentPrefs)
+        }
+        try {
+            globalClass.mainActivityManager.state.value.tabs.forEach { tab ->
+                if (tab is com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab) {
+                    tab.viewConfig = getViewConfigPrefsFor(tab.activeFolder)
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     fun getViewConfigPrefsFor(content: ContentHolder): ViewConfigs {

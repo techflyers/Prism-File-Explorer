@@ -69,8 +69,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -101,8 +105,19 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.copyToClipboard
 import com.techflyers.compose.file.explorer.common.getIndexIf
+import com.techflyers.compose.file.explorer.common.toFormattedSize
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Update
 import com.techflyers.compose.file.explorer.common.icons.PrismIcons
 import com.techflyers.compose.file.explorer.common.icons.Upgrade
+import com.techflyers.compose.file.explorer.common.icons.SortNameAscending
+import com.techflyers.compose.file.explorer.common.icons.SortNameDescending
+import com.techflyers.compose.file.explorer.common.icons.SortSizeSmaller
+import com.techflyers.compose.file.explorer.common.icons.SortSizeLarger
+import com.techflyers.compose.file.explorer.common.icons.SortTypeAscending
+import com.techflyers.compose.file.explorer.common.icons.SortTypeDescending
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FileSortingMenuDialog
 import com.techflyers.compose.file.explorer.common.orIf
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
@@ -118,6 +133,28 @@ import com.techflyers.compose.file.explorer.screen.preferences.PreferencesActivi
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.max
+
+/**
+ * A convenience wrapper that adds a [PlainTooltip] (shown on long-press) to an [IconButton].
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun TooltipIconButton(
+    tooltip: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(tooltip) } },
+        state = rememberTooltipState()
+    ) {
+        IconButton(onClick = onClick, modifier = modifier) {
+            content()
+        }
+    }
+}
 
 @Composable
 fun Toolbar(
@@ -145,7 +182,8 @@ fun Toolbar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
-            IconButton(
+            TooltipIconButton(
+                tooltip = stringResource(R.string.navigation_drawer),
                 onClick = { onToggleAppInfoDialog(true) },
                 modifier = buttonModifier
             ) {
@@ -222,6 +260,26 @@ fun Toolbar(
                                 lineHeight = 16.sp,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = "•",
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            )
+                            Text(
+                                text = filesTab.selectedFilesTotalSize.toFormattedSize() +
+                                        if (filesTab.isCalculatingSelectedSize) "…" else "",
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -310,7 +368,8 @@ fun Toolbar(
 
             if (!enableBottomToolbar) {
                 // Dedicated search button
-                IconButton(
+                TooltipIconButton(
+                    tooltip = stringResource(R.string.search),
                     onClick = { filesTab.toggleSearchPenal(true) },
                     modifier = buttonModifier
                 ) {
@@ -322,7 +381,8 @@ fun Toolbar(
 
                 // Normal plus create button (moves into overflow when disableTabBar is true)
                 if (!disableTabBar) {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.create_new),
                         onClick = { filesTab.toggleCreateNewFileDialog(true) },
                         modifier = buttonModifier
                     ) {
@@ -451,6 +511,7 @@ fun SingleRowTabsControl(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun MoreOptionsButton(modifier: Modifier = Modifier) {
     val mainActivityManager = globalClass.mainActivityManager
@@ -458,6 +519,11 @@ fun MoreOptionsButton(modifier: Modifier = Modifier) {
 
     var showOptionsMenu by remember { mutableStateOf(false) }
 
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(stringResource(R.string.more_options)) } },
+        state = rememberTooltipState()
+    ) {
     Box {
         IconButton(
             onClick = { showOptionsMenu = true },
@@ -733,12 +799,22 @@ fun MoreOptionsButton(modifier: Modifier = Modifier) {
             }
         }
     }
+    } // end TooltipBox
 }
 
+private data class SortMenuItem(
+    val method: Int,
+    val reverse: Boolean,
+    val titleRes: Int,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
     val prefs = globalClass.preferencesManager
     var showMenu by remember { mutableStateOf(false) }
+    var showOptionsDialog by remember { mutableStateOf(false) }
 
     // Local observable state — initialized from prefs each time menu opens, updated on click
     var applyForThisFolder by remember { mutableStateOf(false) }
@@ -761,188 +837,213 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
         }
     }
 
-    val sortOptions = listOf(
-        Triple(
-            SortingMethod.SORT_BY_NAME,
-            if (currentReverse) stringResource(R.string.name_z_a) else stringResource(R.string.name_a_z),
-            Icons.Rounded.SortByAlpha
-        ),
-        Triple(
-            SortingMethod.SORT_BY_DATE,
-            if (currentReverse) stringResource(R.string.date_older) else stringResource(R.string.date_newer),
-            Icons.Rounded.DateRange
-        ),
-        Triple(
-            SortingMethod.SORT_BY_SIZE,
-            if (currentReverse) stringResource(R.string.size_larger) else stringResource(R.string.size_smaller),
-            Icons.AutoMirrored.Rounded.Sort
-        ),
-        Triple(
-            SortingMethod.SORT_BY_TYPE,
-            stringResource(R.string.type),
-            Icons.AutoMirrored.Rounded.InsertDriveFile
-        )
-    )
+    LaunchedEffect(tab.activeFolder.uniquePath, prefs.defaultSortMethod, prefs.reverse, prefs.showFoldersFirst) {
+        loadFromPrefs()
+    }
 
-    Box {
-        IconButton(
-            onClick = {
-                loadFromPrefs()   // always fresh when menu opens
-                showMenu = true
-            },
-            modifier = modifier
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SortByAlpha,
-                contentDescription = stringResource(R.string.sort)
-            )
+    val currentSortIcon = remember(currentMethod, currentReverse) {
+        when (currentMethod) {
+            SortingMethod.SORT_BY_NAME -> if (currentReverse) PrismIcons.SortNameDescending else PrismIcons.SortNameAscending
+            SortingMethod.SORT_BY_SIZE -> if (currentReverse) PrismIcons.SortSizeLarger else PrismIcons.SortSizeSmaller
+            SortingMethod.SORT_BY_DATE -> if (currentReverse) Icons.Rounded.History else Icons.Rounded.Update
+            SortingMethod.SORT_BY_TYPE -> if (currentReverse) PrismIcons.SortTypeDescending else PrismIcons.SortTypeAscending
+            SortingMethod.SORT_BY_SHUFFLED -> Icons.Default.Shuffle
+            else -> PrismIcons.SortNameAscending
         }
+    }
 
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ) {
-            Text(
-                text = stringResource(R.string.sort_by),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+    val sortItems = remember {
+        listOf(
+            SortMenuItem(SortingMethod.SORT_BY_NAME, false, R.string.name_a_z, PrismIcons.SortNameAscending),
+            SortMenuItem(SortingMethod.SORT_BY_NAME, true, R.string.name_z_a, PrismIcons.SortNameDescending),
+            SortMenuItem(SortingMethod.SORT_BY_SIZE, false, R.string.size_smaller, PrismIcons.SortSizeSmaller),
+            SortMenuItem(SortingMethod.SORT_BY_SIZE, true, R.string.size_larger, PrismIcons.SortSizeLarger),
+            SortMenuItem(SortingMethod.SORT_BY_DATE, true, R.string.date_older, Icons.Rounded.History),
+            SortMenuItem(SortingMethod.SORT_BY_DATE, false, R.string.date_newer, Icons.Rounded.Update),
+            SortMenuItem(SortingMethod.SORT_BY_TYPE, false, R.string.type_ascending, PrismIcons.SortTypeAscending),
+            SortMenuItem(SortingMethod.SORT_BY_TYPE, true, R.string.type_descending, PrismIcons.SortTypeDescending),
+            SortMenuItem(SortingMethod.SORT_BY_SHUFFLED, false, R.string.shuffled, Icons.Default.Shuffle)
+        )
+    }
 
-            sortOptions.forEach { (method, label, icon) ->
-                val isCurrent = currentMethod == method
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(stringResource(R.string.sort)) } },
+        state = rememberTooltipState()
+    ) {
+        Box {
+            IconButton(
+                onClick = {
+                    loadFromPrefs()   // always fresh when menu opens
+                    showMenu = true
+                },
+                modifier = modifier
+            ) {
+                Icon(
+                    imageVector = currentSortIcon,
+                    contentDescription = stringResource(R.string.sort)
+                )
+            }
+
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Text(
+                    text = stringResource(R.string.sort_by_first),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+
+                sortItems.forEach { item ->
+                    val isCurrent = currentMethod == item.method &&
+                            (item.method == SortingMethod.SORT_BY_SHUFFLED || currentReverse == item.reverse)
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(item.titleRes),
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            currentMethod = item.method
+                            currentReverse = item.reverse
+                            if (applyForThisFolder) {
+                                prefs.setSortingPrefsFor(
+                                    tab.activeFolder,
+                                    FileSortingPrefs(
+                                        sortMethod = item.method,
+                                        showFoldersFirst = currentFoldersFirst,
+                                        reverseSorting = item.reverse,
+                                        applyForThisFileOnly = true
+                                    )
+                                )
+                            } else {
+                                prefs.defaultSortMethod = item.method
+                                prefs.reverse = item.reverse
+                            }
+                            tab.openFolder(tab.activeFolder, rememberListState = false)
+                            showMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = item.icon,
+                                contentDescription = null,
+                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        trailingIcon = {
+                            if (isCurrent) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // Folders First Toggle
                 DropdownMenuItem(
-                    text = { Text(text = label) },
+                    text = { Text(text = stringResource(R.string.folders_first)) },
                     onClick = {
-                        currentMethod = method          // update local state immediately
+                        val newFoldersFirst = !currentFoldersFirst
+                        currentFoldersFirst = newFoldersFirst  // update local state immediately
                         if (applyForThisFolder) {
                             prefs.setSortingPrefsFor(
                                 tab.activeFolder,
                                 FileSortingPrefs(
-                                    sortMethod = method,
+                                    sortMethod = currentMethod,
+                                    showFoldersFirst = newFoldersFirst,
+                                    reverseSorting = currentReverse,
+                                    applyForThisFileOnly = true
+                                )
+                            )
+                        } else {
+                            prefs.showFoldersFirst = newFoldersFirst
+                        }
+                        tab.openFolder(tab.activeFolder, rememberListState = false)
+                    },
+                    leadingIcon = {
+                        Icon(imageVector = Icons.Rounded.Folder, contentDescription = null)
+                    },
+                    trailingIcon = {
+                        Icon(
+                            imageVector = if (currentFoldersFirst) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                            contentDescription = null
+                        )
+                    }
+                )
+
+                // Apply to this folder only Toggle
+                DropdownMenuItem(
+                    text = { Text(text = stringResource(R.string.apply_to_this_folder_only)) },
+                    onClick = {
+                        val newApply = !applyForThisFolder
+                        applyForThisFolder = newApply       // update local state immediately
+                        if (newApply) {
+                            prefs.setSortingPrefsFor(
+                                tab.activeFolder,
+                                FileSortingPrefs(
+                                    sortMethod = currentMethod,
                                     showFoldersFirst = currentFoldersFirst,
                                     reverseSorting = currentReverse,
                                     applyForThisFileOnly = true
                                 )
                             )
                         } else {
-                            prefs.defaultSortMethod = method
+                            prefs.deleteSortingPrefsFor(tab.activeFolder)
                         }
                         tab.openFolder(tab.activeFolder, rememberListState = false)
                     },
                     leadingIcon = {
-                        Icon(imageVector = icon, contentDescription = null)
+                        Icon(imageVector = Icons.Rounded.FolderSpecial, contentDescription = null)
                     },
                     trailingIcon = {
-                        if (isCurrent) {
-                            Icon(imageVector = Icons.Rounded.Check, contentDescription = null)
-                        }
+                        Icon(
+                            imageVector = if (applyForThisFolder) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                            contentDescription = null
+                        )
+                    }
+                )
+
+                HorizontalDivider()
+
+                // Options...
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = stringResource(R.string.options_ellipsis),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    },
+                    onClick = {
+                        showMenu = false
+                        showOptionsDialog = true
                     }
                 )
             }
-
-            HorizontalDivider()
-
-            // Direction Toggle
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.reverse)) },
-                onClick = {
-                    val newReverse = !currentReverse
-                    currentReverse = newReverse         // update local state immediately
-                    if (applyForThisFolder) {
-                        prefs.setSortingPrefsFor(
-                            tab.activeFolder,
-                            FileSortingPrefs(
-                                sortMethod = currentMethod,
-                                showFoldersFirst = currentFoldersFirst,
-                                reverseSorting = newReverse,
-                                applyForThisFileOnly = true
-                            )
-                        )
-                    } else {
-                        prefs.reverse = newReverse
-                    }
-                    tab.openFolder(tab.activeFolder, rememberListState = false)
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (currentReverse) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward,
-                        contentDescription = null
-                    )
-                },
-                trailingIcon = {
-                    Icon(
-                        imageVector = if (currentReverse) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                        contentDescription = null
-                    )
-                }
-            )
-
-            // Folders First Toggle
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.folders_first)) },
-                onClick = {
-                    val newFoldersFirst = !currentFoldersFirst
-                    currentFoldersFirst = newFoldersFirst  // update local state immediately
-                    if (applyForThisFolder) {
-                        prefs.setSortingPrefsFor(
-                            tab.activeFolder,
-                            FileSortingPrefs(
-                                sortMethod = currentMethod,
-                                showFoldersFirst = newFoldersFirst,
-                                reverseSorting = currentReverse,
-                                applyForThisFileOnly = true
-                            )
-                        )
-                    } else {
-                        prefs.showFoldersFirst = newFoldersFirst
-                    }
-                    tab.openFolder(tab.activeFolder, rememberListState = false)
-                },
-                leadingIcon = {
-                    Icon(imageVector = Icons.Rounded.Folder, contentDescription = null)
-                },
-                trailingIcon = {
-                    Icon(
-                        imageVector = if (currentFoldersFirst) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                        contentDescription = null
-                    )
-                }
-            )
-
-            // Apply to this folder only Toggle
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.apply_to_this_folder_only)) },
-                onClick = {
-                    val newApply = !applyForThisFolder
-                    applyForThisFolder = newApply       // update local state immediately
-                    if (newApply) {
-                        prefs.setSortingPrefsFor(
-                            tab.activeFolder,
-                            FileSortingPrefs(
-                                sortMethod = currentMethod,
-                                showFoldersFirst = currentFoldersFirst,
-                                reverseSorting = currentReverse,
-                                applyForThisFileOnly = true
-                            )
-                        )
-                    } else {
-                        prefs.deleteSortingPrefsFor(tab.activeFolder)
-                    }
-                    tab.openFolder(tab.activeFolder, rememberListState = false)
-                },
-                leadingIcon = {
-                    Icon(imageVector = Icons.Rounded.FolderSpecial, contentDescription = null)
-                },
-                trailingIcon = {
-                    Icon(
-                        imageVector = if (applyForThisFolder) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                        contentDescription = null
-                    )
-                }
-            )
         }
+    } // end TooltipBox
+
+    if (showOptionsDialog) {
+        FileSortingMenuDialog(
+            show = true,
+            tab = tab,
+            onDismissRequest = {
+                showOptionsDialog = false
+                loadFromPrefs()
+                tab.openFolder(tab.activeFolder, rememberListState = false)
+            }
+        )
     }
 }
 

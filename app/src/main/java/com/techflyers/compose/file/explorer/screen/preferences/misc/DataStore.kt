@@ -81,4 +81,6 @@ suspend fun importPreferences(jsonData: String) {
             }
         }
     }
+
+    globalClass.preferencesManager.reloadFromDataStore()
 }

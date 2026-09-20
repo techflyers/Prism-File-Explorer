@@ -10,28 +10,53 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.FitScreen
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.ZoomIn
+import androidx.compose.material.icons.rounded.ZoomOut
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.techflyers.compose.file.explorer.common.copyToClipboard
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.roundToInt
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.common.ConvertioApiKeyDialog
 import com.techflyers.compose.file.explorer.common.ConvertioProgressDialog
@@ -453,7 +478,15 @@ private fun DocumentViewerScreen(
                             },
                             processedRows = processedRows,
                             filterActive = filterColumnIndex != null || sortType != "none",
-                            onFilterClick = { showFilterDialog = true }
+                            onFilterClick = { showFilterDialog = true },
+                            onColumnFilter = { col ->
+                                filterColumnIndex = col
+                                showFilterDialog = true
+                            },
+                            onColumnSort = { col, sort ->
+                                sortColumnIndex = col
+                                sortType = sort
+                            }
                         )
                     }
                 }
@@ -691,59 +724,78 @@ private fun getColumnLetter(colIndex: Int): String {
 }
 
 @Composable
-private fun ExcelCell(
-    text: String,
-    isHeader: Boolean = false,
-    width: Dp = 120.dp,
-    height: Dp = 36.dp
-) {
-    Box(
-        modifier = Modifier
-            .width(width)
-            .height(height)
-            .background(
-                if (isHeader) MaterialTheme.colorScheme.surfaceVariant
-                else MaterialTheme.colorScheme.surface
-            )
-            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            fontSize = 12.sp,
-            maxLines = if (height > 36.dp) Int.MAX_VALUE else 1,
-            overflow = TextOverflow.Ellipsis,
-            fontWeight = if (isHeader) FontWeight.Bold else FontWeight.Normal,
-            color = if (isHeader) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
 private fun ExcelView(
     sheets: List<SheetData>,
     selectedSheet: Int,
     onSheetSelected: (Int) -> Unit,
     processedRows: List<List<String>>,
     filterActive: Boolean,
-    onFilterClick: () -> Unit
+    onFilterClick: () -> Unit,
+    onColumnFilter: ((Int) -> Unit)? = null,
+    onColumnSort: ((Int, String) -> Unit)? = null
 ) {
-    val defaultColWidth = 120.dp
-    val defaultRowHeight = 36.dp
-    val minColWidth = 40.dp
-    val minRowHeight = 24.dp
-    val headerHeight = 36.dp
+    var zoomScale by remember(selectedSheet) { mutableFloatStateOf(1.0f) }
+    var showZoomMenu by remember { mutableStateOf(false) }
+    var showCornerMenu by remember { mutableStateOf(false) }
+
+    // Dialog state
+    var resizeColumnTarget by remember { mutableStateOf<Int?>(null) }
+    var resizeRowTarget by remember { mutableStateOf<Int?>(null) }
+
+    val baseRowHeaderWidth = 46.dp
+    val baseHeaderHeight = 32.dp
+    val defaultRowHeight = 32.dp
+
+    val scaledRowHeaderWidth = (baseRowHeaderWidth * zoomScale).coerceIn(28.dp, 80.dp)
+    val scaledHeaderHeight = (baseHeaderHeight * zoomScale).coerceIn(20.dp, 56.dp)
+
+    val cellFontSize = (12f * zoomScale).coerceIn(7f, 20f).sp
+    val headerFontSize = (11f * zoomScale).coerceIn(7f, 18f).sp
+    val rowFontSize = (10f * zoomScale).coerceIn(6.5f, 16f).sp
+
+    // Selected cell: Pair(rowIndex, colIndex)
+    var selectedCell by remember(selectedSheet) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var expandedCell by remember(selectedSheet) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var showCellDetailDialog by remember(selectedSheet) { mutableStateOf(false) }
+    var activeColumnMenu by remember(selectedSheet) { mutableStateOf<Int?>(null) }
+    var activeRowMenu by remember(selectedSheet) { mutableStateOf<Int?>(null) }
+
+    val maxCols = remember(processedRows) {
+        if (processedRows.isNotEmpty()) processedRows.maxOf { it.size } else 0
+    }
+
+    // Base column widths (without zoom scale)
+    val columnWidths = remember(selectedSheet, maxCols) {
+        mutableStateMapOf<Int, Dp>().apply {
+            for (c in 0 until maxCols) {
+                val maxChars = processedRows.take(150).maxOfOrNull { it.getOrNull(c)?.length ?: 0 } ?: 0
+                val colLetterLen = getColumnLetter(c).length
+                val longest = maxOf(maxChars, colLetterLen)
+                val autoWidth = (longest * 8.5f + 28f).dp.coerceIn(60.dp, 300.dp)
+                put(c, autoWidth)
+            }
+        }
+    }
+
+    // Base row heights (without zoom scale)
+    val rowHeights = remember(selectedSheet) {
+        mutableStateMapOf<Int, Dp>()
+    }
+
+    fun baseColWidth(c: Int): Dp = columnWidths[c] ?: 80.dp
+    fun scaledColWidth(c: Int): Dp = baseColWidth(c) * zoomScale
+
+    fun baseRowHeight(r: Int): Dp = rowHeights[r] ?: defaultRowHeight
+    fun scaledRowHeight(r: Int): Dp = baseRowHeight(r) * zoomScale
+
+    val selectedValue = selectedCell?.let { (r, c) -> processedRows.getOrNull(r)?.getOrNull(c) ?: "" } ?: ""
+    val selectedCellRef = selectedCell?.let { (r, c) -> "${getColumnLetter(c)}${r + 1}" } ?: ""
+
+    val horizontalScrollState = rememberScrollState()
+    val lazyListState = rememberLazyListState()
     val density = LocalDensity.current
-
-    // Per-sheet resize state — resets automatically when selectedSheet changes
-    val columnWidths = remember(selectedSheet) { mutableStateMapOf<Int, Dp>() }
-    val rowHeights  = remember(selectedSheet) { mutableStateMapOf<Int, Dp>() }
-
-    fun colWidth(c: Int): Dp  = columnWidths[c] ?: defaultColWidth
-    fun rowHeight(r: Int): Dp = rowHeights[r]  ?: defaultRowHeight
-
-    val handleColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Tab row for multiple sheets
@@ -756,133 +808,617 @@ private fun ExcelView(
                 sheets.forEachIndexed { index, sheet ->
                     Tab(
                         selected = selectedSheet == index,
-                        onClick = { onSheetSelected(index) },
+                        onClick = {
+                            selectedCell = null
+                            expandedCell = null
+                            showCellDetailDialog = false
+                            onSheetSelected(index)
+                        },
                         text = { Text(sheet.name) }
                     )
                 }
             }
         }
 
-        if (processedRows.isNotEmpty()) {
-            val maxCols = processedRows.maxOf { it.size }
-
-            Column(
+        // ── Cell Formula / Inspector & Zoom Bar ───────────────────────────
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .horizontalScroll(rememberScrollState())
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── Header row (column letters + resize handles) ──────────────
-                Row {
-                    // Top-left corner spacer
-                    Box(
-                        modifier = Modifier
-                            .width(40.dp)
-                            .height(headerHeight)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                // Coordinate badge
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (selectedCell != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.5.dp,
+                        if (selectedCell != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.clickable(enabled = selectedCell != null && selectedValue.isNotEmpty()) {
+                        showCellDetailDialog = true
+                    }
+                ) {
+                    Text(
+                        text = if (selectedCell != null) selectedCellRef else "fx",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedCell != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
 
-                    for (c in 0 until maxCols) {
-                        // Wrap each column header in a Box so we can overlay the drag handle
-                        Box(modifier = Modifier.width(colWidth(c)).height(headerHeight)) {
-                            ExcelCell(
-                                text = getColumnLetter(c),
-                                isHeader = true,
-                                width = colWidth(c),
-                                height = headerHeight
-                            )
-                            // Right-edge drag handle for column resize
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterEnd)
-                                    .width(10.dp)
-                                    .fillMaxHeight()
-                                    .pointerInput(c) {
-                                        detectDragGestures { change, dragAmount ->
-                                            change.consume()
-                                            val newW = with(density) {
-                                                (colWidth(c).toPx() + dragAmount.x)
-                                                    .coerceAtLeast(minColWidth.toPx())
-                                                    .toDp()
-                                            }
-                                            columnWidths[c] = newW
-                                        }
-                                    }
-                            ) {
-                                // Thin visual indicator
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.CenterEnd)
-                                        .width(2.dp)
-                                        .fillMaxHeight(0.55f)
-                                        .background(handleColor)
-                                )
-                            }
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Cell content / formula preview
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = selectedCell != null && selectedValue.isNotEmpty()) {
+                            showCellDetailDialog = true
                         }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (selectedCell != null) {
+                            selectedValue.ifEmpty { "«Empty»" }
+                        } else {
+                            "Tap a cell • Pinch or +/- to zoom"
+                        },
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (selectedCell != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                    if (selectedCell != null && selectedValue.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.FitScreen,
+                            contentDescription = "View full text",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                        )
                     }
                 }
 
-                // ── Data rows ────────────────────────────────────────────────
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    itemsIndexed(processedRows) { rIdx, row ->
-                        Row {
-                            // Row-number cell with bottom-edge drag handle
-                            Box(
-                                modifier = Modifier
-                                    .width(40.dp)
-                                    .height(rowHeight(rIdx))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = (rIdx + 1).toString(),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                // Zoom Controls
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    IconButton(
+                        onClick = { zoomScale = (zoomScale - 0.15f).coerceAtLeast(0.35f) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ZoomOut,
+                            contentDescription = "Zoom Out",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.clickable { showZoomMenu = true }
+                        ) {
+                            Text(
+                                text = "${(zoomScale * 100).roundToInt()}%",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showZoomMenu,
+                            onDismissRequest = { showZoomMenu = false }
+                        ) {
+                            listOf(0.4f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { scale ->
+                                val pct = (scale * 100).roundToInt()
+                                val label = when (pct) {
+                                    40 -> "40% (Overview)"
+                                    50 -> "50% (Wide View)"
+                                    75 -> "75% (Compact)"
+                                    100 -> "100% (Default)"
+                                    125 -> "125% (Comfortable)"
+                                    150 -> "150% (Large)"
+                                    200 -> "200% (Close-up)"
+                                    else -> "$pct%"
                                 }
-                                // Bottom-edge drag handle for row resize
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            fontWeight = if ((zoomScale * 100).roundToInt() == pct) FontWeight.Bold else FontWeight.Normal,
+                                            color = if ((zoomScale * 100).roundToInt() == pct) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        zoomScale = scale
+                                        showZoomMenu = false
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Fit Sheet Width") },
+                                onClick = {
+                                    showZoomMenu = false
+                                    val totalColWidth = (0 until minOf(maxCols, 8)).sumOf { (columnWidths[it] ?: 80.dp).value.toDouble() }.toFloat()
+                                    if (totalColWidth > 0f) {
+                                        zoomScale = ((screenWidth - 50.dp).value / totalColWidth).coerceIn(0.35f, 1.5f)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Reset Zoom (100%)") },
+                                onClick = {
+                                    zoomScale = 1.0f
+                                    showZoomMenu = false
+                                }
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { zoomScale = (zoomScale + 0.15f).coerceAtMost(2.5f) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ZoomIn,
+                            contentDescription = "Zoom In",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (selectedCell != null) {
+                    if (selectedValue.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                selectedValue.copyToClipboard()
+                                globalClass.showMsg("Copied $selectedCellRef to clipboard")
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ContentCopy,
+                                contentDescription = "Copy cell content",
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { selectedCell = null },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Clear selection",
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        if (processedRows.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            do {
+                                val event = awaitPointerEvent()
+                                if (event.changes.size >= 2) {
+                                    val p0 = event.changes[0].position
+                                    val p1 = event.changes[1].position
+                                    val prev0 = event.changes[0].previousPosition
+                                    val prev1 = event.changes[1].previousPosition
+                                    val currentDist = (p0 - p1).getDistance()
+                                    val prevDist = (prev0 - prev1).getDistance()
+                                    if (prevDist > 1f && currentDist > 1f) {
+                                        val ratio = currentDist / prevDist
+                                        zoomScale = (zoomScale * ratio).coerceIn(0.35f, 2.5f)
+                                    }
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // ── Sticky Column Header Row ──────────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(scaledHeaderHeight)
+                    ) {
+                        // Pinned Top-Left Corner Box
+                        Box(
+                            modifier = Modifier
+                                .width(scaledRowHeaderWidth)
+                                .height(scaledHeaderHeight)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                                .clickable { showCornerMenu = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.TableChart,
+                                contentDescription = "Spreadsheet Options",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+
+                            DropdownMenu(
+                                expanded = showCornerMenu,
+                                onDismissRequest = { showCornerMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Auto-fit All Columns") },
+                                    leadingIcon = { Icon(Icons.Rounded.FitScreen, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showCornerMenu = false
+                                        for (col in 0 until maxCols) {
+                                            val maxChars = processedRows.maxOfOrNull { it.getOrNull(col)?.length ?: 0 } ?: 0
+                                            columnWidths[col] = (maxOf(maxChars, getColumnLetter(col).length) * 9f + 32f).dp.coerceIn(50.dp, 450.dp)
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Reset Column Widths") },
+                                    leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showCornerMenu = false
+                                        columnWidths.clear()
+                                        for (c in 0 until maxCols) {
+                                            val maxChars = processedRows.take(150).maxOfOrNull { it.getOrNull(c)?.length ?: 0 } ?: 0
+                                            val colLetterLen = getColumnLetter(c).length
+                                            val longest = maxOf(maxChars, colLetterLen)
+                                            columnWidths[c] = (longest * 8.5f + 28f).dp.coerceIn(60.dp, 300.dp)
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Reset Row Heights") },
+                                    leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showCornerMenu = false
+                                        rowHeights.clear()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Fit Width to Screen") },
+                                    leadingIcon = { Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showCornerMenu = false
+                                        val totalColWidth = (0 until minOf(maxCols, 8)).sumOf { (columnWidths[it] ?: 80.dp).value.toDouble() }.toFloat()
+                                        if (totalColWidth > 0f) {
+                                            zoomScale = ((screenWidth - 50.dp).value / totalColWidth).coerceIn(0.35f, 1.5f)
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Reset Zoom (100%)") },
+                                    leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showCornerMenu = false
+                                        zoomScale = 1.0f
+                                    }
+                                )
+                            }
+                        }
+
+                        // Horizontally scrollable column header cells
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(horizontalScrollState)
+                        ) {
+                            for (c in 0 until maxCols) {
+                                val isColActive = selectedCell?.second == c
                                 Box(
                                     modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .fillMaxWidth()
-                                        .height(10.dp)
-                                        .pointerInput(rIdx) {
-                                            detectDragGestures { change, dragAmount ->
-                                                change.consume()
-                                                val newH = with(density) {
-                                                    (rowHeight(rIdx).toPx() + dragAmount.y)
-                                                        .coerceAtLeast(minRowHeight.toPx())
-                                                        .toDp()
-                                                }
-                                                rowHeights[rIdx] = newH
-                                            }
-                                        }
+                                        .width(scaledColWidth(c))
+                                        .height(scaledHeaderHeight)
+                                        .background(
+                                            if (isColActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
                                 ) {
-                                    // Thin visual indicator
+                                    // Column letter / click zone
                                     Box(
                                         modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .fillMaxWidth(0.55f)
-                                            .height(2.dp)
-                                            .background(handleColor)
-                                    )
+                                            .fillMaxSize()
+                                            .clickable { activeColumnMenu = c },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = getColumnLetter(c),
+                                            fontSize = headerFontSize,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isColActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    // Draggable resize handle on right border
+                                    var isDraggingCol by remember { mutableStateOf(false) }
+                                    Box(
+                                        modifier = Modifier
+                                            .width(18.dp)
+                                            .fillMaxHeight()
+                                            .align(Alignment.CenterEnd)
+                                            .pointerInput(c, zoomScale) {
+                                                detectHorizontalDragGestures(
+                                                    onDragStart = { isDraggingCol = true },
+                                                    onDragEnd = { isDraggingCol = false },
+                                                    onDragCancel = { isDraggingCol = false }
+                                                ) { change, dragAmount ->
+                                                    change.consume()
+                                                    val currentBase = columnWidths[c] ?: 80.dp
+                                                    val deltaDp = (dragAmount / density.density / zoomScale).dp
+                                                    columnWidths[c] = (currentBase + deltaDp).coerceIn(28.dp, 600.dp)
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(2.5.dp)
+                                                .fillMaxHeight(0.65f)
+                                                .background(
+                                                    if (isDraggingCol) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                                    RoundedCornerShape(1.dp)
+                                                )
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = activeColumnMenu == c,
+                                        onDismissRequest = { activeColumnMenu = null }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Resize Column ${getColumnLetter(c)}…") },
+                                            leadingIcon = { Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                resizeColumnTarget = c
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Auto-fit Column ${getColumnLetter(c)}") },
+                                            leadingIcon = { Icon(Icons.Rounded.FitScreen, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                val maxChars = processedRows.maxOfOrNull { it.getOrNull(c)?.length ?: 0 } ?: 0
+                                                columnWidths[c] = (maxOf(maxChars, getColumnLetter(c).length) * 9f + 32f).dp.coerceIn(50.dp, 450.dp)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Auto-fit All Columns") },
+                                            leadingIcon = { Icon(Icons.Rounded.TableChart, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                for (col in 0 until maxCols) {
+                                                    val maxChars = processedRows.maxOfOrNull { it.getOrNull(col)?.length ?: 0 } ?: 0
+                                                    columnWidths[col] = (maxOf(maxChars, getColumnLetter(col).length) * 9f + 32f).dp.coerceIn(50.dp, 450.dp)
+                                                }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Sort A → Z") },
+                                            leadingIcon = { Icon(Icons.Rounded.ArrowUpward, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                onColumnSort?.invoke(c, "asc")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Sort Z → A") },
+                                            leadingIcon = { Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                onColumnSort?.invoke(c, "desc")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Copy Column Data") },
+                                            leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                val columnData = processedRows.mapNotNull { it.getOrNull(c) }.joinToString("\n")
+                                                columnData.copyToClipboard()
+                                                globalClass.showMsg("Copied column ${getColumnLetter(c)} to clipboard")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Filter by Column ${getColumnLetter(c)}") },
+                                            leadingIcon = { Icon(Icons.Rounded.FilterList, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeColumnMenu = null
+                                                onColumnFilter?.invoke(c)
+                                            }
+                                        )
+                                    }
                                 }
                             }
+                        }
+                    }
 
-                            // Data cells using dynamic width + height
-                            for (c in 0 until maxCols) {
-                                val cellVal = row.getOrNull(c) ?: ""
-                                ExcelCell(
-                                    text = cellVal,
-                                    width = colWidth(c),
-                                    height = rowHeight(rIdx)
-                                )
+                    // ── Data Rows with Pinned Left Row Numbers ────────────────
+                    LazyColumn(
+                        state = lazyListState,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        itemsIndexed(processedRows) { rIdx, row ->
+                            val isRowActive = selectedCell?.first == rIdx
+                            val currentRHeight = scaledRowHeight(rIdx)
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(currentRHeight)
+                            ) {
+                                // Pinned Left Row Number Cell (OUTSIDE horizontalScroll)
+                                Box(
+                                    modifier = Modifier
+                                        .width(scaledRowHeaderWidth)
+                                        .height(currentRHeight)
+                                        .background(
+                                            if (isRowActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    // Row number tap/long-tap zone
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .pointerInput(rIdx) {
+                                                detectTapGestures(
+                                                    onTap = { selectedCell = Pair(rIdx, 0) },
+                                                    onLongPress = { activeRowMenu = rIdx }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = (rIdx + 1).toString(),
+                                            fontSize = rowFontSize,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isRowActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    // Draggable resize handle on bottom border
+                                    var isDraggingRow by remember { mutableStateOf(false) }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(14.dp)
+                                            .align(Alignment.BottomCenter)
+                                            .pointerInput(rIdx, zoomScale) {
+                                                detectVerticalDragGestures(
+                                                    onDragStart = { isDraggingRow = true },
+                                                    onDragEnd = { isDraggingRow = false },
+                                                    onDragCancel = { isDraggingRow = false }
+                                                ) { change, dragAmount ->
+                                                    change.consume()
+                                                    val currentBase = rowHeights[rIdx] ?: defaultRowHeight
+                                                    val deltaDp = (dragAmount / density.density / zoomScale).dp
+                                                    rowHeights[rIdx] = (currentBase + deltaDp).coerceIn(16.dp, 300.dp)
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(14.dp)
+                                                .height(2.dp)
+                                                .background(
+                                                    if (isDraggingRow) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                                    RoundedCornerShape(1.dp)
+                                                )
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = activeRowMenu == rIdx,
+                                        onDismissRequest = { activeRowMenu = null }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Resize Row ${rIdx + 1}…") },
+                                            leadingIcon = { Icon(Icons.Rounded.SwapVert, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeRowMenu = null
+                                                resizeRowTarget = rIdx
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Reset Row Height") },
+                                            leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeRowMenu = null
+                                                rowHeights.remove(rIdx)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Copy Row Data") },
+                                            leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                activeRowMenu = null
+                                                val rowText = row.joinToString("\t")
+                                                rowText.copyToClipboard()
+                                                globalClass.showMsg("Copied row ${rIdx + 1} to clipboard")
+                                            }
+                                        )
+                                    }
+                                }
+
+                                // Horizontally scrollable data cells
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(horizontalScrollState)
+                                ) {
+                                    for (c in 0 until maxCols) {
+                                        val cellVal = row.getOrNull(c) ?: ""
+                                        val isSelected = selectedCell?.first == rIdx && selectedCell?.second == c
+                                        val isExpanded = expandedCell?.first == rIdx && expandedCell?.second == c
+                                        val colLetter = getColumnLetter(c)
+                                        val cellRef = "$colLetter${rIdx + 1}"
+                                        ExcelDataCell(
+                                            text = cellVal,
+                                            cellRef = cellRef,
+                                            width = scaledColWidth(c),
+                                            height = currentRHeight,
+                                            fontSize = cellFontSize,
+                                            isSelected = isSelected,
+                                            isExpanded = isExpanded,
+                                            onClick = {
+                                                selectedCell = Pair(rIdx, c)
+                                                expandedCell = Pair(rIdx, c)
+                                            },
+                                            onDismissExpand = {
+                                                if (expandedCell == Pair(rIdx, c)) {
+                                                    expandedCell = null
+                                                }
+                                            },
+                                            onDetailClick = {
+                                                selectedCell = Pair(rIdx, c)
+                                                showCellDetailDialog = true
+                                            },
+                                            onCopy = {
+                                                cellVal.copyToClipboard()
+                                                globalClass.showMsg("Copied cell $cellRef to clipboard")
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -898,6 +1434,476 @@ private fun ExcelView(
             }
         }
     }
+
+    // ── Resize Column Dialog ──────────────────────────────────────────────
+    if (resizeColumnTarget != null) {
+        val col = resizeColumnTarget!!
+        ResizeColumnDialog(
+            colIndex = col,
+            currentWidth = baseColWidth(col),
+            onDismiss = { resizeColumnTarget = null },
+            onApply = { newWidth, applyToAll ->
+                if (applyToAll) {
+                    for (c in 0 until maxCols) {
+                        columnWidths[c] = newWidth
+                    }
+                } else {
+                    columnWidths[col] = newWidth
+                }
+            },
+            onAutoFit = {
+                val maxChars = processedRows.maxOfOrNull { it.getOrNull(col)?.length ?: 0 } ?: 0
+                columnWidths[col] = (maxOf(maxChars, getColumnLetter(col).length) * 9f + 32f).dp.coerceIn(50.dp, 450.dp)
+            }
+        )
+    }
+
+    // ── Resize Row Dialog ─────────────────────────────────────────────────
+    if (resizeRowTarget != null) {
+        val row = resizeRowTarget!!
+        ResizeRowDialog(
+            rowIndex = row,
+            currentHeight = baseRowHeight(row),
+            onDismiss = { resizeRowTarget = null },
+            onApply = { newHeight, applyToAll ->
+                if (applyToAll) {
+                    for (r in processedRows.indices) {
+                        rowHeights[r] = newHeight
+                    }
+                } else {
+                    rowHeights[row] = newHeight
+                }
+            },
+            onReset = {
+                rowHeights.remove(row)
+            }
+        )
+    }
+
+    // ── Cell Detail Dialog ────────────────────────────────────────────────
+    if (showCellDetailDialog && selectedCell != null && selectedValue.isNotEmpty()) {
+        val (selRow, selCol) = selectedCell!!
+        CellDetailDialog(
+            cellRef = selectedCellRef,
+            text = selectedValue,
+            onDismiss = { showCellDetailDialog = false },
+            onAutoFitColumn = {
+                val maxChars = processedRows.maxOfOrNull { it.getOrNull(selCol)?.length ?: 0 } ?: 0
+                columnWidths[selCol] = (maxOf(maxChars, getColumnLetter(selCol).length) * 9f + 32f).dp.coerceIn(50.dp, 450.dp)
+            },
+            onCopy = {
+                selectedValue.copyToClipboard()
+                globalClass.showMsg("Copied cell $selectedCellRef to clipboard")
+            }
+        )
+    }
+}
+
+@Composable
+private fun ExcelDataCell(
+    text: String,
+    cellRef: String,
+    width: Dp,
+    height: Dp,
+    fontSize: TextUnit,
+    isSelected: Boolean,
+    isExpanded: Boolean,
+    onClick: () -> Unit,
+    onDismissExpand: () -> Unit,
+    onDetailClick: () -> Unit,
+    onCopy: () -> Unit
+) {
+    val padH = (6f * (fontSize.value / 12f)).dp.coerceIn(2.dp, 10.dp)
+    var isTruncated by remember(text, width, fontSize) { mutableStateOf(false) }
+    val mightOverflow = remember(text, width, fontSize) {
+        text.contains('\n') || (text.length * fontSize.value * 0.62f > (width.value - padH.value * 2f))
+    }
+
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(height)
+            .background(
+                when {
+                    isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+            )
+            .border(
+                if (isSelected) 1.5.dp else 0.5.dp,
+                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = padH, vertical = 2.dp),
+            fontSize = fontSize,
+            maxLines = 1,
+            overflow = if (isSelected) TextOverflow.Clip else TextOverflow.Ellipsis,
+            onTextLayout = { res ->
+                isTruncated = res.hasVisualOverflow
+            },
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+        )
+
+        // Floating full-text overlay card when clicked / expanded
+        if (isExpanded && text.isNotBlank() && (mightOverflow || isTruncated)) {
+            Popup(
+                alignment = Alignment.TopStart,
+                onDismissRequest = onDismissExpand,
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = true,
+                    clippingEnabled = true
+                )
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .widthIn(min = width, max = 340.dp)
+                        .heightIn(min = height, max = 240.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = padH + 2.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = cellRef,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = onCopy,
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ContentCopy,
+                                        contentDescription = "Copy text",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = onDetailClick,
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FitScreen,
+                                        contentDescription = "Full view",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(2.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .clickable(onClick = onDetailClick)
+                        ) {
+                            Text(
+                                text = text,
+                                fontSize = fontSize,
+                                fontWeight = FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = (fontSize.value * 1.35f).sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CellDetailDialog(
+    cellRef: String,
+    text: String,
+    onDismiss: () -> Unit,
+    onAutoFitColumn: () -> Unit,
+    onCopy: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Cell $cellRef", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        "${text.length} chars",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = text,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onCopy()
+                onDismiss()
+            }) {
+                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Copy")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    onAutoFitColumn()
+                    onDismiss()
+                }) {
+                    Text("Auto-Fit Column")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun ResizeColumnDialog(
+    colIndex: Int,
+    currentWidth: Dp,
+    onDismiss: () -> Unit,
+    onApply: (width: Dp, applyToAll: Boolean) -> Unit,
+    onAutoFit: () -> Unit
+) {
+    var widthSlider by remember { mutableFloatStateOf(currentWidth.value.coerceIn(30f, 400f)) }
+    var applyToAll by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Resize Column ${getColumnLetter(colIndex)}") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Width", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "${widthSlider.roundToInt()} dp",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Slider(
+                    value = widthSlider,
+                    onValueChange = { widthSlider = it },
+                    valueRange = 30f..400f
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(60, 90, 130, 180, 240).forEach { preset ->
+                        OutlinedButton(
+                            onClick = { widthSlider = preset.toFloat() },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp)
+                        ) {
+                            Text("$preset", fontSize = 10.sp)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { applyToAll = !applyToAll }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = applyToAll, onCheckedChange = { applyToAll = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text("Apply to all columns", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    onAutoFit()
+                    onDismiss()
+                }) {
+                    Text("Auto-Fit")
+                }
+                Button(onClick = {
+                    onApply(widthSlider.dp, applyToAll)
+                    onDismiss()
+                }) {
+                    Text("Apply")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ResizeRowDialog(
+    rowIndex: Int,
+    currentHeight: Dp,
+    onDismiss: () -> Unit,
+    onApply: (height: Dp, applyToAll: Boolean) -> Unit,
+    onReset: () -> Unit
+) {
+    var heightSlider by remember { mutableFloatStateOf(currentHeight.value.coerceIn(18f, 150f)) }
+    var applyToAll by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Resize Row ${rowIndex + 1}") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Height", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "${heightSlider.roundToInt()} dp",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Slider(
+                    value = heightSlider,
+                    onValueChange = { heightSlider = it },
+                    valueRange = 18f..150f
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        22 to "22",
+                        32 to "32",
+                        44 to "44",
+                        60 to "60",
+                        80 to "80"
+                    ).forEach { (preset, label) ->
+                        OutlinedButton(
+                            onClick = { heightSlider = preset.toFloat() },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp)
+                        ) {
+                            Text(label, fontSize = 10.sp)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { applyToAll = !applyToAll }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = applyToAll, onCheckedChange = { applyToAll = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text("Apply to all rows", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    onReset()
+                    onDismiss()
+                }) {
+                    Text("Reset")
+                }
+                Button(onClick = {
+                    onApply(heightSlider.dp, applyToAll)
+                    onDismiss()
+                }) {
+                    Text("Apply")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

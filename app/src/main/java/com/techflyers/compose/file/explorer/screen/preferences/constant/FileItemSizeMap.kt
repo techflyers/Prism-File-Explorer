@@ -20,6 +20,27 @@ object FileItemSizeMap {
         const val EXTRA_LARGE = 22
     }
 
+    fun getSpace(itemSize: Int) = when (itemSize) {
+        FileItemSize.LARGE.ordinal, FileItemSize.EXTRA_LARGE.ordinal -> 8
+        else -> 4
+    }
+
+    fun getIconSize(itemSize: Int) = when (itemSize) {
+        FileItemSize.EXTRA_SMALL.ordinal -> IconSize.EXTRA_SMALL
+        FileItemSize.SMALL.ordinal -> IconSize.SMALL
+        FileItemSize.MEDIUM.ordinal -> IconSize.MEDIUM
+        FileItemSize.LARGE.ordinal -> IconSize.LARGE
+        else -> IconSize.EXTRA_LARGE
+    }
+
+    fun getFontSize(itemSize: Int) = when (itemSize) {
+        FileItemSize.EXTRA_SMALL.ordinal -> FontSize.EXTRA_SMALL
+        FileItemSize.SMALL.ordinal -> FontSize.SMALL
+        FileItemSize.MEDIUM.ordinal -> FontSize.MEDIUM
+        FileItemSize.LARGE.ordinal -> FontSize.LARGE
+        else -> FontSize.EXTRA_LARGE
+    }
+
     fun getFileListSpace(contentHolder: ContentHolder? = null) = when (
         if (contentHolder == null) globalClass.preferencesManager.itemSize
         else globalClass.preferencesManager.getViewConfigPrefsFor(contentHolder).itemSize

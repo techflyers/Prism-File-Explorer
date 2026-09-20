@@ -16,7 +16,11 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.Stora
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
-class VirtualFileHolder(val type: Int) : ContentHolder() {
+class VirtualFileHolder(
+    val type: Int,
+    val customItems: List<ContentHolder>? = null,
+    val customTitle: String? = null
+) : ContentHolder() {
     private var fileCount = 0
     private val contentList = arrayListOf<ContentHolder>()
     private val categories = arrayListOf<String>()
@@ -32,6 +36,7 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
         DOCUMENT -> globalClass.getString(R.string.documents)
         RECENT -> globalClass.getString(R.string.recent_files)
         SEARCH -> globalClass.getString(R.string.search)
+        DUPLICATES -> customTitle ?: "Duplicates"
         else -> globalClass.getString(R.string.unknown)
     }
 
@@ -50,7 +55,7 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
     override suspend fun getParent() = null
 
     override suspend fun listSortedContent(): ArrayList<out ContentHolder> {
-        if (type == SEARCH || type == BOOKMARKS) {
+        if (type == SEARCH || type == BOOKMARKS || type == DUPLICATES) {
             return super.listSortedContent()
         }
 
@@ -80,13 +85,14 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
             DOCUMENT -> getDocumentFiles(sortingPrefs)
             RECENT -> getRecentFiles()
             SEARCH -> getSearchResult()
+            DUPLICATES -> ArrayList(customItems ?: emptyList())
             else -> arrayListOf()
         }.also {
             contentList.apply {
                 clear()
                 addAll(it)
             }
-            if (type != BOOKMARKS) fetchCategories()
+            if (type != BOOKMARKS && type != DUPLICATES) fetchCategories()
         }
 
         return contentList.filter {
@@ -136,5 +142,6 @@ class VirtualFileHolder(val type: Int) : ContentHolder() {
         const val DOCUMENT = 5
         const val RECENT = 6
         const val SEARCH = 7
+        const val DUPLICATES = 8
     }
 }

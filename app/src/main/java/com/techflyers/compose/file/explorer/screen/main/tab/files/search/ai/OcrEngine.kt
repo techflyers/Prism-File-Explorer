@@ -6,6 +6,7 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -47,7 +48,19 @@ interface OcrEngine {
  */
 class MlKitOcrEngine : OcrEngine {
 
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    @Volatile
+    private var _recognizer: TextRecognizer? = null
+
+    private fun getRecognizer(): TextRecognizer {
+        return _recognizer ?: synchronized(this) {
+            _recognizer ?: run {
+                MlKitInitializer.initialize(com.techflyers.compose.file.explorer.App.globalClass)
+                TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also {
+                    _recognizer = it
+                }
+            }
+        }
+    }
 
     /**
      * OCR a single image file using ML Kit.
@@ -123,7 +136,7 @@ class MlKitOcrEngine : OcrEngine {
      */
     private suspend fun recognizeText(inputImage: InputImage): String =
         suspendCancellableCoroutine { cont ->
-            recognizer.process(inputImage)
+            getRecognizer().process(inputImage)
                 .addOnSuccessListener { result -> cont.resume(result.text) }
                 .addOnFailureListener { e -> cont.resumeWithException(e) }
         }
@@ -132,6 +145,10 @@ class MlKitOcrEngine : OcrEngine {
      * Release ML Kit resources. Call when the engine is no longer needed.
      */
     fun close() {
-        recognizer.close()
+        try {
+            _recognizer?.close()
+            _recognizer = null
+        } catch (_: Exception) {
+        }
     }
 }

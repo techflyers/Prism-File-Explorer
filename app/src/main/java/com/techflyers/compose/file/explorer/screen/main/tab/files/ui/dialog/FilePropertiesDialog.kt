@@ -23,11 +23,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Shortcut
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Inventory
@@ -35,14 +41,28 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import com.techflyers.compose.file.explorer.common.toFormattedSize
+import com.techflyers.compose.file.explorer.screen.main.ui.TooltipIconButton
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTaskParameters
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -153,11 +173,14 @@ fun FilePropertiesDialog(
                                 }
 
                                 is PropertiesState.SingleContentProperties -> {
-                                    SingleFileContent(details)
+                                    SingleFileContent(
+                                        details = details,
+                                        onReload = { contentPropertiesProvider.reload() }
+                                    )
                                 }
 
                                 is PropertiesState.MultipleContentProperties -> {
-                                    MultipleFilesContent(details)
+                                    MultipleFilesContent(details, tab, onDismissRequest)
                                 }
                             }
                         }
@@ -197,7 +220,15 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun SingleFileContent(details: PropertiesState.SingleContentProperties) {
+private fun SingleFileContent(
+    details: PropertiesState.SingleContentProperties,
+    onReload: () -> Unit
+) {
+    var showSetModeDialog by remember { mutableStateOf(false) }
+    var showSetOwnerDialog by remember { mutableStateOf(false) }
+    var showSetGroupDialog by remember { mutableStateOf(false) }
+    var showSetSeLinuxDialog by remember { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Basic properties
         PropertySection(title = stringResource(R.string.general)) {
@@ -218,6 +249,14 @@ private fun SingleFileContent(details: PropertiesState.SingleContentProperties) 
                 label = stringResource(R.string.type),
                 value = details.type
             )
+            if (!details.symbolicLinkTarget.isNullOrBlank()) {
+                PropertyRow(
+                    icon = Icons.AutoMirrored.Rounded.Shortcut,
+                    label = stringResource(R.string.file_properties_basic_symbolic_link_target),
+                    value = details.symbolicLinkTarget,
+                    maxLines = 3
+                )
+            }
             PropertyRow(
                 icon = Icons.Default.DataUsage,
                 label = stringResource(R.string.size),
@@ -235,13 +274,38 @@ private fun SingleFileContent(details: PropertiesState.SingleContentProperties) 
             PropertyRow(
                 icon = Icons.Default.Person,
                 label = stringResource(R.string.owner),
-                value = details.owner
+                value = details.owner,
+                onClick = if (details.fileHolder != null && details.owner.isNotBlank()) {
+                    { showSetOwnerDialog = true }
+                } else null
+            )
+            PropertyRow(
+                icon = Icons.Rounded.Groups,
+                label = stringResource(R.string.file_properties_permission_group),
+                value = details.group,
+                onClick = if (details.fileHolder != null && details.group.isNotBlank()) {
+                    { showSetGroupDialog = true }
+                } else null
             )
             PropertyRow(
                 icon = Icons.Default.Security,
                 label = stringResource(R.string.permissions),
-                value = details.permissions
+                value = details.permissions,
+                onClick = if (details.fileHolder != null && details.permissions.isNotBlank()) {
+                    { showSetModeDialog = true }
+                } else null
             )
+            if (details.seLinuxContext.isNotBlank()) {
+                PropertyRow(
+                    icon = Icons.Rounded.Security,
+                    label = stringResource(R.string.file_properties_permission_selinux_context),
+                    value = details.seLinuxContext,
+                    maxLines = 4,
+                    onClick = if (details.fileHolder != null) {
+                        { showSetSeLinuxDialog = true }
+                    } else null
+                )
+            }
         }
 
         // Computed properties
@@ -266,10 +330,62 @@ private fun SingleFileContent(details: PropertiesState.SingleContentProperties) 
             )
         }
     }
+
+    if (showSetModeDialog && details.fileHolder != null) {
+        SetModeDialog(
+            file = details.fileHolder,
+            onDismissRequest = { showSetModeDialog = false },
+            onPermissionsChanged = {
+                onReload()
+            }
+        )
+    }
+
+    if (showSetOwnerDialog && details.fileHolder != null) {
+        SetOwnerGroupDialog(
+            file = details.fileHolder,
+            isOwner = true,
+            onDismissRequest = { showSetOwnerDialog = false },
+            onChanged = {
+                onReload()
+            }
+        )
+    }
+
+    if (showSetGroupDialog && details.fileHolder != null) {
+        SetOwnerGroupDialog(
+            file = details.fileHolder,
+            isOwner = false,
+            onDismissRequest = { showSetGroupDialog = false },
+            onChanged = {
+                onReload()
+            }
+        )
+    }
+
+    if (showSetSeLinuxDialog && details.fileHolder != null) {
+        SetSeLinuxContextDialog(
+            file = details.fileHolder,
+            onDismissRequest = { showSetSeLinuxDialog = false },
+            onContextChanged = {
+                onReload()
+            }
+        )
+    }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun MultipleFilesContent(details: PropertiesState.MultipleContentProperties) {
+private fun MultipleFilesContent(
+    details: PropertiesState.MultipleContentProperties,
+    tab: FilesTab,
+    onDismissRequest: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var fileToDelete by remember { mutableStateOf<com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder?>(null) }
+    var deletedPaths by remember { mutableStateOf(setOf<String>()) }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PropertySection(title = stringResource(R.string.selection_summary)) {
             PropertyRow(
@@ -300,30 +416,210 @@ private fun MultipleFilesContent(details: PropertiesState.MultipleContentPropert
             )
             val duplicates by details.duplicateGroups.collectAsState()
             if (duplicates.isNotEmpty()) {
-                duplicates.forEach { (hash, duplicateNames) ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.duplicate_group, hash.take(8)),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        duplicateNames.forEach { name ->
-                            Text(
-                                text = "• $name",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp, top = 2.dp)
-                            )
+                duplicates.forEach { (hash, duplicateFiles) ->
+                    val visibleFiles = duplicateFiles.filter { it.uniquePath !in deletedPaths }
+                    if (visibleFiles.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    SelectionContainer {
+                                        Text(
+                                            text = hash,
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                            ),
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = "${visibleFiles.size} duplicate files",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TooltipIconButton(
+                                        tooltip = stringResource(R.string.copy_hash),
+                                        onClick = {
+                                            hash.copyToClipboard()
+                                            showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ContentCopy,
+                                            contentDescription = stringResource(R.string.copy_hash),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    TooltipIconButton(
+                                        tooltip = stringResource(R.string.open_duplicates_in_new_tab),
+                                        onClick = {
+                                            onDismissRequest()
+                                            globalClass.mainActivityManager.addTabAndSelect(
+                                                FilesTab(
+                                                    com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder(
+                                                        type = com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.DUPLICATES,
+                                                        customItems = visibleFiles,
+                                                        customTitle = "Duplicates (${hash.take(6)})"
+                                                    )
+                                                )
+                                            )
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.OpenInNew,
+                                            contentDescription = stringResource(R.string.open_duplicates_in_new_tab),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            visibleFiles.forEach { file ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (file.isFolder) Icons.Default.FolderOpen else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.InsertDriveFile,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = file.displayName,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = file.uniquePath,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = file.size.toFormattedSize(),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                        // Quick Action: Open File
+                                        TooltipIconButton(
+                                            tooltip = stringResource(R.string.open),
+                                            onClick = {
+                                                onDismissRequest()
+                                                tab.openFile(context, file)
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.OpenInNew,
+                                                contentDescription = stringResource(R.string.open),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        // Quick Action: Open containing folder in new tab
+                                        TooltipIconButton(
+                                            tooltip = stringResource(R.string.open_containing_folder),
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    globalClass.mainActivityManager.addTabAndSelect(FilesTab(file))
+                                                    onDismissRequest()
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.FolderOpen,
+                                                contentDescription = stringResource(R.string.open_containing_folder),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        // Quick Action: Delete file
+                                        TooltipIconButton(
+                                            tooltip = stringResource(R.string.delete),
+                                            onClick = { fileToDelete = file },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Delete,
+                                                contentDescription = stringResource(R.string.delete),
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Delete Confirmation Dialog
+    fileToDelete?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { fileToDelete = null },
+            title = { Text(stringResource(R.string.delete)) },
+            text = { Text("Are you sure you want to delete \"${target.displayName}\"?") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val path = target.uniquePath
+                        fileToDelete = null
+                        deletedPaths = deletedPaths + path
+                        globalClass.taskManager.addTaskAndRun(
+                            DeleteTask(listOf(target)),
+                            DeleteTaskParameters()
+                        )
+                        globalClass.showMsg("Deleted ${target.displayName}")
+                    }
+                ) {
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { fileToDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 }
 
@@ -365,11 +661,21 @@ fun PropertyRow(
     icon: ImageVector,
     label: String,
     value: String,
-    maxLines: Int = 3
+    maxLines: Int = 3,
+    onClick: (() -> Unit)? = null
 ) {
     if (value.isNotBlank()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (onClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onClick)
+                            .padding(vertical = 2.dp)
+                    } else Modifier
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -390,8 +696,18 @@ fun PropertyRow(
             CopiableText(
                 text = value,
                 modifier = Modifier.weight(1f),
-                maxLines = maxLines
+                maxLines = maxLines,
+                onClick = onClick
             )
+            if (onClick != null) {
+                Space(4.dp)
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }
@@ -472,15 +788,14 @@ fun CopiableText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.onSurface,
-    maxLines: Int = 3
+    maxLines: Int = 1,
+    onClick: (() -> Unit)? = null
 ) {
-    LocalContext.current
-    LocalClipboard.current
     var showCopiedFeedback by remember { mutableStateOf(false) }
 
     LaunchedEffect(showCopiedFeedback) {
         if (showCopiedFeedback) {
-            delay(2000)
+            delay(1500)
             showCopiedFeedback = false
         }
     }
@@ -494,8 +809,9 @@ fun CopiableText(
             overflow = if (maxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(text) {
+                .pointerInput(text, onClick) {
                     detectTapGestures(
+                        onTap = if (onClick != null) { _ -> onClick() } else null,
                         onLongPress = {
                             text.copyToClipboard()
                             showCopiedFeedback = true

@@ -42,7 +42,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
@@ -79,6 +81,11 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.exp
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+
 
 class MainActivity : BaseActivity() {
     private val HOME_SCREEN_SHORTCUT_EXTRA_KEY = "filePath"
@@ -199,7 +206,37 @@ class MainActivity : BaseActivity() {
                             )
                         }
                     ) {
-                        Column(Modifier.fillMaxSize()) {
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        val edgeSwipeThresholdPx = with(density as Density) { 24.dp.toPx() }
+                        val dragThresholdPx = with(density as Density) { 48.dp.toPx() }
+                        val edgeSwipeEnabled = globalClass.preferencesManager.disableNavigationGestures
+
+                        Column(
+                            Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (edgeSwipeEnabled) {
+                                        Modifier.pointerInput(edgeSwipeEnabled) {
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                if (down.position.x > edgeSwipeThresholdPx) return@awaitEachGesture
+                                                var totalDrag = 0f
+                                                do {
+                                                    val event = awaitPointerEvent()
+                                                    val drag = event.changes.firstOrNull()?.positionChange()?.x ?: 0f
+                                                    totalDrag += drag
+                                                    if (totalDrag > dragThresholdPx) {
+                                                        event.changes.forEach { it.consume() }
+                                                        drawerScope.launch { drawerState.open() }
+                                                        return@awaitEachGesture
+                                                    }
+                                                } while (event.changes.any { it.pressed })
+                                            }
+                                        }
+                                    } else Modifier
+                                )
+                        ) {
+
                             val moveToolbarToBottom =
                                 globalClass.preferencesManager.moveToolbarToBottom
                             val moveTabsToBottom =
@@ -385,6 +422,29 @@ class MainActivity : BaseActivity() {
                 if (pagerState.currentPage isNot state.selectedTabIndex) {
                     pagerState.scrollToPage(state.selectedTabIndex)
                 }
+                if (!globalClass.preferencesManager.disableTabBar) {
+                    val page = state.selectedTabIndex
+                    if (page == 0) {
+                        state.tabLayoutState.animateScrollToItem(0, 0)
+                    } else {
+                        val layoutInfo = state.tabLayoutState.layoutInfo
+                        val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
+                        if (visibleItem == null) {
+                            state.tabLayoutState.animateScrollToItem(page, 0)
+                        } else {
+                            val viewportStart = layoutInfo.viewportStartOffset
+                            val viewportEnd = layoutInfo.viewportEndOffset
+                            val itemStart = visibleItem.offset
+                            val itemEnd = visibleItem.offset + visibleItem.size
+                            if (itemStart < viewportStart) {
+                                state.tabLayoutState.animateScrollToItem(page, 0)
+                            } else if (itemEnd > viewportEnd) {
+                                val scrollDelta = (itemEnd - viewportEnd).toFloat()
+                                state.tabLayoutState.animateScrollBy(scrollDelta)
+                            }
+                        }
+                    }
+                }
             }
 
             LaunchedEffect(pagerState.currentPage) {
@@ -393,22 +453,24 @@ class MainActivity : BaseActivity() {
                         manager.selectTabAt(page, true)
                     }
                     if (!globalClass.preferencesManager.disableTabBar) {
-                        val layoutInfo = state.tabLayoutState.layoutInfo
-                        val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
-                        if (visibleItem == null) {
-                            val viewportWidth = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-                            val scrollOffset = -((viewportWidth - 200).coerceAtLeast(0) / 2)
-                            state.tabLayoutState.animateScrollToItem(page, scrollOffset)
+                        if (page == 0) {
+                            state.tabLayoutState.animateScrollToItem(0, 0)
                         } else {
-                            val viewportStart = layoutInfo.viewportStartOffset
-                            val viewportEnd = layoutInfo.viewportEndOffset
-                            val itemStart = visibleItem.offset
-                            val itemEnd = visibleItem.offset + visibleItem.size
-                            if (itemStart < viewportStart) {
-                                state.tabLayoutState.animateScrollToItem(page)
-                            } else if (itemEnd > viewportEnd) {
-                                val scrollDelta = (itemEnd - viewportEnd).toFloat()
-                                state.tabLayoutState.animateScrollBy(scrollDelta)
+                            val layoutInfo = state.tabLayoutState.layoutInfo
+                            val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
+                            if (visibleItem == null) {
+                                state.tabLayoutState.animateScrollToItem(page, 0)
+                            } else {
+                                val viewportStart = layoutInfo.viewportStartOffset
+                                val viewportEnd = layoutInfo.viewportEndOffset
+                                val itemStart = visibleItem.offset
+                                val itemEnd = visibleItem.offset + visibleItem.size
+                                if (itemStart < viewportStart) {
+                                    state.tabLayoutState.animateScrollToItem(page, 0)
+                                } else if (itemEnd > viewportEnd) {
+                                    val scrollDelta = (itemEnd - viewportEnd).toFloat()
+                                    state.tabLayoutState.animateScrollBy(scrollDelta)
+                                }
                             }
                         }
                     }
@@ -535,6 +597,14 @@ class MainActivity : BaseActivity() {
 
                                 is RemoteExplorerTab -> {
                                     RemoteExplorerScreen(currentTab)
+                                }
+
+                                is StorageAnalysisTab -> {
+                                    StorageAnalysisScreen(currentTab)
+                                }
+
+                                is DuplicateFinderTab -> {
+                                    DuplicateFinderScreen(currentTab)
                                 }
                             }
                         }

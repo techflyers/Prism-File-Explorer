@@ -32,12 +32,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
 import java.io.File
 
 class AudioPlayerInstance(
     override val uri: Uri,
     override val id: String,
-    val playlist: List<Uri> = listOf()
+    val playlist: List<Uri> = listOf(),
+    val archiveSession: ArchiveMediaSession? = null
 ) : ViewerInstance {
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
@@ -125,6 +128,9 @@ class AudioPlayerInstance(
                         }
                         CoroutineScope(Dispatchers.IO).launch {
                             extractMetadata(context, currentUri)
+                        }
+                        archiveSession?.let { session ->
+                            ArchiveMediaQueueManager.prefetchWindow(session, currentIndex, windowSize = 2)
                         }
                     }
 
@@ -359,6 +365,9 @@ class AudioPlayerInstance(
      * Jump directly to a specific track index in the playlist.
      */
     fun seekToTrack(index: Int) {
+        archiveSession?.let { session ->
+            ArchiveMediaQueueManager.prefetchWindow(session, index, windowSize = 2)
+        }
         exoPlayer?.let { player ->
             player.seekTo(index, 0)
             player.play()

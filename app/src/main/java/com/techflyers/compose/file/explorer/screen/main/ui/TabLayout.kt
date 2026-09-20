@@ -17,18 +17,31 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Tab
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +63,7 @@ import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.toJson
 import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.screen.main.model.ClosedTabEntry
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTab
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTabType
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTabs
@@ -84,6 +98,7 @@ fun TabLayout(
     var to by remember { mutableIntStateOf(-1) }
     var draggedItem by remember { mutableIntStateOf(-1) }
     val list = remember { mutableStateListOf<Int>() }
+    var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
 
     val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
         if (draggedItem > -1) {
@@ -126,13 +141,9 @@ fun TabLayout(
                 .weight(1f)
                 .heightIn(max = 42.dp),
             state = tabLayoutState,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = if (hideToolbar) 8.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (hideToolbar) {
-                item {
-                    Space(8.dp)
-                }
-            }
             itemsIndexed(list, key = { _, item -> item }) { index, id ->
                 tabs.find { it.id == id }?.let { tab ->
                     ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
@@ -171,6 +182,9 @@ fun TabLayout(
                         var showTabHeaderMenu by remember(tab.id) {
                             mutableStateOf(false)
                         }
+                        var lastClickTime by remember(tab.id) {
+                            mutableLongStateOf(0L)
+                        }
 
                         Row(
                             modifier = Modifier
@@ -186,10 +200,22 @@ fun TabLayout(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
-                                        if (!isSelected) {
-                                            mainActivityManager.selectTabAt(index)
+                                        val currentTime = android.os.SystemClock.uptimeMillis()
+                                        if (currentTime - lastClickTime < 300L) {
+                                            lastClickTime = 0L
+                                            showTabHeaderMenu = false
+                                            if (tabs.size > 1) {
+                                                mainActivityManager.removeTabAt(index)
+                                            } else if (tab !is HomeTab) {
+                                                mainActivityManager.replaceCurrentTabWith(HomeTab())
+                                            }
                                         } else {
-                                            showTabHeaderMenu = true
+                                            lastClickTime = currentTime
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index)
+                                            } else {
+                                                showTabHeaderMenu = true
+                                            }
                                         }
                                     }
                                 )
@@ -217,7 +243,8 @@ fun TabLayout(
                                 OptionsMenu(
                                     tab = tab,
                                     index = index,
-                                    onDismiss = { showTabHeaderMenu = false }
+                                    onDismiss = { showTabHeaderMenu = false },
+                                    onShowClosedTabsHistory = { showClosedTabsHistoryDialog = true }
                                 )
                             }
                         }
@@ -234,13 +261,18 @@ fun TabLayout(
             MoreOptionsButton()
         }
     }
+
+    if (showClosedTabsHistoryDialog) {
+        ClosedTabsHistoryDialog(onDismiss = { showClosedTabsHistoryDialog = false })
+    }
 }
 
 @Composable
 fun OptionsMenu(
     tab: Tab,
     index: Int,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onShowClosedTabsHistory: () -> Unit = {}
 ) {
     DropdownMenu(
         expanded = true,
@@ -347,6 +379,41 @@ fun OptionsMenu(
             }
         )
 
+        DropdownMenuItem(
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(R.string.reopen_closed_tab),
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    IconButton(
+                        onClick = {
+                            onDismiss()
+                            onShowClosedTabsHistory()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.History,
+                            contentDescription = stringResource(R.string.closed_tabs_history),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            },
+            onClick = {
+                val reopened = globalClass.mainActivityManager.reopenLastClosedTab()
+                if (!reopened) {
+                    showMsg(globalClass.getString(R.string.no_closed_tabs))
+                }
+                onDismiss()
+            }
+        )
+
         if (tab !is HomeTab) {
             DropdownMenuItem(
                 text = { Text(text = stringResource(R.string.home_tab_title)) },
@@ -357,4 +424,135 @@ fun OptionsMenu(
             )
         }
     }
+}
+
+@Composable
+fun ClosedTabsHistoryDialog(
+    onDismiss: () -> Unit
+) {
+    val mainActivityManager = globalClass.mainActivityManager
+    var history by remember {
+        mutableStateOf(mainActivityManager.getClosedTabsHistorySnapshot())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.History,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.closed_tabs_history),
+                style = MaterialTheme.typography.titleMedium
+            )
+        },
+        text = {
+            if (history.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.no_closed_tabs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 350.dp)
+                ) {
+                    items(history.size) { i ->
+                        val entry = history[i]
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .combinedClickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        mainActivityManager.reopenClosedTab(entry)
+                                        onDismiss()
+                                    }
+                                )
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tab,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Space(10.dp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = entry.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (entry.subtitle.isNotEmpty() && entry.subtitle != entry.title) {
+                                    Text(
+                                        text = entry.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    mainActivityManager.removeClosedTab(entry)
+                                    history = mainActivityManager.getClosedTabsHistorySnapshot()
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = stringResource(R.string.close),
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (i < history.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (history.isNotEmpty()) {
+                TextButton(
+                    onClick = {
+                        mainActivityManager.clearClosedTabsHistory()
+                        history = emptyList()
+                    }
+                ) {
+                    Text(stringResource(R.string.clear_history))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
 }

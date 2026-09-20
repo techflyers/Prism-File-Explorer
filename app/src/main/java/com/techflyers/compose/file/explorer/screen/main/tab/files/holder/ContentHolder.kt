@@ -12,6 +12,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMe
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SIZE
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_TYPE
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SHUFFLED
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.sortFoldersFirst
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.sortLargerFirst
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.sortName
@@ -40,6 +41,10 @@ abstract class ContentHolder {
     abstract val canWrite: Boolean
 
     abstract val canAddNewContent: Boolean
+
+    open val isSymbolicLink: Boolean get() = false
+    open val isSymbolicLinkBroken: Boolean get() = false
+    open val symbolicLinkTarget: String? get() = null
 
     /**
      * Returns unsorted content list, use listSortedContent() to get sorted list.
@@ -94,6 +99,20 @@ abstract class ContentHolder {
 
         if (!globalClass.preferencesManager.showHiddenFiles) {
             list.removeIf { it.isHidden() }
+        }
+
+        if (sortingPrefs.sortMethod == SORT_BY_SHUFFLED) {
+            list.shuffle()
+            if (sortingPrefs.showFoldersFirst) {
+                list.sortWith(Comparator { f1: ContentHolder, f2: ContentHolder ->
+                    if (f1.isFolder != f2.isFolder) {
+                        if (f1.isFolder) -1 else 1
+                    } else {
+                        0
+                    }
+                })
+            }
+            return list
         }
 
         val primaryComparator = when (sortingPrefs.sortMethod) {

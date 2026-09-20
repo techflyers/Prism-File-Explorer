@@ -109,7 +109,6 @@ fun ItemRow(
                     text = title,
                     isFolder = isFolder,
                     fontSize = fontSize.sp,
-                    maxLines = 1,
                     lineHeight = (fontSize + 2).sp
                 )
                 if (subtitle.isNotEmpty()) {
@@ -230,6 +229,19 @@ fun FileIcon(
                 sourceInfo = sourceInfo,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .padding(2.dp),
+                badgeSize = badgeSize,
+                iconSize = badgeIconSize
+            )
+        }
+
+        if (contentHolder.isSymbolicLink) {
+            val badgeSize = (iconSize * 0.42f).coerceIn(14f, 22f).dp
+            val badgeIconSize = (badgeSize.value * 0.72f).dp
+            SymbolicLinkBadge(
+                isBroken = contentHolder.isSymbolicLinkBroken,
+                modifier = Modifier
+                    .align(if (sourceInfo != null) Alignment.BottomStart else Alignment.BottomEnd)
                     .padding(2.dp),
                 badgeSize = badgeSize,
                 iconSize = badgeIconSize

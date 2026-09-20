@@ -33,6 +33,7 @@ import com.techflyers.compose.file.explorer.screen.main.MainActivityManager
 import com.techflyers.compose.file.explorer.screen.main.tab.files.coil.DocumentFileMapper
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchManager
+import com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai.MlKitInitializer
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.SftpRemoteClient
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.TaskManager
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ZipManager
@@ -134,6 +135,7 @@ class App : Application(), coil3.SingletonImageLoader.Factory {
         appContext = this
 
         cleanOnExitDir()
+        MlKitInitializer.initialize(this)
     }
 
     /**

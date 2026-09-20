@@ -44,6 +44,10 @@ sealed interface PropertiesState {
         val size: String,
         val permissions: String,
         val owner: String,
+        val group: String = "",
+        val seLinuxContext: String = "",
+        val symbolicLinkTarget: String? = null,
+        val fileHolder: ContentHolder? = null,
         val contentCount: StateFlow<String>,
         val checksum: StateFlow<String>,
         val sha256: StateFlow<String>,
@@ -60,7 +64,7 @@ sealed interface PropertiesState {
         val sizeProgress: StateFlow<CalculationProgress>,
         val checksumStatus: StateFlow<String>,
         val checksumProgress: StateFlow<CalculationProgress>,
-        val duplicateGroups: StateFlow<List<Pair<String, List<String>>>> = MutableStateFlow(emptyList()),
+        val duplicateGroups: StateFlow<List<Pair<String, List<ContentHolder>>>> = MutableStateFlow(emptyList()),
     ) : PropertiesState
 }
 
@@ -94,6 +98,12 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         calculationScope.cancel()
     }
 
+    fun reload() {
+        if (contentHolders.size == 1) {
+            loadSingleContentDetails(contentHolders.first())
+        }
+    }
+
     private fun loadSingleContentDetails(file: ContentHolder) {
         val contentCountFlow = MutableStateFlow(emptyString)
         val checksumFlow = MutableStateFlow(
@@ -120,6 +130,10 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     size = if (file.isFolder) globalClass.getString(R.string.calculating) else file.size.toFormattedSize(),
                     permissions = getPermissions(file),
                     owner = getOwner(file),
+                    group = getGroup(file),
+                    seLinuxContext = getSELinuxContext(file),
+                    symbolicLinkTarget = file.symbolicLinkTarget,
+                    fileHolder = file,
                     contentCount = contentCountFlow,
                     checksum = checksumFlow,
                     sha256 = sha256Flow,
@@ -211,7 +225,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         val sizeProgressFlow = MutableStateFlow(CalculationProgress())
         val checksumStatusFlow = MutableStateFlow(globalClass.getString(R.string.calculating))
         val checksumProgressFlow = MutableStateFlow(CalculationProgress())
-        val duplicateGroupsFlow = MutableStateFlow<List<Pair<String, List<String>>>>(emptyList())
+        val duplicateGroupsFlow = MutableStateFlow<List<Pair<String, List<ContentHolder>>>>(emptyList())
 
         _uiState.update {
             it.copy(
@@ -285,15 +299,24 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         }
         activeJobs.add(job)
 
+        calculateDuplicates(files, checksumStatusFlow, checksumProgressFlow, duplicateGroupsFlow)
+    }
+
+    private fun calculateDuplicates(
+        contentHolders: List<ContentHolder>,
+        checksumStatusFlow: MutableStateFlow<String>,
+        checksumProgressFlow: MutableStateFlow<CalculationProgress>,
+        duplicateGroupsFlow: MutableStateFlow<List<Pair<String, List<ContentHolder>>>>
+    ) {
         val checksumJob = calculationScope.launch {
-            val localFiles = files.filterIsInstance<LocalFileHolder>().filter { !it.isFolder }
+            val localFiles = contentHolders.filterIsInstance<LocalFileHolder>().filter { !it.isFolder }
             if (localFiles.isEmpty()) {
                 checksumStatusFlow.value = globalClass.getString(R.string.no_applicable_files)
                 return@launch
             }
             checksumProgressFlow.value =
                 CalculationProgress(isCalculating = true, total = localFiles.size.toLong())
-            val checksumMap = mutableMapOf<String, MutableList<String>>()
+            val checksumMap = mutableMapOf<String, MutableList<ContentHolder>>()
             var processed = 0L
             try {
                 for (file in localFiles) {
@@ -306,7 +329,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     )
                     val md5 = calculateMD5WithProgress(file) { _, _ -> }
                     if (md5.isNotBlank() && md5 != globalClass.getString(R.string.error_calculating)) {
-                        checksumMap.getOrPut(md5) { mutableListOf() }.add(file.displayName)
+                        checksumMap.getOrPut(md5) { mutableListOf() }.add(file)
                     }
                     yield()
                 }
@@ -327,27 +350,43 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
     }
 
     private fun determineFileType(file: ContentHolder): String {
-        return when {
+        val baseType = when {
             file.isFolder -> globalClass.getString(R.string.folder)
-            else -> {
-                file.extension.lowercase().ifEmpty { globalClass.getString(R.string.unknown) }
+            else -> file.extension.lowercase().ifEmpty { globalClass.getString(R.string.unknown) }
+        }
+        return if (file.isSymbolicLink) {
+            if (file.isSymbolicLinkBroken) {
+                globalClass.getString(R.string.symbolic_link_broken)
+            } else {
+                globalClass.getString(R.string.file_properties_basic_type_symbolic_link_format, baseType)
             }
+        } else {
+            baseType
         }
     }
 
     private fun getPermissions(file: ContentHolder): String {
         if (file is LocalFileHolder) {
+            val mode = file.posixMode
+            if (mode != null) {
+                return com.techflyers.compose.file.explorer.screen.main.tab.files.posix.formatPosixMode(mode)
+            }
             return buildString {
                 append(if (file.canRead) "r" else "-")
                 append(if (file.canWrite) "w" else "-")
                 append(if (file.file.canExecute()) "x" else "-")
             }
         }
-
         return emptyString
     }
 
     private fun getOwner(file: ContentHolder): String {
+        if (file is LocalFileHolder) {
+            val uid = file.posixUid
+            if (uid != null) {
+                return com.techflyers.compose.file.explorer.screen.main.tab.files.posix.PosixPrincipalLookup.formatUser(uid)
+            }
+        }
         return try {
             if (file is LocalFileHolder) {
                 Files.getOwner(file.file.toPath()).name
@@ -357,6 +396,23 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         } catch (_: Exception) {
             globalClass.getString(R.string.unknown)
         }
+    }
+
+    private fun getGroup(file: ContentHolder): String {
+        if (file is LocalFileHolder) {
+            val gid = file.posixGid
+            if (gid != null) {
+                return com.techflyers.compose.file.explorer.screen.main.tab.files.posix.PosixPrincipalLookup.formatGroup(gid)
+            }
+        }
+        return globalClass.getString(R.string.unknown)
+    }
+
+    private fun getSELinuxContext(file: ContentHolder): String {
+        if (file is LocalFileHolder) {
+            return file.seLinuxContext ?: com.techflyers.compose.file.explorer.screen.main.tab.files.posix.SELinuxManager.getFileContext(file.file.absolutePath) ?: "—"
+        }
+        return "—"
     }
 
     private suspend fun calculateDirectoryStats(

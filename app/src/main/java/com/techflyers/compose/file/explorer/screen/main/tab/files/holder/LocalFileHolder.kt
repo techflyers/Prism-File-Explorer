@@ -5,13 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
+import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructStat
 import androidx.core.content.FileProvider
 import com.anggrayudi.storage.file.getBasePath
 import com.anggrayudi.storage.file.mimeType
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.screen.main.tab.files.posix.SELinuxManager
 import com.techflyers.compose.file.explorer.common.MimeTypeDetector
 import com.techflyers.compose.file.explorer.common.drawableToBitmap
 import com.techflyers.compose.file.explorer.common.emptyString
@@ -64,7 +69,51 @@ class LocalFileHolder(file: File) : ContentHolder() {
 
     var details = emptyString
 
-    override val isFolder: Boolean by lazy { file.isDirectory }
+    val lstat: StructStat? by lazy {
+        try {
+            Os.lstat(file.absolutePath)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    override val isSymbolicLink: Boolean by lazy {
+        lstat?.let { OsConstants.S_ISLNK(it.st_mode) } ?: false
+    }
+
+    override val symbolicLinkTarget: String? by lazy {
+        if (isSymbolicLink) {
+            try {
+                Os.readlink(file.absolutePath)
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+    }
+
+    override val isSymbolicLinkBroken: Boolean by lazy {
+        if (isSymbolicLink) {
+            try {
+                Os.stat(file.absolutePath)
+                false
+            } catch (_: Exception) {
+                true
+            }
+        } else false
+    }
+
+    override val isFolder: Boolean by lazy {
+        if (isSymbolicLink && isSymbolicLinkBroken) {
+            false
+        } else {
+            file.isDirectory
+        }
+    }
+
+    val posixMode: Int? get() = lstat?.st_mode
+    val posixUid: Int? get() = lstat?.st_uid
+    val posixGid: Int? get() = lstat?.st_gid
+    val seLinuxContext: String? by lazy { SELinuxManager.getFileContext(file.absolutePath) }
 
     override val lastModified: Long
         get() = file.lastModified().also {
@@ -93,6 +142,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
         private val pdfPageCache = android.util.LruCache<String, Int>(500)
         private val archiveRatioCache = android.util.LruCache<String, String>(500)
         private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
+        private val videoDurationCache = android.util.LruCache<String, String>(500)
 
         fun getCachedDetails(file: File, lastModified: Long): String? {
             val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}"
@@ -103,7 +153,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
     override suspend fun getDetails(): String {
         if (details.isNotEmpty()) return details
 
-        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}"
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}:${globalClass.preferencesManager.showVideoDuration}"
         val cached = detailsCache.get(cacheKey)
         if (cached != null) {
             details = cached
@@ -148,6 +198,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
                     if (pages > 0) "$sizeStr • $pages ${if (pages == 1) "page" else "pages"}"
                     else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
                 }
+                // Video: show duration
+                ext in FileMimeType.videoFileType && globalClass.preferencesManager.showVideoDuration -> {
+                    val duration = getVideoDuration()
+                    if (duration.isNotEmpty()) "$sizeStr • $duration"
+                    else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
+                }
                 // Archives: show compression ratio
                 ext in archiveExtensions -> {
                     val ratio = getArchiveCompressionRatio()
@@ -181,6 +237,37 @@ class LocalFileHolder(file: File) : ContentHolder() {
         return pages
     }
 
+    private fun getVideoDuration(): String {
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        val cached = videoDurationCache.get(cacheKey)
+        if (cached != null) return cached
+
+        val durationStr = try {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                if (durationMs > 0L) {
+                    val totalSeconds = durationMs / 1000
+                    val hours = totalSeconds / 3600
+                    val minutes = (totalSeconds % 3600) / 60
+                    val seconds = totalSeconds % 60
+                    if (hours > 0) {
+                        String.format("%d:%02d:%02d", hours, minutes, seconds)
+                    } else {
+                        String.format("%d:%02d", minutes, seconds)
+                    }
+                } else {
+                    ""
+                }
+            } finally {
+                try { retriever.release() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) { "" }
+        videoDurationCache.put(cacheKey, durationStr)
+        return durationStr
+    }
+
     private fun getArchiveCompressionRatio(): String? {
         if (!file.exists() || file.extension.lowercase() !in setOf("zip", "jar", "apk", "xapk")) return null
         val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
@@ -209,7 +296,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
     }
 
     override suspend fun isValid(): Boolean {
-        if (file.exists()) return true
+        if (file.exists() || isSymbolicLink) return true
         if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
             return com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.exists(file.absolutePath)
         }
@@ -789,7 +876,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 isTarCompressed()
     }
 
-    private fun createUri() = FileProvider.getUriForFile(
+    internal fun createUri() = FileProvider.getUriForFile(
         globalClass,
         "com.techflyers.compose.file.explorer.provider",
         file

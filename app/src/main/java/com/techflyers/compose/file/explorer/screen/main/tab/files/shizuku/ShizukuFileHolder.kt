@@ -42,13 +42,17 @@ class ShizukuFileHolder(
 
     override val uniquePath: String = entry.path
     override val displayName: String = entry.name
-    override val isFolder: Boolean = entry.isDirectory
+    override val isFolder: Boolean = if (entry.isSymbolicLink && entry.isSymbolicLinkBroken) false else entry.isDirectory
     override val lastModified: Long = entry.lastModified
     override val size: Long = entry.size
     override val extension: String = if (isFolder) emptyString else entry.name.substringAfterLast(".", "")
     override val canRead: Boolean = true
     override val canWrite: Boolean = ShizukuManager.isPrivileged
     override val canAddNewContent: Boolean = isFolder && ShizukuManager.isPrivileged
+
+    override val isSymbolicLink: Boolean get() = entry.isSymbolicLink
+    override val isSymbolicLinkBroken: Boolean get() = entry.isSymbolicLinkBroken
+    override val symbolicLinkTarget: String? get() = entry.symbolicLinkTarget
 
     private var details = emptyString
     private var filesCount = 0

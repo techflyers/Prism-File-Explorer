@@ -40,6 +40,8 @@
     <string name="select_all">Select All</string>
     <string name="options">Options</string>
     <string name="create_new">New Content</string>
+    <string name="navigation_drawer">Navigation Drawer</string>
+    <string name="more_options">More Options</string>
     <string name="name">Name</string>
     <string name="invalid_file_name">Invalid file name</string>
     <string name="file">File</string>
@@ -66,13 +68,18 @@
     <string name="selected">selected</string>
     <string name="copied_to_clipboard">Copied to clipboard</string>
     <string name="sort_by">Sort by</string>
+    <string name="sort_by_first">Sort by (first)</string>
     <string name="apply_to_this_folder_only">Apply to this folder only</string>
-    <string name="name_a_z">Name (A-Z)</string>
-    <string name="name_z_a">Name (Z-A)</string>
-    <string name="date_newer">Date (newer)</string>
-    <string name="date_older">Date (older)</string>
-    <string name="size_smaller">Size (smaller)</string>
-    <string name="size_larger">Size (larger)</string>
+    <string name="name_a_z">Name (A - Z)</string>
+    <string name="name_z_a">Name (Z - A)</string>
+    <string name="date_newer">Date (Newer)</string>
+    <string name="date_older">Date (Older)</string>
+    <string name="size_smaller">Size (Smaller)</string>
+    <string name="size_larger">Size (Larger)</string>
+    <string name="type_ascending">Type (Ascending)</string>
+    <string name="type_descending">Type (Descending)</string>
+    <string name="shuffled">Shuffled</string>
+    <string name="options_ellipsis">Options…</string>
     <string name="folders_first">Folders first</string>
     <string name="reverse">Reverse</string>
     <string name="custom_format">Custom format…</string>
@@ -81,6 +88,23 @@
     <string name="mime_type">MIME Type</string>
     <string name="close">Close</string>
     <string name="close_others">Close others</string>
+    <string name="reopen_closed_tab">Reopen closed tab</string>
+    <string name="closed_tabs_history">Closed tabs history</string>
+    <string name="no_closed_tabs">No recently closed tabs</string>
+    <string name="clear_history">Clear history</string>
+    <string name="selection_ribbon_two_rows">Two-row selection ribbon</string>
+    <string name="selection_ribbon_two_rows_desc">Display selection ribbon in two rows for quick access to more actions</string>
+    <string name="customize_selection_ribbon">Customize selection ribbon</string>
+    <string name="customize_selection_ribbon_desc">Configure and reorder selection ribbon action buttons</string>
+    <string name="customize_selection_ribbon_title">Selection Ribbon Actions</string>
+    <string name="cell_value">Cell value</string>
+    <string name="copy_cell">Copy cell</string>
+    <string name="auto_fit_column">Auto-fit column</string>
+    <string name="copy_column">Copy column</string>
+    <string name="filter_by_column">Filter by this column</string>
+    <string name="sort_asc">Sort A → Z</string>
+    <string name="sort_desc">Sort Z → A</string>
+    <string name="extracting_media">Extracting from archive…</string>
     <string name="rename">Rename</string>
     <string name="copy_path">Copy path</string>
     <string name="restore">Restore</string>
@@ -200,6 +224,7 @@
     <string name="root">Root</string>
     <string name="counting_files">Counting files…</string>
     <string name="copying">Copying</string>
+    <string name="adding_to_archive">Adding to archive</string>
     <string name="file_already_exists">File %1$s already exists in destination folder.</string>
     <string name="hide">Hide</string>
     <string name="conflict">Conflict</string>
@@ -473,10 +498,61 @@
     <string name="unpin_from_home_tab">Unpin from home tab</string>
     <string name="hide_hidden_files">Hide hidden files</string>
     <string name="press_back_again">Press again to exit</string>
-    <string name="remember_last_session_desc">if enabled, startup tabs will be ignored</string>
+    <string name="remember_last_session_desc">If enabled, startup tabs will be ignored</string>
     <string name="close_tab_on_back_nav">Back navigation to close tabs</string>
     <string name="remember_last_session">Remember last session</string>
     <string name="confirm_before_exit">Confirm before exiting the app</string>
+    <string name="cancel_copy_task">Cancel Copy?</string>
+    <string name="cancel_move_task">Cancel Move?</string>
+    <string name="cancel_task_confirmation">This will discard the pending file operation. Continue?</string>
+    <string name="cancel_task">Cancel Task</string>
+    <string name="keep">Keep</string>
+    <string name="portrait">Portrait</string>
+    <string name="landscape">Landscape</string>
+    <string name="lines">Lines (1–5)</string>
+    <string name="use_same_for_both_orientations">Use same for both orientations</string>
+    <string name="filename_wrap_lines">Filename wrap lines</string>
+    <string name="filename_wrap_lines_desc">Number of lines a filename may wrap before being truncated with ellipsis</string>
+    <string name="filename_wrap_lines_range">Valid range: 1–5</string>
+    <string name="filename_wrap_lines_off">No wrap (single line)</string>
+    <string name="filename_wrap_lines_n">%d lines</string>
+    <string name="show_video_duration">Show Video Duration</string>
+    <string name="show_video_duration_desc">Display video length alongside file size in the file list</string>
+    <string name="tabs">Tabs</string>
+    <string name="storage_analysis">Storage Analysis</string>
+    <string name="storage_breakdown">Storage Breakdown</string>
+    <string name="folder_analysis">Folder Breakdown</string>
+    <string name="used_of_total">%1$s of %2$s used</string>
+    <string name="free_storage">%1$s free</string>
+    <string name="system_and_apps">System &amp; Apps</string>
+    <string name="other_files">Other Files</string>
+    <string name="apks_and_apps">APKs</string>
+    <string name="explore_in_files">Open in Files</string>
+    <string name="no_subfolders_found">No subfolders found</string>
+    <string name="storage_device">Storage Device</string>
+    <string name="duplicate_finder">Duplicate Finder</string>
+    <string name="scan_scope">Scan Folder</string>
+    <string name="select_scan_folder">Choose folder to scan</string>
+    <string name="min_file_size">Minimum File Size</string>
+    <string name="all_sizes">All sizes</string>
+    <string name="min_100kb">&gt; 100 KB</string>
+    <string name="min_1mb">&gt; 1 MB</string>
+    <string name="min_10mb">&gt; 10 MB</string>
+    <string name="match_method">Match Method</string>
+    <string name="match_hash">Accurate (SHA-256 Hash)</string>
+    <string name="match_name_size">Fast (Name &amp; Size)</string>
+    <string name="start_scan">Start Scan</string>
+    <string name="stop_scan">Stop Scan</string>
+    <string name="scanning">Scanning…</string>
+    <string name="scanning_progress">Scanned %1$d files • Found %2$d duplicates</string>
+    <string name="no_duplicates_found">No duplicate files found</string>
+    <string name="duplicates_summary">Found %1$d duplicate groups (%2$d files, %3$s reclaimable)</string>
+    <string name="select_except_newest">Keep newest</string>
+    <string name="select_except_oldest">Keep oldest</string>
+    <string name="select_except_first">Keep first</string>
+    <string name="delete_selected">Delete %1$d files (%2$s)</string>
+    <string name="confirm_delete_duplicates">Delete %1$d duplicate files?</string>
+    <string name="duplicates_deleted">%1$d duplicate files deleted</string>
 
     <!-- Share Menu Receiver Strings -->
     <string name="share_title_save_to">Save to Prism</string>
@@ -578,6 +654,7 @@
     <string name="duplicates_found">%1$d duplicate group(s) found</string>
     <string name="no_applicable_files">No files to compare</string>
     <string name="duplicate_group">Duplicates (%1$s)</string>
+    <string name="copy_hash">Copy hash</string>
     <string name="deselect_all">Deselect All</string>
 
     <!-- Filename Truncation -->
@@ -585,4 +662,57 @@
     <string name="filename_end_characters_desc">Number of characters from the end of the filename to show before the extension when truncated (e.g. Beginning...end.ext)</string>
     <string name="filename_end_characters_none">None (Default)</string>
     <string name="filename_end_characters_n">%1$d characters</string>
+
+    <!-- Side Menu Drawer Customization -->
+    <string name="show_tabs_in_drawer">Show tabs in sidebar</string>
+    <string name="show_tabs_in_drawer_desc">Display open tabs section in the side menu drawer</string>
+    <string name="show_bookmarks_in_drawer">Show bookmarks in sidebar</string>
+    <string name="show_bookmarks_in_drawer_desc">Display bookmarked folders in the side menu drawer</string>
+    <string name="rearrange_tabs">Rearrange tabs</string>
+    <string name="move_tab_up">Move tab up</string>
+    <string name="move_tab_down">Move tab down</string>
+    <string name="close_tab">Close tab</string>
+
+    <!-- Task Info & Rename FAB -->
+    <string name="task_details_title">Task Details</string>
+    <string name="task_info_rename">Task info &amp; rename</string>
+    <string name="pending_task_files">Files in task (%1$d)</string>
+    <string name="rename_destination_file">Rename destination file</string>
+    <string name="rename_file_hint">Enter new filename</string>
+
+
+    <!-- Duplicate Finder Custom Options -->
+    <string name="custom_folder">Custom Folder…</string>
+    <string name="custom_folder_picker">Select Folder to Scan</string>
+    <string name="custom_size_limit">Custom Size</string>
+    <string name="enter_size_limit">Enter minimum file size</string>
+    <string name="min_custom_size">&gt; %1$s</string>
+    <string name="open_duplicates_in_new_tab">Open duplicates in new tab</string>
+    <string name="open_containing_folder">Open containing folder</string>
+
+    <!-- Linux-Aware Attributes & Permissions -->
+    <string name="file_properties_permission_owner">Owner</string>
+    <string name="file_properties_permission_group">Group</string>
+    <string name="file_properties_permission_principal_format">%1$s (%2$d)</string>
+    <string name="file_properties_permission_mode">Mode</string>
+    <string name="file_properties_permission_mode_format">%1$s (%2$04o)</string>
+    <string name="file_properties_permission_set_mode_title">Change mode</string>
+    <string name="file_properties_permission_set_owner_title">Change owner</string>
+    <string name="file_properties_permission_set_group_title">Change group</string>
+    <string name="file_properties_permission_selinux_context">SELinux context</string>
+    <string name="file_properties_permission_set_selinux_context_title">Change SELinux context</string>
+    <string name="file_properties_permission_set_selinux_context_restore">Restore</string>
+    <string name="file_properties_permission_recursive">Apply to enclosed files</string>
+    <string name="file_properties_basic_symbolic_link_target">Link target</string>
+    <string name="file_properties_basic_type_symbolic_link_format">%1$s, symbolic link</string>
+    <string name="symbolic_link_broken">Broken symbolic link</string>
+    <string name="symbolic_link_target_not_found">Symbolic link target does not exist</string>
+    <string name="read">Read</string>
+    <string name="write">Write</string>
+    <string name="execute">Execute</string>
+    <string name="special">Special</string>
+    <string name="set_uid">Set UID</string>
+    <string name="set_gid">Set GID</string>
+    <string name="sticky_bit">Sticky</string>
+    <string name="others">Others</string>
 </resources>

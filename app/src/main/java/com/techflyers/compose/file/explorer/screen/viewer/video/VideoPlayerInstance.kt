@@ -25,12 +25,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
 import java.io.File
 
 class VideoPlayerInstance(
     override val uri: Uri,
     override val id: String,
-    val playlist: List<Uri> = listOf()
+    val playlist: List<Uri> = listOf(),
+    val archiveSession: ArchiveMediaSession? = null
 ) : ViewerInstance {
     private val _playerState = MutableStateFlow(VideoPlayerState())
     val playerState: StateFlow<VideoPlayerState> = _playerState.asStateFlow()
@@ -122,6 +125,9 @@ class VideoPlayerInstance(
                                 currentPosition = 0L,
                                 duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                             )
+                        }
+                        archiveSession?.let { session ->
+                            ArchiveMediaQueueManager.prefetchWindow(session, currentIndex, windowSize = 2)
                         }
                     }
                 })
@@ -230,6 +236,9 @@ class VideoPlayerInstance(
     }
 
     fun playPlaylistItem(index: Int) {
+        archiveSession?.let { session ->
+            ArchiveMediaQueueManager.prefetchWindow(session, index, windowSize = 2)
+        }
         exoPlayer?.let { player ->
             if (index in 0 until player.mediaItemCount) {
                 player.seekTo(index, 0)

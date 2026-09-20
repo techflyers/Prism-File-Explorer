@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,13 +41,16 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.state.DialogsS
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CompressTask
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
+import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -79,7 +83,7 @@ class FilesTab(
         globalClass.preferencesManager.getViewConfigPrefsFor(activeFolder)
     )
 
-    val highlightedFiles = arrayListOf<String>()
+    val highlightedFiles = mutableStateListOf<String>()
     val selectedFiles = linkedMapOf<String, ContentHolder>()
     var lastSelectedFileIndex = -1
 
@@ -117,6 +121,9 @@ class FilesTab(
     var filesCount by mutableIntStateOf(0)
         private set
     var selectedFilesCount by mutableIntStateOf(0)
+    var selectedFilesTotalSize by mutableLongStateOf(0L)
+    var isCalculatingSelectedSize by mutableStateOf(false)
+    private var calculateSizeJob: Job? = null
 
     init {
         // If the tab point to a file, open it immediately without waiting for its parent content to be loaded
@@ -130,29 +137,31 @@ class FilesTab(
         // Load either the source file or the home tab
         scope.launch {
             if (source.isFile()) { // This is true when locating a file
+                // Highlight the opened file
+                highlightedFiles.apply {
+                    clear()
+                    add(source.uniquePath)
+                }
+
                 // Check if we can access the parent folder and open it
                 source.getParent()?.let { parent ->
                     openFolderImpl(parent) {
                         // Scroll to the file once the content has been loaded
                         CoroutineScope(Dispatchers.Main).launch {
-                            getFileListState().scrollToItem(
-                                maxOf(
-                                    activeFolderContent.getIndexIf { uniquePath == source.uniquePath },
-                                    0
-                                ),
-                                0
-                            )
+                            val targetIndex = activeFolderContent.getIndexIf {
+                                uniquePath == source.uniquePath || (displayName == source.displayName && size == source.size)
+                            }
+                            if (targetIndex >= 0) {
+                                val listState = getFileListState()
+                                listState.scrollToItem(targetIndex, 0)
+                                kotlinx.coroutines.delay(100)
+                                listState.scrollToItem(targetIndex, 0)
+                            }
                         }
                     }
                 } ?: also {
                     // If parent folder cannot be accessed, revert to home folder
                     openFolderImpl(homeDir)
-                }
-
-                // Highlight the opened file
-                highlightedFiles.apply {
-                    clear()
-                    add(source.uniquePath)
                 }
             } else {
                 // If the source file is a folder, open it
@@ -245,6 +254,7 @@ class FilesTab(
         selectedFiles.clear()
         selectedFilesCount = 0
         lastSelectedFileIndex = -1
+        updateSelectedFilesSize()
         if (quickReload) quickReloadFiles()
     }
 
@@ -308,6 +318,7 @@ class FilesTab(
         }
         withContext(Dispatchers.Main) {
             selectedFilesCount = selectedFiles.size
+            updateSelectedFilesSize()
         }
 
         // Update the bottom bar options to fit the new folder
@@ -566,6 +577,7 @@ class FilesTab(
 
             withContext(Dispatchers.Main) {
                 selectedFilesCount = selectedFiles.size
+                updateSelectedFilesSize()
 
                 // Reload the list
                 activeFolderContent.clear()
@@ -600,10 +612,85 @@ class FilesTab(
 
             withContext(Dispatchers.Main) {
                 selectedFilesCount = selectedFiles.size
+                updateSelectedFilesSize()
             }
 
             // Update title and subtitle
             requestHomeToolbarUpdate()
+        }
+    }
+
+    fun updateSelectedFilesSize() {
+        if (selectedFiles.isEmpty()) {
+            calculateSizeJob?.cancel()
+            calculateSizeJob = null
+            selectedFilesTotalSize = 0L
+            isCalculatingSelectedSize = false
+            return
+        }
+
+        val directFilesSize = selectedFiles.values.filter { !it.isFolder }.sumOf { it.size }
+        val selectedFolders = selectedFiles.values.filter { it.isFolder }.toList()
+
+        if (selectedFolders.isEmpty()) {
+            calculateSizeJob?.cancel()
+            calculateSizeJob = null
+            selectedFilesTotalSize = directFilesSize
+            isCalculatingSelectedSize = false
+            return
+        }
+
+        selectedFilesTotalSize = directFilesSize
+        isCalculatingSelectedSize = true
+        calculateSizeJob?.cancel()
+        calculateSizeJob = scope.launch(Dispatchers.IO) {
+            var totalFolderSize = 0L
+            for (folder in selectedFolders) {
+                if (!isActive) return@launch
+                when (folder) {
+                    is LocalFileHolder -> {
+                        try {
+                            folder.file.walkTopDown().maxDepth(50).onFail { _, _ -> }.forEach { f ->
+                                if (!isActive) return@launch
+                                if (f.isFile) {
+                                    totalFolderSize += f.length()
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    is ZipFileHolder -> {
+                        try {
+                            folder.node.listFilesAndEmptyDirs().forEach { child ->
+                                if (!child.isDirectory) {
+                                    totalFolderSize += child.size
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    else -> {
+                        try {
+                            suspend fun walkGeneric(holder: ContentHolder) {
+                                if (!isActive) return
+                                holder.listContent().forEach { child ->
+                                    if (!isActive) return@forEach
+                                    if (child.isFolder) {
+                                        walkGeneric(child)
+                                    } else {
+                                        totalFolderSize += child.size
+                                    }
+                                }
+                            }
+                            walkGeneric(folder)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+            if (isActive) {
+                withContext(Dispatchers.Main) {
+                    selectedFilesTotalSize = directFilesSize + totalFolderSize
+                    isCalculatingSelectedSize = false
+                }
+            }
         }
     }
 
@@ -670,9 +757,14 @@ class FilesTab(
             openFolderImpl(parent) {
                 CoroutineScope(Dispatchers.Main).launch {
                     val targetIndex =
-                        activeFolderContent.getIndexIf { uniquePath == file.uniquePath }
+                        activeFolderContent.getIndexIf {
+                            uniquePath == file.uniquePath || (displayName == file.displayName && size == file.size)
+                        }
                     if (targetIndex >= 0) {
-                        getFileListState().scrollToItem(targetIndex, 0)
+                        val listState = getFileListState()
+                        listState.scrollToItem(targetIndex, 0)
+                        kotlinx.coroutines.delay(100)
+                        listState.scrollToItem(targetIndex, 0)
                     }
                 }
             }

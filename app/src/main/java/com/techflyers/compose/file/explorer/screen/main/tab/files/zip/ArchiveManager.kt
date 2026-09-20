@@ -858,44 +858,157 @@ object ArchiveManager {
 
     /**
      * Add or update a file or folder inside an archive.
+     *
+     * @param onProgress Callback receiving (0..1 float, currentFileName). Called in real-time
+     *   as the underlying 7za process emits progress output.
+     * @param isAborted Optional lambda; if it returns true the operation is cancelled.
      */
     suspend fun addOrUpdateMember(
         archivePath: String,
         localFile: File,
         internalPath: String,
-        password: String? = null
+        password: String? = null,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) = addOrUpdateMembers(
+        archivePath = archivePath,
+        items = listOf(Pair(localFile, internalPath)),
+        password = password,
+        isAborted = isAborted,
+        onProgress = onProgress
+    )
+
+    /**
+     * Add or update multiple files or folders inside an archive in a single batch operation.
+     *
+     * @param onProgress Callback receiving (0..1 float, currentFileName). Called in real-time
+     *   as the underlying 7za process emits progress output (native archives) or as Zip4j
+     *   reports bytes written (plain ZIP).
+     * @param isAborted Optional lambda; if it returns true the operation is cancelled.
+     */
+    suspend fun addOrUpdateMembers(
+        archivePath: String,
+        items: List<Pair<File, String>>,
+        password: String? = null,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) = withContext(Dispatchers.IO) {
-        val accessiblePath = resolveAccessibleArchivePath(archivePath)
+        if (items.isEmpty()) return@withContext
+        val lowerName = archivePath.lowercase()
+        val isCompound = COMPOUND_ARCHIVE_SUFFIXES.any { lowerName.endsWith(it) }
+
+        if (isCompound) {
+            addOrUpdateMembersToCompound(archivePath, items)
+        } else {
+            val accessiblePath = resolveAccessibleArchivePath(archivePath)
+            val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
+            val stagingDir = File(cacheParent, "add_batch_staging_${UUID.randomUUID()}").apply { mkdirs() }
+            try {
+                val pathsToAdd = mutableListOf<String>()
+                for ((localFile, internalPath) in items) {
+                    val stagedTarget = File(stagingDir, internalPath)
+                    if (localFile.isDirectory) {
+                        stagedTarget.mkdirs()
+                    } else {
+                        stagedTarget.parentFile?.mkdirs()
+                        localFile.copyTo(stagedTarget, overwrite = true)
+                    }
+                    pathsToAdd.add(internalPath)
+                }
+
+                // -bsp1 enables 7za's streaming progress output on stdout.
+                val args = mutableListOf("a", accessiblePath, "-y", "-r", "-bsp1")
+                if (!password.isNullOrEmpty()) {
+                    args.add("-p$password")
+                    // Only set encryption headers when a password is actually provided.
+                    // When password is null/empty, emit no -p flag at all — 7za treats
+                    // "-p-" as a literal "-" password, which corrupts unencrypted archives.
+                }
+                args.addAll(pathsToAdd)
+                val result = NativeBinaryExecutor.run(
+                    context = globalClass,
+                    binaryName = "lib7za.so",
+                    arguments = args,
+                    workingDir = stagingDir.absolutePath,
+                    isAborted = isAborted,
+                    onProgressUpdate = onProgress
+                )
+                if (!result.success && isAborted?.invoke() != true) {
+                    throw Exception("7za batch add/update failed (exit ${result.exitCode}):\n${result.output}")
+                }
+                syncBackIfCached(archivePath, accessiblePath)
+            } finally {
+                stagingDir.deleteRecursively()
+            }
+        }
+    }
+
+    /**
+     * Add or update members in a compound archive (.tar.gz, .tar.bz2, .tar.xz).
+     */
+    private suspend fun addOrUpdateMembersToCompound(
+        archivePath: String,
+        items: List<Pair<File, String>>
+    ) {
         val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
-        val stagingDir = File(cacheParent, "add_staging_${UUID.randomUUID()}").apply { mkdirs() }
+        val tempDir = File(cacheParent, "compound_add_${UUID.randomUUID()}").apply { mkdirs() }
+        val tempTar = File(tempDir, "archive.tar")
+        val stagingDir = File(tempDir, "staging").apply { mkdirs() }
         try {
-            val stagedTarget = File(stagingDir, internalPath)
-            if (localFile.isDirectory) {
-                stagedTarget.mkdirs()
-            } else {
-                stagedTarget.parentFile?.mkdirs()
-                localFile.copyTo(stagedTarget, overwrite = true)
+            extractAll(archivePath, tempDir.absolutePath)
+            val extractedTar = tempDir.listFiles()?.firstOrNull { it.extension.lowercase() == "tar" }
+                ?: throw Exception("Could not extract intermediate tar from $archivePath")
+            extractedTar.renameTo(tempTar)
+
+            val pathsToAdd = mutableListOf<String>()
+            for ((localFile, internalPath) in items) {
+                val stagedTarget = File(stagingDir, internalPath)
+                if (localFile.isDirectory) {
+                    stagedTarget.mkdirs()
+                } else {
+                    stagedTarget.parentFile?.mkdirs()
+                    localFile.copyTo(stagedTarget, overwrite = true)
+                }
+                pathsToAdd.add(internalPath)
             }
 
-            val args = mutableListOf("a", accessiblePath, "-y", "-r")
-            if (!password.isNullOrEmpty()) {
-                args.add("-p$password")
-            } else {
-                args.add("-p-")
-            }
-            args.add(internalPath)
-            val result = NativeBinaryExecutor.run(
+            val addArgs = mutableListOf("a", tempTar.absolutePath, "-y", "-r")
+            addArgs.addAll(pathsToAdd)
+            val addResult = NativeBinaryExecutor.run(
                 context = globalClass,
                 binaryName = "lib7za.so",
-                arguments = args,
+                arguments = addArgs,
                 workingDir = stagingDir.absolutePath
             )
-            if (!result.success) {
-                throw Exception("7za add/update failed (exit ${result.exitCode}):\n${result.output}")
+            if (!addResult.success) {
+                throw Exception("7za add to tar failed (exit ${addResult.exitCode}):\n${addResult.output}")
             }
-            syncBackIfCached(archivePath, accessiblePath)
+
+            val lowerName = archivePath.lowercase()
+            val outerExt = when {
+                lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") -> "tgz"
+                lowerName.endsWith(".tar.bz2") || lowerName.endsWith(".tbz2") || lowerName.endsWith(".tbz") -> "tbz2"
+                lowerName.endsWith(".tar.xz") || lowerName.endsWith(".txz") -> "txz"
+                else -> "tgz"
+            }
+            val outerFlag = when (outerExt) {
+                "tgz" -> "-tgzip"
+                "tbz2" -> "-tbzip2"
+                "txz" -> "-txz"
+                else -> "-tgzip"
+            }
+            val tempOuter = File(tempDir, "output.archive")
+            val compResult = NativeBinaryExecutor.run(
+                context = globalClass,
+                binaryName = "lib7za.so",
+                arguments = listOf("a", outerFlag, tempOuter.absolutePath, "-mx=5", tempTar.absolutePath)
+            )
+            if (!compResult.success) {
+                throw Exception("7za compound recompress failed (exit ${compResult.exitCode}):\n${compResult.output}")
+            }
+            tempOuter.copyTo(File(archivePath), overwrite = true)
         } finally {
-            stagingDir.deleteRecursively()
+            tempDir.deleteRecursively()
         }
     }
 

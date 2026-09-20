@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.DateRange
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material3.Card
@@ -228,6 +229,20 @@ fun FileSortingMenuDialog(
                                 } else {
                                     sortingMethod = SortingMethod.SORT_BY_TYPE
                                 }
+                            }
+                        )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
+                        )
+
+                        RadioButtonItem(
+                            icon = Icons.Default.Shuffle,
+                            text = stringResource(R.string.shuffled),
+                            selected = sortingMethod == SortingMethod.SORT_BY_SHUFFLED,
+                            onClick = {
+                                sortingMethod = SortingMethod.SORT_BY_SHUFFLED
                             }
                         )
                     }

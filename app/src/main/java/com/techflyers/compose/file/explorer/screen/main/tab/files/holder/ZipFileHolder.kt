@@ -20,6 +20,15 @@ import net.lingala.zip4j.model.ZipParameters
 import java.io.ByteArrayInputStream
 import java.io.File
 
+import android.content.Intent
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaItem
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
+import com.techflyers.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
+import com.techflyers.compose.file.explorer.screen.viewer.image.ImageViewerActivity
+import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
+
 class ZipFileHolder(
     val zipTree: ZipTree,
     val node: ZipNode,
@@ -230,6 +239,63 @@ class ZipFileHolder(
         skipSupportedExtensions: Boolean,
         customMimeType: String?
     ) {
+        if (!skipSupportedExtensions && customMimeType == null) {
+            val isImage = FileMimeType.imageFileType.contains(extension)
+            val isAudio = FileMimeType.audioFileType.contains(extension)
+            val isVideo = FileMimeType.videoFileType.contains(extension)
+
+            if (isImage || isAudio || isVideo) {
+                val parentNode = if (node.parentPath.isEmpty()) zipTree.getRootNode() else zipTree.findNodeByPath(node.parentPath)
+                val siblings = parentNode?.children?.filter { child ->
+                    !child.isDirectory && when {
+                        isImage -> FileMimeType.imageFileType.contains(child.extension)
+                        isAudio -> FileMimeType.audioFileType.contains(child.extension)
+                        isVideo -> FileMimeType.videoFileType.contains(child.extension)
+                        else -> false
+                    }
+                }?.sortedBy { it.name.lowercase() } ?: listOf(node)
+
+                val sessionItems = siblings.map { s ->
+                    ArchiveMediaItem(
+                        internalPath = s.path,
+                        destinationPath = File(zipTree.createExtractionDestinationDirFor(s), s.name).absolutePath,
+                        name = s.name
+                    )
+                }
+                val initialIndex = siblings.indexOfFirst { it.path == node.path }.coerceAtLeast(0)
+                val session = ArchiveMediaQueueManager.createSession(
+                    archivePath = zipTree.archivePathForNative,
+                    password = zipTree.password,
+                    destinationDir = zipTree.cleanOnExitDir.uniquePath,
+                    items = sessionItems
+                )
+
+                val targetClass = when {
+                    isImage -> ImageViewerActivity::class.java.name
+                    isAudio -> AudioPlayerActivity::class.java.name
+                    else -> VideoPlayerActivity::class.java.name
+                }
+
+                val existingFile = zipTree.getExtractionDestinationFile(node)
+                if (existingFile != null) {
+                    launchArchiveMediaViewer(context, existingFile, session, initialIndex, targetClass)
+                } else {
+                    (globalClass.mainActivityManager.getActiveTab() as? FilesTab)?.extractZipHolderForPreview(
+                        this
+                    ) {
+                        val extracted = zipTree.getExtractionDestinationFile(node)
+                        if (extracted != null) {
+                            zipTree.addExtractedFile(node, extracted)
+                            launchArchiveMediaViewer(context, extracted, session, initialIndex, targetClass)
+                        } else {
+                            showMsg(R.string.failed_to_extract_file)
+                        }
+                    }
+                }
+                return
+            }
+        }
+
         val file = zipTree.getExtractionDestinationFile(node)
 
         if (file != null) {
@@ -246,6 +312,55 @@ class ZipFileHolder(
                     showMsg(R.string.failed_to_extract_file)
                 }
             }
+        }
+    }
+
+    private fun launchArchiveMediaViewer(
+        context: Context,
+        file: LocalFileHolder,
+        session: ArchiveMediaSession,
+        initialIndex: Int,
+        targetClass: String
+    ) {
+        val uri = file.createUri()
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, file.mimeType)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                        or Intent.FLAG_ACTIVITY_NEW_DOCUMENT
+                        or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+                        or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            setPackage(context.packageName)
+            setClassName(context.packageName, targetClass)
+            putExtra("extra_file_path", file.file.absolutePath)
+            putExtra(ArchiveMediaQueueManager.EXTRA_ARCHIVE_SESSION_ID, session.sessionId)
+            putExtra(ArchiveMediaQueueManager.EXTRA_ARCHIVE_PATH, session.archivePath)
+            putExtra(ArchiveMediaQueueManager.EXTRA_ARCHIVE_PASSWORD, session.password)
+            putStringArrayListExtra(
+                ArchiveMediaQueueManager.EXTRA_ARCHIVE_INTERNAL_PATHS,
+                ArrayList(session.items.map { it.internalPath })
+            )
+            putStringArrayListExtra(
+                ArchiveMediaQueueManager.EXTRA_ARCHIVE_DEST_PATHS,
+                ArrayList(session.items.map { it.destinationPath })
+            )
+            putExtra(ArchiveMediaQueueManager.EXTRA_ARCHIVE_DEST_DIR, session.destinationDir)
+            putExtra(ArchiveMediaQueueManager.EXTRA_ARCHIVE_INITIAL_INDEX, initialIndex)
+            if (targetClass == ImageViewerActivity::class.java.name) {
+                putStringArrayListExtra(
+                    ImageViewerActivity.EXTRA_IMAGE_LIST,
+                    ArrayList(session.items.map { it.destinationPath })
+                )
+            }
+        }
+
+        if (intent.resolveActivity(globalClass.packageManager) != null) {
+            context.startActivity(intent)
+            ArchiveMediaQueueManager.prefetchWindow(session, initialIndex, 3)
+        } else {
+            file.open(context, false, false, null)
         }
     }
 

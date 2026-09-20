@@ -14,6 +14,7 @@ import com.techflyers.compose.file.explorer.common.printFullStackTrace
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.toJson
 import com.techflyers.compose.file.explorer.screen.main.model.GithubRelease
+import com.techflyers.compose.file.explorer.screen.main.model.ClosedTabEntry
 import com.techflyers.compose.file.explorer.screen.main.startup.PlusButtonOverride
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTab
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTabType
@@ -66,6 +67,117 @@ class MainActivityManager {
         refreshStorageDevices()
     }
 
+    private val closedTabsHistory = mutableListOf<ClosedTabEntry>()
+
+    private fun createClosedTabEntry(tab: Tab): ClosedTabEntry {
+        return when (tab) {
+            is FilesTab -> {
+                val folder = tab.activeFolder
+                ClosedTabEntry(
+                    title = tab.header.ifEmpty { folder.displayName },
+                    subtitle = folder.displayName,
+                    createTab = { FilesTab(source = folder) }
+                )
+            }
+            is HomeTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Home" },
+                subtitle = "Home",
+                createTab = { HomeTab() }
+            )
+            is AppsTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Apps" },
+                subtitle = "Apps",
+                createTab = { AppsTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Vault" },
+                subtitle = "Vault",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "FTP Server" },
+                subtitle = "FTP Server",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Web Sharing" },
+                subtitle = "Web Sharing",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Network Wizard" },
+                subtitle = "Network Connection",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.RemoteExplorerTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { tab.connection.name },
+                subtitle = tab.connection.name,
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.RemoteExplorerTab(tab.connection) }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Storage" },
+                subtitle = "Storage Analysis",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab() }
+            )
+            is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Duplicates" },
+                subtitle = "Duplicate Finder",
+                createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab() }
+            )
+            else -> ClosedTabEntry(
+                title = tab.header.ifEmpty { "Tab" },
+                subtitle = "",
+                createTab = { HomeTab() }
+            )
+        }
+    }
+
+    fun recordClosedTab(tab: Tab) {
+        val entry = createClosedTabEntry(tab)
+        synchronized(closedTabsHistory) {
+            closedTabsHistory.add(0, entry)
+            if (closedTabsHistory.size > 30) {
+                closedTabsHistory.removeAt(closedTabsHistory.lastIndex)
+            }
+        }
+    }
+
+    fun reopenLastClosedTab(): Boolean {
+        val entry = synchronized(closedTabsHistory) {
+            if (closedTabsHistory.isEmpty()) return false
+            closedTabsHistory.removeAt(0)
+        }
+        val restoredTab = entry.createTab()
+        addTabAndSelect(restoredTab)
+        return true
+    }
+
+    fun reopenClosedTab(entry: ClosedTabEntry) {
+        synchronized(closedTabsHistory) {
+            closedTabsHistory.remove(entry)
+        }
+        val restoredTab = entry.createTab()
+        addTabAndSelect(restoredTab)
+    }
+
+    fun removeClosedTab(entry: ClosedTabEntry) {
+        synchronized(closedTabsHistory) {
+            closedTabsHistory.remove(entry)
+        }
+    }
+
+    fun clearClosedTabsHistory() {
+        synchronized(closedTabsHistory) {
+            closedTabsHistory.clear()
+        }
+    }
+
+    fun getClosedTabsHistorySnapshot(): List<ClosedTabEntry> {
+        return synchronized(closedTabsHistory) {
+            closedTabsHistory.toList()
+        }
+    }
+
     /**
      * Removes all tabs except the one at the given index.
      *
@@ -82,7 +194,10 @@ class MainActivityManager {
         val tabsToRemove = _state.value.tabs.filter { it != tabToKeep }
 
         // Call onTabRemoved on tabs being removed BEFORE state update
-        tabsToRemove.forEach { it.onTabRemoved() }
+        tabsToRemove.forEach {
+            recordClosedTab(it)
+            it.onTabRemoved()
+        }
 
         // Update the state
         _state.update {
@@ -99,6 +214,8 @@ class MainActivityManager {
 
         val tabToRemove = _state.value.tabs[index]
         val currentSelectedIndex = _state.value.selectedTabIndex
+
+        recordClosedTab(tabToRemove)
 
         // Call callbacks on the tab to be removed BEFORE state update
         if (currentSelectedIndex == index) {

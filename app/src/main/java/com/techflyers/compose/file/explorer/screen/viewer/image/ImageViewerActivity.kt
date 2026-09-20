@@ -12,6 +12,8 @@ import com.techflyers.compose.file.explorer.screen.viewer.image.ui.ImageViewerSc
 import com.techflyers.compose.file.explorer.theme.FileExplorerTheme
 import java.io.File
 
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+
 class ImageViewerActivity : ViewerActivity() {
 
     companion object {
@@ -72,25 +74,35 @@ class ImageViewerActivity : ViewerActivity() {
             ?.filter { it.isNotEmpty() && File(it).isFile }
             ?.distinct()
 
-        val (paths, uris) = when {
-            !contextPaths.isNullOrEmpty() -> {
-                // Prefer the list the user is actually browsing
-                val list = ensureContains(contextPaths, currentPath)
-                list to list.map { pathToUri(it) }
+        val archiveSession = ArchiveMediaQueueManager.getOrCreateSession(intent)
+        val (paths, uris, initialIndex) = if (archiveSession != null && archiveSession.items.isNotEmpty()) {
+            val list = archiveSession.items.map { it.destinationPath }
+            val initIdx = intent.getIntExtra(
+                ArchiveMediaQueueManager.EXTRA_ARCHIVE_INITIAL_INDEX,
+                if (currentPath != null) list.indexOfFirst { pathsEqual(it, currentPath) }.coerceAtLeast(0) else 0
+            ).coerceIn(0, list.lastIndex)
+            Triple(list, list.map { pathToUri(it) }, initIdx)
+        } else {
+            val (pList, uList) = when {
+                !contextPaths.isNullOrEmpty() -> {
+                    // Prefer the list the user is actually browsing
+                    val list = ensureContains(contextPaths, currentPath)
+                    list to list.map { pathToUri(it) }
+                }
+                currentPath != null -> {
+                    val list = buildFolderImagePaths(currentPath)
+                    list to list.map { pathToUri(it) }
+                }
+                else -> {
+                    emptyList<String>() to listOf(uri)
+                }
             }
-            currentPath != null -> {
-                val list = buildFolderImagePaths(currentPath)
-                list to list.map { pathToUri(it) }
+            val initIdx = when {
+                pList.isNotEmpty() && currentPath != null ->
+                    pList.indexOfFirst { pathsEqual(it, currentPath) }.coerceAtLeast(0)
+                else -> 0
             }
-            else -> {
-                emptyList<String>() to listOf(uri)
-            }
-        }
-
-        val initialIndex = when {
-            paths.isNotEmpty() && currentPath != null ->
-                paths.indexOfFirst { pathsEqual(it, currentPath) }.coerceAtLeast(0)
-            else -> 0
+            Triple(pList, uList, initIdx)
         }
 
         val finalUris = if (uris.isEmpty()) listOf(uri) else uris

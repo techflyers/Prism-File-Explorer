@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -16,6 +17,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.res.Configuration
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 
 fun computeMiddleEllipsisParts(
@@ -58,10 +60,15 @@ fun MiddleEllipsisText(
     fontWeight: FontWeight? = null,
     lineHeight: TextUnit = TextUnit.Unspecified,
     textAlign: TextAlign = TextAlign.Start,
-    maxLines: Int = 1,
+    maxLines: Int = globalClass.preferencesManager.filenameMaxLines,
     enableMarquee: Boolean = true,
     marqueeVelocity: Dp = 90.dp,
-    endCharsCount: Int = globalClass.preferencesManager.filenameEndCharsCount
+    endCharsCount: Int = run {
+        val prefs = globalClass.preferencesManager
+        val landscapeVal = prefs.filenameEndCharsCountLandscape
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape && landscapeVal >= 0) landscapeVal else prefs.filenameEndCharsCount
+    }
 ) {
     val shouldMarquee = enableMarquee && isSelected
 

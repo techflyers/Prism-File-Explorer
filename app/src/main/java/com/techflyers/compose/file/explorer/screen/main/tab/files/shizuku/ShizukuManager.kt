@@ -260,9 +260,39 @@ object ShizukuManager {
     }
 
     fun openDownloadPage(context: Context) {
+        openSheveryReleases(context)
+    }
+
+    fun openSheveryReleases(context: Context) {
         try {
-            val url = "https://github.com/HmnDev-Tech/shevery/releases"
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/HmnDev-Tech/shevery/releases")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
+    fun openShizukuPlayStore(context: Context) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(webIntent)
+            } catch (_: Exception) {
+                openShizukuReleases(context)
+            }
+        }
+    }
+
+    fun openShizukuReleases(context: Context) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/RikkaApps/Shizuku/releases")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
@@ -483,12 +513,39 @@ object ShizukuManager {
         }
     }
 
+    // ─── Privileged POSIX & SELinux Operations ───────────────────────────────
+
+    fun chmod(path: String, modeOctal: String, recursive: Boolean = false): Boolean {
+        val r = if (recursive) "-R " else ""
+        val cmd = "chmod $r$modeOctal " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun chown(path: String, uid: Int, gid: Int, recursive: Boolean = false): Boolean {
+        val r = if (recursive) "-R " else ""
+        val groupPart = if (gid >= 0) ":$gid" else ""
+        val cmd = "chown $r$uid$groupPart " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun chcon(path: String, context: String, recursive: Boolean = false): Boolean {
+        val r = if (recursive) "-R " else ""
+        val cmd = "chcon $r" + escapeShellArg(context) + " " + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
+    fun restorecon(path: String, recursive: Boolean = false): Boolean {
+        val r = if (recursive) "-R " else ""
+        val cmd = "restorecon $r" + escapeShellArg(path)
+        return executeCommand(cmd)?.isSuccess == true
+    }
+
     // ─── File listing ─────────────────────────────────────────────────────────
 
     /**
      * Lists files in the given directory path using privileged shell.
-     * Uses `find <dir> -mindepth 1 -maxdepth 1 -exec stat -L -c "%F|%s|%Y|%n" {} +`
-     * to safely include hidden files and avoid wildcard expansion issues.
+     * Uses `find <dir> -mindepth 1 -maxdepth 1 -exec stat -c "%F|%s|%Y|%n|%N" {} +`
+     * to detect symbolic links, permissions, size, and mod times.
      */
     fun listFiles(dirPath: String): List<ShizukuFileEntry> {
         val cleanPath = if (dirPath.length > 1 && dirPath.endsWith("/")) {
@@ -498,9 +555,9 @@ object ShizukuManager {
         }
         val safePath = escapeShellArg(cleanPath)
 
-        val command = "find $safePath -mindepth 1 -maxdepth 1 -exec stat -L -c \"%F|%s|%Y|%n\" {} + 2>/dev/null || " +
-                "find $safePath -mindepth 1 -maxdepth 1 -exec stat -c \"%F|%s|%Y|%n\" {} + 2>/dev/null || " +
-                "stat -L -c \"%F|%s|%Y|%n\" $safePath/* 2>/dev/null"
+        val command = "find $safePath -mindepth 1 -maxdepth 1 -exec stat -c \"%F|%s|%Y|%n|%N\" {} + 2>/dev/null || " +
+                "stat -c \"%F|%s|%Y|%n|%N\" $safePath/* 2>/dev/null || " +
+                "find $safePath -mindepth 1 -maxdepth 1 -exec stat -L -c \"%F|%s|%Y|%n\" {} + 2>/dev/null"
 
         val output = runCommand(command) ?: return emptyList()
 
@@ -510,18 +567,40 @@ object ShizukuManager {
                 try {
                     val parts = line.split("|")
                     if (parts.size >= 4) {
-                        val type = parts[0].trim()
+                        val type = parts[0].trim().lowercase()
                         val size = parts[1].trim().toLongOrNull() ?: 0L
                         val modTime = parts[2].trim().toLongOrNull()?.times(1000L) ?: 0L
                         val fullPath = parts[3].trim()
                         val name = fullPath.substringAfterLast("/")
                         if (name.isNotEmpty() && name != "." && name != "..") {
+                            val isSymlink = type.contains("symbolic") || type.contains("link")
+                            val rawTarget = if (isSymlink && parts.size >= 5) {
+                                parts[4].substringAfter("->", "").trim().trim('\'', '"')
+                            } else null
+                            val target = if (rawTarget.isNullOrEmpty()) null else rawTarget
+
+                            val isDir = if (isSymlink) {
+                                // Test if symlink target is a directory
+                                val testDirCmd = "[ -d " + escapeShellArg(fullPath) + " ]"
+                                executeCommand(testDirCmd)?.isSuccess == true
+                            } else {
+                                type.contains("directory")
+                            }
+
+                            val isBroken = if (isSymlink) {
+                                val testExistsCmd = "[ -e " + escapeShellArg(fullPath) + " ]"
+                                executeCommand(testExistsCmd)?.isSuccess != true
+                            } else false
+
                             ShizukuFileEntry(
                                 name = name,
                                 path = fullPath,
-                                isDirectory = type.contains("directory"),
+                                isDirectory = isDir,
                                 size = size,
-                                lastModified = modTime
+                                lastModified = modTime,
+                                isSymbolicLink = isSymlink,
+                                isSymbolicLinkBroken = isBroken,
+                                symbolicLinkTarget = target
                             )
                         } else null
                     } else null
@@ -537,5 +616,8 @@ data class ShizukuFileEntry(
     val path: String,
     val isDirectory: Boolean,
     val size: Long,
-    val lastModified: Long
+    val lastModified: Long,
+    val isSymbolicLink: Boolean = false,
+    val isSymbolicLinkBroken: Boolean = false,
+    val symbolicLinkTarget: String? = null
 )

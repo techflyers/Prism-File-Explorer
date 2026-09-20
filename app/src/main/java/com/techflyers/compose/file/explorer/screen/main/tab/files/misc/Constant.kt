@@ -5,6 +5,7 @@ object SortingMethod {
     const val SORT_BY_DATE = 2
     const val SORT_BY_SIZE = 3
     const val SORT_BY_TYPE = 4
+    const val SORT_BY_SHUFFLED = 5
 }
 
 object Language {

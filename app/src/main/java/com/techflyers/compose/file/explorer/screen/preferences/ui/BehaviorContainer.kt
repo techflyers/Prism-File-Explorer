@@ -56,6 +56,19 @@ fun BehaviorContainer() {
         )
 
         PreferenceItem(
+            label = stringResource(R.string.show_video_duration),
+            supportingText = stringResource(R.string.show_video_duration_desc),
+            icon = Icons.Rounded.VideoFile,
+            switchState = prefs.showVideoDuration,
+            onSwitchChange = { prefs.showVideoDuration = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
             label = stringResource(R.string.disable_pull_down_to_refresh),
             supportingText = emptyString,
             icon = Icons.Rounded.Refresh,

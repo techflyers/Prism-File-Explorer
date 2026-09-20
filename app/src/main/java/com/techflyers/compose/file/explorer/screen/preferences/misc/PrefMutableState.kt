@@ -8,6 +8,18 @@ import com.techflyers.compose.file.explorer.App
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
+interface ReloadablePref {
+    fun reload(preferences: Preferences)
+}
+
+val reloadablePrefs = java.util.Collections.synchronizedList(mutableListOf<ReloadablePref>())
+
+fun reloadAllPrefMutableStates(preferences: Preferences) {
+    synchronized(reloadablePrefs) {
+        reloadablePrefs.forEach { it.reload(preferences) }
+    }
+}
+
 inline fun <reified A> prefMutableState(
     keyName: String,
     defaultValue: A,
@@ -19,6 +31,13 @@ inline fun <reified A> prefMutableState(
             App.globalClass.prefDataStore.data.first()[key] ?: defaultValue
         }
     )
+
+    val reloadable = object : ReloadablePref {
+        override fun reload(preferences: Preferences) {
+            snapshotMutableState.value = preferences[key] ?: defaultValue
+        }
+    }
+    reloadablePrefs.add(reloadable)
 
     return object : MutableState<A> {
         override var value: A

@@ -23,6 +23,8 @@ import com.techflyers.compose.file.explorer.theme.FileExplorerTheme
 import java.io.File
 import kotlinx.coroutines.launch
 
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+
 class VideoPlayerActivity : ViewerActivity() {
     private var activeInstance: VideoPlayerInstance? = null
 
@@ -51,6 +53,18 @@ class VideoPlayerActivity : ViewerActivity() {
         uri: Uri,
         uid: String
     ): ViewerInstance {
+        val archiveSession = ArchiveMediaQueueManager.getOrCreateSession(intent)
+        if (archiveSession != null && archiveSession.items.isNotEmpty()) {
+            val playlist = archiveSession.items.map { Uri.fromFile(File(it.destinationPath)) }
+            val initialIndex = intent.getIntExtra(
+                ArchiveMediaQueueManager.EXTRA_ARCHIVE_INITIAL_INDEX,
+                0
+            ).coerceIn(0, playlist.lastIndex)
+            val initialUri = playlist.getOrElse(initialIndex) { uri }
+            ArchiveMediaQueueManager.prefetchWindow(archiveSession, initialIndex, windowSize = 2)
+            return VideoPlayerInstance(initialUri, uid, playlist, archiveSession).also { activeInstance = it }
+        }
+
         val filePath = resolveFilePath(uri)
         android.util.Log.d("VideoPlayerActivity", "onCreateNewInstance: uri=$uri, resolvedPath=$filePath")
         val initialUri = if (filePath != null) Uri.fromFile(File(filePath)) else uri

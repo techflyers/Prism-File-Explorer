@@ -23,6 +23,7 @@ import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.runBlocking
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
+import net.lingala.zip4j.progress.ProgressMonitor
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -38,6 +39,15 @@ class CopyTask(
     private val pendingFiles: ArrayList<TaskContentItem> = arrayListOf()
     private var canPerformAtomicFileMove = true
     private var skippedSourceDeletion = false
+    val customTargetNames: MutableMap<String, String> = mutableMapOf()
+
+    fun setCustomTargetName(sourceUniquePath: String, targetName: String) {
+        if (targetName.isNotBlank()) {
+            customTargetNames[sourceUniquePath] = targetName.trim()
+        } else {
+            customTargetNames.remove(sourceUniquePath)
+        }
+    }
 
     override val metadata = createTaskMetadata()
     override val progressMonitor = TaskProgressMonitor(
@@ -162,6 +172,9 @@ class CopyTask(
             sample is ShizukuFileHolder && destHolder is LocalFileHolder ->
                 copyShizukuToLocalFiles(sourcePath, destHolder)
 
+            sample is ShizukuFileHolder && destHolder is ZipFileHolder ->
+                copyShizukuFilesToZip(sourcePath, destHolder)
+
             sample is LocalFileHolder && destHolder is ShizukuFileHolder ->
                 copyLocalToShizukuFiles(sourcePath, destHolder)
 
@@ -216,6 +229,16 @@ class CopyTask(
 
     private fun finalizeTask() {
         if (progressMonitor.status == TaskStatus.RUNNING) {
+            (parameters?.destHolder as? ZipFileHolder)?.let { destZip ->
+                destZip.zipTree.invalidate()
+                destZip.zipTree.prepare()
+            }
+            if (deleteSourceFiles) {
+                (sourceFiles.firstOrNull() as? ZipFileHolder)?.let { srcZip ->
+                    srcZip.zipTree.invalidate()
+                    srcZip.zipTree.prepare()
+                }
+            }
             progressMonitor.apply {
                 status = TaskStatus.SUCCESS
                 progress = 1.0f
@@ -447,9 +470,15 @@ class CopyTask(
                 }
                 sample.zipTree.invalidate()
             } else {
-                ZipFile(sourceFile).use { zipFile ->
+                val pwd = sample.zipTree.password
+                val zipFile = if (pwd.isNullOrEmpty()) {
+                    ZipFile(sourceFile)
+                } else {
+                    ZipFile(sourceFile, pwd.toCharArray())
+                }
+                zipFile.use { zip ->
                     if (successfulPaths.isNotEmpty()) {
-                        zipFile.removeFiles(successfulPaths)
+                        zip.removeFiles(successfulPaths)
                     }
 
                     // Remove empty directories
@@ -457,10 +486,13 @@ class CopyTask(
                         val zipSrc = src as ZipFileHolder
                         val hasFiles = zipSrc.node.listFilesAndEmptyDirs().any { !it.isDirectory }
                         if (!hasFiles) {
-                            zipFile.removeFile(zipSrc.node.path)
+                            try {
+                                zip.removeFile(zipSrc.node.path)
+                            } catch (_: Exception) {}
                         }
                     }
                 }
+                sample.zipTree.invalidate()
             }
         } catch (e: Exception) {
             logger.logError(e)
@@ -711,8 +743,130 @@ class CopyTask(
             else globalClass.resources.getString(R.string.copying)
         }
 
-        try {
-            ZipFile(destinationHolder.zipTree.source.file).use { targetZipFile ->
+        val zipTree = destinationHolder.zipTree
+        val sourceFile = zipTree.source.file
+        val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
+                ArchiveManager.isNativeArchive(sourceFile.extension)
+
+        if (isNative) {
+            if (!ArchiveManager.isModifiableArchive(sourceFile.name)) {
+                markAsFailed(globalClass.getString(R.string.unsupported_source_type))
+                return
+            }
+
+            // ── Phase 1: resolve conflicts & build the items list (progress 0 → 50%) ──
+            val totalItems = pendingFiles.size.coerceAtLeast(1)
+            val actionLabel = if (deleteSourceFiles)
+                globalClass.resources.getString(R.string.moving)
+            else
+                globalClass.resources.getString(R.string.copying)
+
+            val itemsToAdd = mutableListOf<Pair<File, String>>()
+            pendingFiles.forEachIndexed { index, item ->
+                if (aborted) {
+                    progressMonitor.status = TaskStatus.PAUSED
+                    return
+                }
+
+                if (item.status isNot TaskContentStatus.PENDING
+                    && item.status isNot TaskContentStatus.REPLACE
+                    && item.status isNot TaskContentStatus.CONFLICT
+                ) {
+                    return@forEachIndexed
+                }
+
+                // Phase-1 progress: 0 → 50%
+                val phase1Progress = (index.toFloat() / totalItems * 0.5f).coerceIn(0f, 0.5f)
+                val pct1 = (phase1Progress * 100).toInt()
+                progressMonitor.apply {
+                    contentName = item.content.displayName
+                    remainingContent = totalItems - (index + 1)
+                    progress = phase1Progress
+                    processName = "$actionLabel ($pct1%)"
+                }
+
+                if (item.status == TaskContentStatus.CONFLICT && !handleConflict(item)) {
+                    return
+                }
+
+                val local = (item.content as? LocalFileHolder)?.file ?: return@forEachIndexed
+                val targetPath = createZipEntryPath(destinationHolder.node.path, item.relativePath).replace('\\', '/')
+
+                if (item.status == TaskContentStatus.PENDING) {
+                    val existingNode = destinationHolder.zipTree.findNodeByPath(targetPath)
+                    val conflictExists = existingNode != null && !existingNode.isDirectory
+                    if (conflictExists && !handleConflict(item)) return
+                }
+
+                if (item.status == TaskContentStatus.PENDING || item.status == TaskContentStatus.REPLACE) {
+                    itemsToAdd.add(Pair(local, targetPath))
+                }
+            }
+
+            // ── Phase 2: write items into archive one-by-one (progress 50 → 100%) ──
+            val archiveLabel = globalClass.resources.getString(R.string.adding_to_archive)
+            val totalToAdd = itemsToAdd.size.coerceAtLeast(1)
+            itemsToAdd.forEachIndexed { idx, (local, targetPath) ->
+                if (aborted) {
+                    progressMonitor.status = TaskStatus.PAUSED
+                    return
+                }
+
+                // Base progress for this file slot (each file owns an equal slice of 50→99%)
+                val sliceStart = 0.5f + idx.toFloat() / totalToAdd * 0.5f
+                val sliceEnd   = 0.5f + (idx + 1).toFloat() / totalToAdd * 0.5f
+
+                progressMonitor.apply {
+                    contentName = local.name
+                    remainingContent = totalToAdd - (idx + 1)
+                    progress = sliceStart
+                    processName = "$archiveLabel (${(sliceStart * 100).toInt()}%)"
+                }
+
+                val pendingItem = pendingFiles.firstOrNull { (it.content as? LocalFileHolder)?.file == local }
+                try {
+                    runBlocking {
+                        ArchiveManager.addOrUpdateMember(
+                            archivePath = zipTree.archivePathForNative,
+                            localFile = local,
+                            internalPath = targetPath,
+                            password = zipTree.password,
+                            isAborted = { aborted },
+                            onProgress = { filePct, fileName ->
+                                // filePct is 0..1 from 7za's own streaming output.
+                                // Map into this file's slice of the overall 50→100% window.
+                                val mapped = (sliceStart + filePct * (sliceEnd - sliceStart)).coerceIn(sliceStart, sliceEnd)
+                                progressMonitor.apply {
+                                    if (fileName.isNotEmpty()) contentName = fileName
+                                    progress = mapped
+                                    processName = "$archiveLabel (${(mapped * 100).toInt()}%)"
+                                }
+                            }
+                        )
+                    }
+                    pendingItem?.status = TaskContentStatus.SUCCESS
+                } catch (e: Exception) {
+                    logger.logError(e)
+                    pendingItem?.status = TaskContentStatus.FAILED
+                    throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+                }
+            }
+        } else {
+            // ── Zip4j path — use ProgressMonitor polling for byte-level realtime feedback ──
+            val pwd = zipTree.password
+            val zipFile = if (pwd.isNullOrEmpty()) {
+                ZipFile(sourceFile)
+            } else {
+                ZipFile(sourceFile, pwd.toCharArray())
+            }
+            // Enable async mode so Zip4j's ProgressMonitor is updated while we poll.
+            zipFile.isRunInThread = true
+            val zip4jMonitor = zipFile.progressMonitor
+
+            try {
+                val totalItems = pendingFiles.size.coerceAtLeast(1)
+                val archiveLabel = globalClass.resources.getString(R.string.adding_to_archive)
+
                 pendingFiles.forEachIndexed { index, item ->
                     if (aborted) {
                         progressMonitor.status = TaskStatus.PAUSED
@@ -733,23 +887,41 @@ class CopyTask(
                     }
 
                     val targetPath =
-                        createZipEntryPath(destinationHolder.node.path, item.relativePath)
+                        createZipEntryPath(destinationHolder.node.path, item.relativePath).replace('\\', '/')
 
                     if (item.status == TaskContentStatus.PENDING) {
-                        val existingHeader = targetZipFile.getFileHeader(targetPath)
+                        val existingHeader = zipFile.getFileHeader(targetPath)
                         val conflictExists = existingHeader != null && !existingHeader.isDirectory
                         if (conflictExists && !handleConflict(item)) {
                             return
                         }
                     }
 
+                    if (item.status == TaskContentStatus.REPLACE) {
+                        try {
+                            zipFile.removeFile(targetPath)
+                            // removeFile is sync even in runInThread mode
+                        } catch (e: Exception) {
+                            logger.logError(e)
+                        }
+                    }
+
                     when (item.status) {
                         TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
-                            item.status = if (addLocalFileToZip(
-                                    targetZipFile,
-                                    item,
-                                    targetPath,
-                                    item.status == TaskContentStatus.REPLACE
+                            // Slice of the overall progress this file occupies
+                            val sliceStart = index.toFloat() / totalItems
+                            val sliceEnd   = (index + 1).toFloat() / totalItems
+
+                            item.status = if (addLocalFileToZipAsync(
+                                    zipFile = zipFile,
+                                    zip4jMonitor = zip4jMonitor,
+                                    item = item,
+                                    targetPath = targetPath,
+                                    overwrite = item.status == TaskContentStatus.REPLACE,
+                                    archiveLabel = archiveLabel,
+                                    sliceStart = sliceStart,
+                                    sliceEnd = sliceEnd,
+                                    isAborted = { aborted }
                                 )
                             ) {
                                 TaskContentStatus.SUCCESS
@@ -758,14 +930,18 @@ class CopyTask(
                             }
                         }
 
-                        else -> { /* Already handled */
-                        }
+                        else -> { /* Already handled */ }
                     }
                 }
+            } catch (e: Exception) {
+                throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+            } finally {
+                zipFile.close()
             }
-        } catch (e: Exception) {
-            throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
         }
+
+        destinationHolder.zipTree.invalidate()
+        destinationHolder.zipTree.prepare()
     }
 
     private fun addLocalFileToZip(
@@ -778,19 +954,287 @@ class CopyTask(
             val sourceFile = (item.content as LocalFileHolder).file
             val params = ZipParameters().apply {
                 isOverrideExistingFilesInZip = overwrite
-                fileNameInZip = targetPath
             }
 
             if (sourceFile.isFile) {
+                params.fileNameInZip = targetPath
                 zipFile.addFile(sourceFile, params)
             } else {
-                zipFile.addFolder(sourceFile, params)
+                val dirPath = if (targetPath.endsWith("/")) targetPath else "$targetPath/"
+                params.fileNameInZip = dirPath
+                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
             }
             true
         } catch (e: Exception) {
             logger.logError(e)
             false
         }
+    }
+
+    /**
+     * Adds a local file or directory entry to a Zip4j [ZipFile] that is running in async
+     * (run-in-thread) mode, polling [zip4jMonitor] every 50 ms so that [progressMonitor] is
+     * updated with byte-granular progress in real time.
+     *
+     * @param sliceStart Overall progress fraction at which this file's write begins (0..1).
+     * @param sliceEnd   Overall progress fraction at which this file's write ends (0..1).
+     */
+    private fun addLocalFileToZipAsync(
+        zipFile: ZipFile,
+        zip4jMonitor: ProgressMonitor,
+        item: TaskContentItem,
+        targetPath: String,
+        overwrite: Boolean,
+        archiveLabel: String,
+        sliceStart: Float,
+        sliceEnd: Float,
+        isAborted: () -> Boolean
+    ): Boolean {
+        return try {
+            val sourceFile = (item.content as LocalFileHolder).file
+            val params = ZipParameters().apply {
+                isOverrideExistingFilesInZip = overwrite
+            }
+
+            if (sourceFile.isFile) {
+                params.fileNameInZip = targetPath
+                zipFile.addFile(sourceFile, params)  // launches async write
+            } else {
+                // Directories are tiny — add synchronously (Zip4j finishes instantly).
+                val dirPath = if (targetPath.endsWith("/")) targetPath else "$targetPath/"
+                params.fileNameInZip = dirPath
+                // Must run sync: runInThread doesn't help for addStream.
+                zipFile.isRunInThread = false
+                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                zipFile.isRunInThread = true
+                progressMonitor.apply {
+                    progress = sliceEnd
+                    processName = "$archiveLabel (${(sliceEnd * 100).toInt()}%)"
+                }
+                return true
+            }
+
+            // Poll Zip4j's ProgressMonitor until the async write finishes.
+            while (zip4jMonitor.state != ProgressMonitor.State.READY) {
+                if (isAborted()) {
+                    zip4jMonitor.isCancelAllTasks = true
+                    return false
+                }
+                // zip4jMonitor.percentDone is 0..100
+                val filePct = zip4jMonitor.percentDone / 100f
+                val mapped = (sliceStart + filePct * (sliceEnd - sliceStart)).coerceIn(sliceStart, sliceEnd)
+                progressMonitor.apply {
+                    contentName = sourceFile.name
+                    progress = mapped
+                    processName = "$archiveLabel (${(mapped * 100).toInt()}%)"
+                }
+                Thread.sleep(50)
+            }
+
+            if (zip4jMonitor.result == ProgressMonitor.Result.ERROR) {
+                throw Exception(zip4jMonitor.exception?.message ?: "Zip4j async write failed")
+            }
+
+            progressMonitor.apply {
+                progress = sliceEnd
+                processName = "$archiveLabel (${(sliceEnd * 100).toInt()}%)"
+            }
+            true
+        } catch (e: Exception) {
+            logger.logError(e)
+            false
+        }
+    }
+
+    private fun copyShizukuFilesToZip(sourcePath: String, destinationHolder: ZipFileHolder) {
+        progressMonitor.processName = globalClass.resources.getString(R.string.counting_files)
+        preparePendingFiles(sourcePath)
+
+        if (progressMonitor.status == TaskStatus.FAILED) return
+        prepareCopyProgress()
+
+        val zipTree = destinationHolder.zipTree
+        val sourceFile = zipTree.source.file
+        val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
+                ArchiveManager.isNativeArchive(sourceFile.extension)
+
+        if (isNative) {
+            if (!ArchiveManager.isModifiableArchive(sourceFile.name)) {
+                markAsFailed(globalClass.getString(R.string.unsupported_source_type))
+                return
+            }
+
+            val tempDir = File(globalClass.cleanOnExitDir.file, "shizuku-zip-${UUID.randomUUID()}").apply { mkdirs() }
+            try {
+                // ── Phase 1: copy Shizuku files to temp dir (progress 0 → 50%) ──
+                val totalItems = pendingFiles.size.coerceAtLeast(1)
+                val actionLabel = if (deleteSourceFiles)
+                    globalClass.resources.getString(R.string.moving)
+                else
+                    globalClass.resources.getString(R.string.copying)
+
+                val itemsToAdd = mutableListOf<Pair<File, String>>()
+                pendingFiles.forEachIndexed { index, item ->
+                    if (!prepareItem(index, item)) return
+                    val source = item.content as ShizukuFileHolder
+                    val targetPath = createZipEntryPath(destinationHolder.node.path, item.relativePath).replace('\\', '/')
+
+                    if (item.status == TaskContentStatus.PENDING) {
+                        val existingNode = destinationHolder.zipTree.findNodeByPath(targetPath)
+                        val conflictExists = existingNode != null && !existingNode.isDirectory
+                        if (conflictExists && !handleConflict(item)) return
+                    }
+
+                    if (item.status == TaskContentStatus.PENDING || item.status == TaskContentStatus.REPLACE) {
+                        // Phase-1 progress: 0 → 50%
+                        val phase1Progress = (index.toFloat() / totalItems * 0.5f).coerceIn(0f, 0.5f)
+                        val pct1 = (phase1Progress * 100).toInt()
+                        progressMonitor.apply {
+                            contentName = source.displayName
+                            remainingContent = totalItems - (index + 1)
+                            progress = phase1Progress
+                            processName = "$actionLabel ($pct1%)"
+                        }
+
+                        val localFile = File(tempDir, item.relativePath)
+                        try {
+                            if (source.isFolder) {
+                                localFile.mkdirs()
+                            } else {
+                                localFile.parentFile?.mkdirs()
+                                ShizukuManager.copyToLocal(source.uniquePath, localFile)
+                            }
+                            itemsToAdd.add(Pair(localFile, targetPath))
+                            // Status is set in phase 2 after archive write succeeds
+                        } catch (e: Exception) {
+                            logger.logError(e)
+                            item.status = TaskContentStatus.FAILED
+                        }
+                    }
+                }
+
+                // ── Phase 2: write items into archive one-by-one (progress 50 → 100%) ──
+                val archiveLabel = globalClass.resources.getString(R.string.adding_to_archive)
+                val totalToAdd = itemsToAdd.size.coerceAtLeast(1)
+                itemsToAdd.forEachIndexed { idx, (localFile, targetPath) ->
+                    if (aborted) {
+                        progressMonitor.status = TaskStatus.PAUSED
+                        return
+                    }
+
+                    // Each file owns an equal slice of the 50→100% window.
+                    val sliceStart = 0.5f + idx.toFloat() / totalToAdd * 0.5f
+                    val sliceEnd   = 0.5f + (idx + 1).toFloat() / totalToAdd * 0.5f
+
+                    progressMonitor.apply {
+                        contentName = localFile.name
+                        remainingContent = totalToAdd - (idx + 1)
+                        progress = sliceStart
+                        processName = "$archiveLabel (${(sliceStart * 100).toInt()}%)"
+                    }
+
+                    val pendingItem = pendingFiles.firstOrNull {
+                        (it.content as? ShizukuFileHolder)?.displayName == localFile.name
+                    }
+                    try {
+                        runBlocking {
+                            ArchiveManager.addOrUpdateMember(
+                                archivePath = zipTree.archivePathForNative,
+                                localFile = localFile,
+                                internalPath = targetPath,
+                                password = zipTree.password,
+                                isAborted = { aborted },
+                                onProgress = { filePct, fileName ->
+                                    // Map 7za's per-file 0..1 into this file's progress slice.
+                                    val mapped = (sliceStart + filePct * (sliceEnd - sliceStart)).coerceIn(sliceStart, sliceEnd)
+                                    progressMonitor.apply {
+                                        if (fileName.isNotEmpty()) contentName = fileName
+                                        progress = mapped
+                                        processName = "$archiveLabel (${(mapped * 100).toInt()}%)"
+                                    }
+                                }
+                            )
+                        }
+                        pendingItem?.status = TaskContentStatus.SUCCESS
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                        pendingItem?.status = TaskContentStatus.FAILED
+                        throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+                    }
+                }
+            } catch (e: Exception) {
+                throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+            } finally {
+                tempDir.deleteRecursively()
+            }
+        } else {
+            val pwd = zipTree.password
+            val zipFile = if (pwd.isNullOrEmpty()) {
+                ZipFile(sourceFile)
+            } else {
+                ZipFile(sourceFile, pwd.toCharArray())
+            }
+
+            try {
+                zipFile.use { targetZipFile ->
+                    pendingFiles.forEachIndexed { index, item ->
+                        if (!prepareItem(index, item)) return
+                        val source = item.content as ShizukuFileHolder
+                        val targetPath = createZipEntryPath(destinationHolder.node.path, item.relativePath).replace('\\', '/')
+
+                        if (item.status == TaskContentStatus.PENDING) {
+                            val existingHeader = targetZipFile.getFileHeader(targetPath)
+                            val conflictExists = existingHeader != null && !existingHeader.isDirectory
+                            if (conflictExists && !handleConflict(item)) return
+                        }
+
+                        if (item.status == TaskContentStatus.REPLACE) {
+                            try {
+                                targetZipFile.removeFile(targetPath)
+                            } catch (e: Exception) {
+                                logger.logError(e)
+                            }
+                        }
+
+                        when (item.status) {
+                            TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
+                                item.status = try {
+                                    val params = ZipParameters().apply {
+                                        isOverrideExistingFilesInZip = item.status == TaskContentStatus.REPLACE
+                                        fileNameInZip = if (source.isFolder) {
+                                            if (targetPath.endsWith("/")) targetPath else "$targetPath/"
+                                        } else {
+                                            targetPath
+                                        }
+                                    }
+                                    if (source.isFolder) {
+                                        targetZipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                                    } else {
+                                        val temp = File(globalClass.cleanOnExitDir.file, "shizuku-zip-${UUID.randomUUID()}")
+                                        try {
+                                            ShizukuManager.copyToLocal(source.uniquePath, temp)
+                                            targetZipFile.addFile(temp, params)
+                                        } finally {
+                                            temp.delete()
+                                        }
+                                    }
+                                    TaskContentStatus.SUCCESS
+                                } catch (e: Exception) {
+                                    logger.logError(e)
+                                    TaskContentStatus.FAILED
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
+            }
+        }
+
+        destinationHolder.zipTree.invalidate()
+        destinationHolder.zipTree.prepare()
     }
 
     private fun copyZipFilesToLocal(sourcePath: String, destinationHolder: LocalFileHolder) {
@@ -1080,6 +1524,8 @@ class CopyTask(
                     }
                 }
             }
+            destinationHolder.zipTree.invalidate()
+            destinationHolder.zipTree.prepare()
         } catch (e: Exception) {
             throw RuntimeException(globalClass.getString(R.string.failed_to_copy_zip_entries), e)
         }
@@ -1143,7 +1589,9 @@ class CopyTask(
     ): List<TaskContentItem> {
         val isFile = startFile.isFile()
         val startName = startFile.displayName
-        val renamedName = if (renameInSameFolder) getRenamedCopyName(startName, isFile) else startName
+        val customName = customTargetNames[startFile.uniquePath]
+        val effectiveName = customName ?: startName
+        val renamedName = if (renameInSameFolder && customName == null) getRenamedCopyName(effectiveName, isFile) else effectiveName
 
         if (isFile) {
             return listOf(
@@ -1166,11 +1614,19 @@ class CopyTask(
                     localItems.map { file ->
                         val relPath = file.toRelativeString(File(basePath))
                             .orIf(startName) { it.isEmpty() }
-                        val adjustedPath = if (renameInSameFolder) {
+                        val adjustedPath = if (renameInSameFolder && customName == null) {
                             if (relPath == startName) {
                                 renamedName
                             } else if (relPath.startsWith("$startName/")) {
                                 renamedName + relPath.substring(startName.length)
+                            } else {
+                                relPath
+                            }
+                        } else if (customName != null) {
+                            if (relPath == startName) {
+                                customName
+                            } else if (relPath.startsWith("$startName/")) {
+                                customName + relPath.substring(startName.length)
                             } else {
                                 relPath
                             }
@@ -1190,11 +1646,19 @@ class CopyTask(
                 startFile.node.listFilesAndEmptyDirs().map { node ->
                     val relPath = node.path.toRelativeString(basePath)
                         .orIf(startName) { it.isEmpty() }
-                    val adjustedPath = if (renameInSameFolder) {
+                    val adjustedPath = if (renameInSameFolder && customName == null) {
                         if (relPath == startName) {
                             renamedName
                         } else if (relPath.startsWith("$startName/")) {
                             renamedName + relPath.substring(startName.length)
+                        } else {
+                            relPath
+                        }
+                    } else if (customName != null) {
+                        if (relPath == startName) {
+                            customName
+                        } else if (relPath.startsWith("$startName/")) {
+                            customName + relPath.substring(startName.length)
                         } else {
                             relPath
                         }
@@ -1555,7 +2019,7 @@ class CopyTask(
                 pendingFiles.add(
                     TaskContentItem(
                         content = source,
-                        relativePath = source.displayName,
+                        relativePath = customTargetNames[source.uniquePath] ?: source.displayName,
                         status = TaskContentStatus.PENDING
                     )
                 )
@@ -1777,6 +2241,8 @@ class CopyTask(
                     }
                 }
             }
+            destinationHolder.zipTree.invalidate()
+            destinationHolder.zipTree.prepare()
         } catch (e: Exception) {
             throw RuntimeException(globalClass.getString(R.string.failed_to_copy_files_to_zip), e)
         }
