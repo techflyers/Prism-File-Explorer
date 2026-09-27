@@ -51,6 +51,14 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
 
     private var pdfViewRef: PdfView? = null
 
+    private val scrollHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val hideScrollbarRunnable = Runnable {
+        pdfViewRef?.let { pdfView ->
+            pdfView.fastScroller?.hide()
+            pdfView.postInvalidate()
+        }
+    }
+
     // ── PdfViewerFragment overrides ────────────────────────────────────────────
 
     override fun onPdfViewCreated(pdfView: PdfView) {
@@ -59,8 +67,9 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
         pdfViewRef = pdfView
         Log.d(TAG, "onPdfViewCreated start: pdfView initialized (time=$startTime)")
 
-        // Revert to manual scroller hide/show as requested by user
+        // Initially hide fast scroller until user scrolls
         pdfView.fastScroller?.hide()
+        pdfView.postInvalidate()
 
         var lastScrollTop = Float.MAX_VALUE
         var lastPage = -1
@@ -73,6 +82,11 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
                 visiblePages: android.util.SparseArray<android.graphics.RectF>,
                 zoom: Float
             ) {
+                // Ensure scrollbar is visible during scrolling and schedule auto-hide after scrolling stops
+                scrollHandler.removeCallbacks(hideScrollbarRunnable)
+                pdfView.fastScroller?.show { pdfView.postInvalidate() }
+                scrollHandler.postDelayed(hideScrollbarRunnable, 1500L)
+
                 if (visiblePages.size() > 0) {
                     val rectTop = visiblePages.valueAt(0)?.top ?: 0f
                     if (lastScrollTop != Float.MAX_VALUE) {
@@ -102,11 +116,12 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
             override fun onGestureStateChanged(state: Int) {
                 Log.d(TAG, "onGestureStateChanged: state=$state")
                 onGestureStateChanged?.invoke(state)
-                // Show scrollbar while interacting; hide when idle
-                if (state == PdfView.GESTURE_STATE_INTERACTING) {
-                    pdfView.fastScroller?.show { }
+                if (state == PdfView.GESTURE_STATE_INTERACTING || state == PdfView.GESTURE_STATE_SETTLING) {
+                    scrollHandler.removeCallbacks(hideScrollbarRunnable)
+                    pdfView.fastScroller?.show { pdfView.postInvalidate() }
                 } else if (state == PdfView.GESTURE_STATE_IDLE) {
-                    pdfView.fastScroller?.hide()
+                    scrollHandler.removeCallbacks(hideScrollbarRunnable)
+                    scrollHandler.postDelayed(hideScrollbarRunnable, 1200L)
                 }
             }
         })
@@ -133,6 +148,12 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
             gestureDetector.onTouchEvent(event)
             false // pass all touch events to child view for scrolling, zoom, text selection
         }
+    }
+
+    override fun onDestroyView() {
+        scrollHandler.removeCallbacks(hideScrollbarRunnable)
+        super.onDestroyView()
+        pdfViewRef = null
     }
 
     override fun onLoadDocumentSuccess(document: PdfDocument) {

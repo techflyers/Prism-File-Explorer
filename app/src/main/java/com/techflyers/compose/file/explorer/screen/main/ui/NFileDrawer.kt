@@ -189,11 +189,38 @@ fun NFileDrawerContent(
 
                 // Section 0b: Bookmarks
                 if (preferencesManager.showBookmarksInDrawer) {
+                    var showAddBookmarkDialog by remember { mutableStateOf(false) }
                     val bookmarks = preferencesManager.bookmarks
                     val bookmarksTitle = stringResource(R.string.bookmarks)
+
+                    if (showAddBookmarkDialog) {
+                        val currentTabPath = (manager.getActiveTab() as? FilesTab)?.activeFolder?.uniquePath ?: ""
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.AddCustomFolderDialog(
+                            show = showAddBookmarkDialog,
+                            initialPath = currentTabPath,
+                            onDismissRequest = { showAddBookmarkDialog = false },
+                            onConfirm = { path ->
+                                preferencesManager.bookmarks = preferencesManager.bookmarks + path
+                            }
+                        )
+                    }
+
                     CollapsibleDrawerSection(
                         sectionId = "bookmarks",
-                        title = "$bookmarksTitle (${bookmarks.size})"
+                        title = "$bookmarksTitle (${bookmarks.size})",
+                        action = {
+                            IconButton(
+                                onClick = { showAddBookmarkDialog = true },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = stringResource(R.string.add_to_bookmarks),
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     ) {
                         if (bookmarks.isEmpty()) {
                             Text(

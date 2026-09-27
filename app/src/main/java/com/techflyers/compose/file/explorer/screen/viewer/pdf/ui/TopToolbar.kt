@@ -39,12 +39,14 @@ fun TopToolbar(
     title: String,
     onBackClick: () -> Unit,
     onInfoClick: () -> Unit,
+    modifier: Modifier = Modifier,
     onSearchClick: (() -> Unit)? = null,
     onShareClick: (() -> Unit)? = null,
     onOpenWithClick: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = visible,
+        modifier = modifier,
         enter = slideInVertically(
             initialOffsetY = { -it },
             animationSpec = tween(500)

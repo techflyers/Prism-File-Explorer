@@ -44,8 +44,10 @@ commonsCompress = "1.26.2"
 jcifs-ng = "2.1.10"
 xz = "1.10"
 rtfparserkit = "1.16.0"
+workRuntimeKtx = "2.9.1"
 
 [libraries]
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 accompanist-systemuicontroller = { module = "com.google.accompanist:accompanist-systemuicontroller", version.ref = "accompanistSystemuicontroller" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }

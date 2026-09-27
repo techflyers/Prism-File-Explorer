@@ -194,6 +194,12 @@ class MainActivity : BaseActivity() {
                     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                     val drawerScope = rememberCoroutineScope()
 
+                    BackHandler(enabled = drawerState.isOpen) {
+                        drawerScope.launch {
+                            drawerState.close()
+                        }
+                    }
+
                     ModalNavigationDrawer(
                         drawerState = drawerState,
                         gesturesEnabled = drawerState.isOpen || !globalClass.preferencesManager.disableNavigationGestures,
@@ -645,10 +651,26 @@ class MainActivity : BaseActivity() {
             currentIntent.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY) -> {
                 val path = currentIntent.getStringExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)
                 if (!path.isNullOrEmpty()) {
-                    globalClass.mainActivityManager.jumpToFile(
-                        file = LocalFileHolder(File(path)),
-                        context = this
-                    )
+                    val file = File(path)
+                    val localHolder = LocalFileHolder(file)
+                    if (!localHolder.isFolder && localHolder.exists()) {
+                        val fileUri = localHolder.createUri()
+                        val dispatchIntent = Intent(this, com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActivity::class.java).apply {
+                            action = Intent.ACTION_VIEW
+                            setDataAndType(fileUri, localHolder.mimeType)
+                            putExtra("extra_file_path", localHolder.file.absolutePath)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        }
+                        startActivity(dispatchIntent)
+                        finish()
+                    } else {
+                        globalClass.mainActivityManager.jumpToFile(
+                            file = localHolder,
+                            context = this
+                        )
+                    }
                 }
                 intent = null
             }

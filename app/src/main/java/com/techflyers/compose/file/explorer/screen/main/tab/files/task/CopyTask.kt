@@ -114,6 +114,24 @@ class CopyTask(
 
     private fun createTaskMetadata(): TaskMetadata {
         val time = System.currentTimeMillis().toFormattedDate()
+        val maxPreview = 10
+        val previewItems = sourceFiles.take(maxPreview)
+        val remainingCount = sourceFiles.size - previewItems.size
+        val display = if (remainingCount > 0) {
+            "${previewItems.joinToString(", ") { it.displayName }} ... and $remainingCount more"
+        } else {
+            previewItems.joinToString(", ") { it.displayName }
+        }
+        val full = buildString {
+            previewItems.forEach { source ->
+                appendLine(source.displayName)
+            }
+            if (remainingCount > 0) {
+                appendLine("... and $remainingCount more files")
+            }
+            appendLine()
+            append(time)
+        }
         return TaskMetadata(
             id = id,
             creationTime = time,
@@ -121,14 +139,8 @@ class CopyTask(
                 if (deleteSourceFiles) R.string.move else R.string.copy
             ),
             subtitle = globalClass.resources.getString(R.string.task_subtitle, sourceFiles.size),
-            displayDetails = sourceFiles.joinToString(", ") { it.displayName },
-            fullDetails = buildString {
-                sourceFiles.forEach { source ->
-                    appendLine(source.displayName)
-                }
-                appendLine()
-                append(time)
-            },
+            displayDetails = display,
+            fullDetails = full,
             isCancellable = true,
             canMoveToBackground = true
         )

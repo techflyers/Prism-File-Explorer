@@ -3,6 +3,7 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 import android.os.Environment
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,13 +47,33 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.max
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BreadcrumbBar(tab: FilesTab) {
     val highlightedPathListItemColor = MaterialTheme.colorScheme.primary
 
     if (tab.showCategories) {
-        CategoriesRow(tab)
+        Column {
+            CategoriesRow(tab)
+            FormatRibbon(tab)
+        }
     } else if (tab.activeFolder !is VirtualFileHolder) {
         Row(
             Modifier.fillMaxWidth(),
@@ -107,10 +128,11 @@ fun BreadcrumbBar(tab: FilesTab) {
                         modifier = Modifier,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            modifier = Modifier.size(18.dp),
-                            imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = null
+                        BreadcrumbSeparator(
+                            index = index,
+                            currentItem = item,
+                            pathSegments = tab.currentPathSegments,
+                            tab = tab
                         )
                         Text(
                             modifier = Modifier
@@ -141,6 +163,106 @@ fun BreadcrumbBar(tab: FilesTab) {
                             color = if (isHighlighted) highlightedPathListItemColor else Color.Unspecified
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BreadcrumbSeparator(
+    index: Int,
+    currentItem: ContentHolder,
+    pathSegments: List<ContentHolder>,
+    tab: FilesTab
+) {
+    var showDropdown by remember { mutableStateOf(false) }
+    var subfolders by remember { mutableStateOf<List<ContentHolder>>(emptyList()) }
+    var isLoadingSubfolders by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable {
+                showDropdown = true
+                scope.launch {
+                    isLoadingSubfolders = true
+                    val list = withContext(Dispatchers.IO) {
+                        val parentFolder = if (index > 0) pathSegments[index - 1] else runBlocking { currentItem.getParent() }
+                        if (parentFolder is LocalFileHolder) {
+                            val files = parentFolder.file.listFiles() ?: emptyArray()
+                            files.filter { it.isDirectory && (globalClass.preferencesManager.showHiddenFiles || !it.name.startsWith(".")) }
+                                .sortedBy { it.name.lowercase() }
+                                .map { LocalFileHolder(it) }
+                        } else {
+                            runCatching { parentFolder?.listContent()?.filter { it.isFolder } }.getOrNull() ?: emptyList()
+                        }
+                    }
+                    subfolders = list
+                    isLoadingSubfolders = false
+                }
+            }
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            modifier = Modifier.size(16.dp),
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = stringResource(R.string.folders)
+        )
+
+        DropdownMenu(
+            expanded = showDropdown,
+            onDismissRequest = { showDropdown = false }
+        ) {
+            if (isLoadingSubfolders) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Space(8.dp)
+                            Text(stringResource(R.string.loading))
+                        }
+                    },
+                    onClick = {}
+                )
+            } else if (subfolders.isEmpty()) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = stringResource(R.string.no_subfolders_found),
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    },
+                    onClick = { showDropdown = false }
+                )
+            } else {
+                subfolders.forEach { folder ->
+                    val isCurrent = folder.uniquePath == currentItem.uniquePath
+                    DropdownMenuItem(
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Rounded.Folder,
+                                contentDescription = null,
+                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = folder.displayName,
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified
+                            )
+                        },
+                        onClick = {
+                            showDropdown = false
+                            tab.openFolder(folder, rememberSelectedFiles = true)
+                        }
+                    )
                 }
             }
         }

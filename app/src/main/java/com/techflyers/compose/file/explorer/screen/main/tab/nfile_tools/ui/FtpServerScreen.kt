@@ -19,6 +19,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.FtpForegroundService
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.FtpServer
 import com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab
@@ -35,6 +38,9 @@ fun FtpServerTabContentView(tab: FtpServerTab) {
     var isRunning by remember { mutableStateOf(FtpServer.isRunning()) }
 
     var showFolderPicker by remember { mutableStateOf(false) }
+    val storageRoots = remember(context) {
+        StorageProvider.getAvailableStorageRoots(context)
+    }
 
     Column(
         modifier = Modifier
@@ -123,6 +129,37 @@ fun FtpServerTabContentView(tab: FtpServerTab) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Quick Storage Selection Chips
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            storageRoots.forEach { (name, rootFile) ->
+                val isSelected = homePath == rootFile.absolutePath
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        if (!isRunning) {
+                            homePath = rootFile.absolutePath
+                        }
+                    },
+                    label = { Text(name, style = MaterialTheme.typography.labelMedium) },
+                    enabled = !isRunning,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (rootFile.absolutePath == "/") Icons.Rounded.Storage else Icons.Rounded.SdCard,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Directory Picker Box
         Row(
             modifier = Modifier
@@ -190,6 +227,7 @@ fun FtpServerTabContentView(tab: FtpServerTab) {
     // Directory selection dialog
     FileSelectionDialog(
         show = showFolderPicker,
+        initialDirectory = File(homePath),
         onDismissRequest = { showFolderPicker = false },
         onItemsSelected = { selected ->
             val first = selected.firstOrNull()

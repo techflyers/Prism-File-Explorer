@@ -33,16 +33,21 @@ import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Task
 import androidx.compose.material.icons.rounded.TaskAlt
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -102,8 +107,11 @@ fun TaskPanel(
         val failedTasks = remember { mutableStateListOf<Task>() }
         val pendingTasks = remember { mutableStateListOf<Task>() }
         val invalidTasks = remember { mutableStateListOf<Task>() }
+        val scheduledTasks = remember { mutableStateListOf<com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledFileTask>() }
 
         LaunchedEffect(Unit) {
+            scheduledTasks.clear()
+            scheduledTasks.addAll(com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledTaskStore.load())
             globalClass.taskManager.validateTasks()
 
             while (tab.dialogsState.value.showTasksPanel) {
@@ -139,27 +147,40 @@ fun TaskPanel(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.Center,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.TaskAlt,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Space(8.dp)
-                Text(
-                    text = stringResource(R.string.tasks),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.TaskAlt,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Space(8.dp)
+                    Text(
+                        text = stringResource(R.string.tasks),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                TextButton(
+                    onClick = {
+                        onDismissRequest()
+                        tab.showCreateTaskDialog = true
+                    }
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Space(4.dp)
+                    Text(stringResource(R.string.create_task))
+                }
             }
 
             AnimatedVisibility(
                 !runningTasks.isEmpty() || !pausedTasks.isEmpty() ||
-                        !failedTasks.isEmpty() || !pendingTasks.isEmpty() || !invalidTasks.isEmpty()
+                        !failedTasks.isEmpty() || !pendingTasks.isEmpty() || !invalidTasks.isEmpty() || !scheduledTasks.isEmpty()
             ) {
                 LazyColumn(
                     modifier = Modifier
@@ -272,7 +293,7 @@ fun TaskPanel(
                                     globalClass.taskManager.removeTask(task.id)
                                 },
                                 onClick = {
-                                    if (tab.activeFolder is VirtualFileHolder || tab !is FilesTab) {
+                                    if (tab.activeFolder is VirtualFileHolder) {
                                         globalClass.showMsg(globalClass.getString(R.string.can_not_run_tasks))
                                         return@SwipeableTaskItem
                                     }
@@ -317,12 +338,41 @@ fun TaskPanel(
                             )
                         }
                     }
+
+                    // Scheduled Tasks
+                    if (scheduledTasks.isNotEmpty()) {
+                        item {
+                            TaskCategoryHeader(
+                                title = stringResource(R.string.scheduled_tasks),
+                                count = scheduledTasks.size,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        items(scheduledTasks, key = { "scheduled-${it.id}" }) { task ->
+                            ScheduledTaskCard(
+                                task = task,
+                                onToggle = { enabled ->
+                                    com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledTaskStore.setEnabled(task.id, enabled)
+                                    val idx = scheduledTasks.indexOfFirst { it.id == task.id }
+                                    if (idx != -1) scheduledTasks[idx] = task.copy(enabled = enabled)
+                                },
+                                onRunNow = {
+                                    com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledTaskStore.runNow(task)
+                                },
+                                onDelete = {
+                                    com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledTaskStore.delete(task.id)
+                                    scheduledTasks.removeAll { it.id == task.id }
+                                }
+                            )
+                        }
+                        item { Space(8.dp) }
+                    }
                 }
             }
 
             AnimatedVisibility(
                 visible = runningTasks.isEmpty() && pausedTasks.isEmpty() &&
-                        failedTasks.isEmpty() && pendingTasks.isEmpty() && invalidTasks.isEmpty()
+                        failedTasks.isEmpty() && pendingTasks.isEmpty() && invalidTasks.isEmpty() && scheduledTasks.isEmpty()
             ) {
                 Column(
                     modifier = Modifier
@@ -689,6 +739,50 @@ private fun TaskItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         maxLines = 3
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduledTaskCard(
+    task: com.techflyers.compose.file.explorer.screen.main.tab.files.task.ScheduledFileTask,
+    onToggle: (Boolean) -> Unit,
+    onRunNow: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(task.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${if (task.move) "Move" else "Copy"} • ${task.regex}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = task.enabled, onCheckedChange = onToggle)
+            }
+            Space(4.dp)
+            Text(
+                "Src: ${task.sourcePath}\nDest: ${task.destPath}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Space(6.dp)
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onRunNow) {
+                    Text(stringResource(R.string.run_now))
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                 }
             }
         }

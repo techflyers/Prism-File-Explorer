@@ -21,6 +21,7 @@ import com.techflyers.compose.file.explorer.screen.viewer.audio.model.AudioMetad
 import com.techflyers.compose.file.explorer.screen.viewer.audio.model.AudioPlayerColorScheme
 import com.techflyers.compose.file.explorer.screen.viewer.audio.model.PlayerState
 import com.techflyers.compose.file.explorer.screen.viewer.audio.ui.extractColorsFromBitmap
+import com.techflyers.compose.file.explorer.screen.viewer.media.MediaNotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -64,6 +65,7 @@ class AudioPlayerInstance(
     private var exoPlayer: ExoPlayer? = null
     private var positionTrackingJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var mediaNotificationHelper: MediaNotificationHelper? = null
 
     @OptIn(UnstableApi::class)
     suspend fun initializePlayer(context: Context, uri: Uri) {
@@ -96,6 +98,7 @@ class AudioPlayerInstance(
                         _playerState.update {
                             it.copy(isPlaying = isPlaying)
                         }
+                        updateNotification()
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -126,6 +129,7 @@ class AudioPlayerInstance(
                                 duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                             )
                         }
+                        updateNotification()
                         CoroutineScope(Dispatchers.IO).launch {
                             extractMetadata(context, currentUri)
                         }
@@ -155,22 +159,33 @@ class AudioPlayerInstance(
                                 val colorScheme = extractColorsFromBitmap(bitmap, defaultColorScheme)
                                 _colorScheme.value = colorScheme
                             }
+                            updateNotification()
                         }
                     }
                 })
             }
         }
 
-        // Update track count
-        _playerState.update {
-            it.copy(
-                totalTracks = exoPlayer?.mediaItemCount ?: 1,
-                currentTrackIndex = exoPlayer?.currentMediaItemIndex ?: 0
-            )
-        }
+        mediaNotificationHelper = MediaNotificationHelper(
+            context = context,
+            sessionTag = "PrismAudio",
+            notificationId = 1001,
+            targetActivityClass = AudioPlayerActivity::class.java,
+            initialUri = uri,
+            instanceId = id,
+            onPlayPause = { playPause() },
+            onNext = { skipNext() },
+            onPrevious = { skipPrevious() },
+            onSeekTo = { pos -> seekTo(pos) },
+            onStop = {
+                exoPlayer?.stop()
+                _playerState.update { it.copy(isPlaying = false) }
+            }
+        )
 
         extractMetadata(context, uri)
         startPositionTracking()
+        updateNotification()
     }
 
     fun setDefaultColorScheme(colorScheme: AudioPlayerColorScheme) {
@@ -243,6 +258,9 @@ class AudioPlayerInstance(
                 _colorScheme.value = defaultColorScheme
             } finally {
                 runCatching { retriever.release() }
+                withContext(Dispatchers.Main) {
+                    updateNotification()
+                }
             }
         }
     }
@@ -434,9 +452,35 @@ class AudioPlayerInstance(
         _playerState.update { it.copy(sleepTimerRemainingMs = 0L) }
     }
 
+    private fun updateNotification() {
+        val player = exoPlayer ?: return
+        val meta = _metadata.value
+        val state = _playerState.value
+        val title = meta.title.ifEmpty {
+            val curUri = playlist.getOrNull(state.currentTrackIndex) ?: uri
+            curUri.lastPathSegment ?: "Audio Track"
+        }
+        val hasPrev = playlist.size > 1 && (state.currentTrackIndex > 0 || state.repeatMode != Player.REPEAT_MODE_OFF)
+        val hasNext = playlist.size > 1 && (state.currentTrackIndex < playlist.lastIndex || state.repeatMode != Player.REPEAT_MODE_OFF)
+
+        mediaNotificationHelper?.update(
+            title = title,
+            artist = meta.artist.ifEmpty { null },
+            album = meta.album.ifEmpty { null },
+            albumArt = meta.albumArt,
+            isPlaying = state.isPlaying,
+            hasPrevious = hasPrev,
+            hasNext = hasNext,
+            positionMs = player.currentPosition,
+            durationMs = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
+        )
+    }
+
     override fun onClose() {
         positionTrackingJob?.cancel()
         sleepTimerJob?.cancel()
+        mediaNotificationHelper?.release()
+        mediaNotificationHelper = null
         exoPlayer?.release()
         exoPlayer = null
     }

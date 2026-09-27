@@ -154,6 +154,36 @@ fun Dialogs(tab: FilesTab) {
         onDismissRequest = { tab.toggleShareFolderCompressDialog(false) }
     )
 
+    tab.pendingLockPath?.let { path ->
+        com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialog(
+            path = path,
+            mode = tab.pendingLockMode,
+            onUnlocked = {
+                val targetPath = tab.pendingLockPath
+                val mode = tab.pendingLockMode
+                tab.pendingLockPath = null
+                if (mode == com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.UNLOCK) {
+                    val target = tab.activeFolderContent.find { it.uniquePath == targetPath }
+                    if (target != null) {
+                        tab.openFolder(target, false)
+                    }
+                } else {
+                    tab.reloadFiles()
+                }
+            },
+            onDismiss = {
+                tab.pendingLockPath = null
+            }
+        )
+    }
+
+    com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.CreateScheduledTaskDialog(
+        show = tab.showCreateTaskDialog,
+        defaultSource = tab.activeFolder.uniquePath,
+        defaultDest = tab.activeFolder.uniquePath,
+        onDismiss = { tab.showCreateTaskDialog = false }
+    )
+
     TaskRunningDialog()
 
     TaskConflictDialog()

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -53,9 +54,15 @@ import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.text.font.FontStyle
+import com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTimestampJournal
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -80,6 +87,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -603,39 +611,120 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
+    val cols = maxOf(1, tab.viewConfig.columnCount)
+    // Take an immutable snapshot of the list ONCE so that all slices and the
+    // maxSiblingSize calculation operate on the same stable copy.  Using subList()
+    // on a live SnapshotStateList returns a structural view; if the IO thread
+    // clears/reloads the list while Compose iterates it, the iterator throws
+    // ConcurrentModificationException — the root cause of the repeated crashes.
+    val snapshot: List<ContentHolder> = tab.activeFolderContent.toList()
+    val totalItems = snapshot.size
+    val chunkSize = if (totalItems == 0) 1 else kotlin.math.ceil(totalItems.toDouble() / cols).toInt()
+    val columnSlices = (0 until cols).map { colIndex ->
+        val start = colIndex * chunkSize
+        val end = minOf(start + chunkSize, totalItems)
+        if (start < totalItems) snapshot.subList(start, end) else emptyList()
+    }
 
-    LazyVerticalGrid(
-        modifier = Modifier
-            .fillMaxSize()
-            .fastScrollbar(tab.activeListState),
-        state = tab.activeListState,
-        columns = GridCells.Fixed(tab.viewConfig.columnCount),
-    ) {
-        // `..` parent directory entry
-        if (parentFolder != null) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
+    // --- Folder size scanning for size-relative tint (optional, default Disabled) ---
+    val folderScanEnabled = globalClass.preferencesManager.folderScanForTint
+    // Keyed by uniquePath -> scanned recursive size. Populated lazily on IO as each
+    // folder's walk completes; writing into a SnapshotStateMap triggers recomposition.
+    val folderScanSizes = remember(snapshot) { mutableStateMapOf<String, Long>() }
+    if (folderScanEnabled) {
+        LaunchedEffect(snapshot) {
+            folderScanSizes.clear()
+            snapshot.forEach { item ->
+                if (item.isFolder) {
+                    launch(IO) {
+                        val scanned = when (item) {
+                            is LocalFileHolder -> {
+                                var total = 0L
+                                // Guard: walkTopDown throws AssertionError (not Exception) if the
+                                // root is not a real directory — common for root mount points like
+                                // /proc, /sys, or symlinks that report isFolder=true but aren't
+                                // actual directories on the filesystem.
+                                if (item.file.isDirectory) {
+                                    try {
+                                        item.file.walkTopDown().maxDepth(50).onFail { _, _ -> }.forEach { f ->
+                                            if (f.isFile) total += f.length()
+                                        }
+                                    } catch (_: Throwable) {} // AssertionError extends Error, not Exception
+                                }
+                                total
+                            }
+                            else -> {
+                                var total = 0L
+                                try {
+                                    suspend fun walk(holder: ContentHolder) {
+                                        holder.listContent().forEach { child ->
+                                            if (child.isFolder) walk(child) else total += child.size
+                                        }
+                                    }
+                                    walk(item)
+                                } catch (_: Throwable) {}
+                                total
+                            }
+                        }
+                        folderScanSizes[item.uniquePath] = scanned
+                    }
+                }
             }
         }
+    }
 
-        itemsIndexed(
-            tab.activeFolderContent,
-            key = { _, item -> item.uniquePath }
-        ) { index, item ->
-            val currentItemPath = item.uniquePath
-            val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
-            var isSelectedItem by remember(isAlreadySelected) { mutableStateOf(isAlreadySelected) }
-            ColumnFileItem(
-                item = item,
-                index = index,
-                tab = tab,
-                selectionHighlightColor = selectionHighlightColor,
-                highlightColor = highlightColor,
-                context = context,
-                viewConfigs = tab.viewConfig,
-                isSelectedItem = isSelectedItem,
-                onSelection = { isSelectedItem = it }
-            )
+    // Effective size for each item: scanned recursive size for folders (when enabled
+    // and already computed), otherwise the raw item.size (0 for folders, file length for files).
+    fun effectiveSizeOf(item: ContentHolder): Long =
+        if (folderScanEnabled && item.isFolder) folderScanSizes[item.uniquePath] ?: 0L
+        else item.size
+
+    val maxSiblingSize = snapshot.maxOfOrNull { effectiveSizeOf(it) }?.coerceAtLeast(1L) ?: 1L
+    val listStates = List(cols) { rememberLazyListState() }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (parentFolder != null) {
+            ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+        ) {
+            columnSlices.forEachIndexed { colIndex, slice ->
+                val listState = listStates[colIndex]
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .fastScrollbar(listState),
+                    state = listState
+                ) {
+                    itemsIndexed(
+                        slice,
+                        key = { _, item -> item.uniquePath }
+                    ) { sliceIndex, item ->
+                        val globalIndex = colIndex * chunkSize + sliceIndex
+                        val currentItemPath = item.uniquePath
+                        val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
+                        var isSelectedItem by remember(isAlreadySelected) { mutableStateOf(isAlreadySelected) }
+                        ColumnFileItem(
+                            item = item,
+                            index = globalIndex,
+                            tab = tab,
+                            selectionHighlightColor = selectionHighlightColor,
+                            highlightColor = highlightColor,
+                            context = context,
+                            viewConfigs = tab.viewConfig,
+                            isSelectedItem = isSelectedItem,
+                            effectiveSize = effectiveSizeOf(item),
+                            maxSiblingSize = maxSiblingSize,
+                            onSelection = { isSelectedItem = it }
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -654,6 +743,8 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
             .fillMaxSize()
             .fastScrollbar(tab.activeListState)
     ) {
+        val maxSiblingSize = tab.activeFolderContent.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+
         // `..` parent directory entry (spans full width)
         if (parentFolder != null) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -679,6 +770,7 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
                 context = context,
                 viewConfigs = tab.viewConfig,
                 isSelectedItem = isSelectedItem,
+                maxSiblingSize = maxSiblingSize,
                 onSelection = { isSelectedItem = it }
             )
         }
@@ -696,6 +788,8 @@ private fun ColumnFileItem(
     context: Context,
     viewConfigs: ViewConfigs,
     isSelectedItem: Boolean,
+    effectiveSize: Long = item.size,
+    maxSiblingSize: Long = 1L,
     onSelection: (Boolean) -> Unit
 ) {
     val currentItemPath = item.uniquePath
@@ -722,6 +816,7 @@ private fun ColumnFileItem(
         }
     } else null
 
+    val tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     Column(
         Modifier
             .fillMaxWidth()
@@ -734,6 +829,15 @@ private fun ColumnFileItem(
                     Color.Unspecified
                 }
             )
+            .drawBehind {
+                if (!isSelected && maxSiblingSize > 0L && effectiveSize > 0L) {
+                    val fraction = (effectiveSize.toFloat() / maxSiblingSize).coerceIn(0f, 1f)
+                    drawRect(
+                        color = tintColor,
+                        size = androidx.compose.ui.geometry.Size(size.width * fraction, size.height)
+                    )
+                }
+            }
             .combinedClickable(
                 onClick = {
                     if (tab.selectedFiles.isNotEmpty()) {
@@ -825,6 +929,7 @@ private fun GridFileItem(
     context: Context,
     viewConfigs: ViewConfigs,
     isSelectedItem: Boolean,
+    maxSiblingSize: Long = 1L,
     onSelection: (Boolean) -> Unit
 ) {
     fun toggleSelection() {
@@ -848,6 +953,7 @@ private fun GridFileItem(
         }
     } else null
 
+    val tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -879,6 +985,15 @@ private fun GridFileItem(
                     Color.Unspecified
                 }
             )
+            .drawBehind {
+                if (!isSelected && maxSiblingSize > 0L && item.size > 0L) {
+                    val fraction = (item.size.toFloat() / maxSiblingSize).coerceIn(0f, 1f)
+                    drawRect(
+                        color = tintColor,
+                        size = androidx.compose.ui.geometry.Size(size.width * fraction, size.height)
+                    )
+                }
+            }
     ) {
         Column(
             modifier = Modifier
@@ -1071,6 +1186,16 @@ private fun FileIcon(
                     tint = Color.Red,
                     contentDescription = null
                 )
+            } else if (FolderLockStore.hasLock(item.uniquePath)) {
+                Icon(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .align(if (sourceInfo != null) Alignment.TopEnd else Alignment.BottomEnd)
+                        .alpha(if (item.isHidden()) 0.4f else 1f),
+                    imageVector = Icons.Rounded.Lock,
+                    tint = MaterialTheme.colorScheme.primary,
+                    contentDescription = null
+                )
             }
         }
     }
@@ -1135,9 +1260,11 @@ private fun FileDetails(
             )
         }
         if (rightText.isNotEmpty()) {
+            val isItalic = DeleteTimestampJournal.shouldItalicize(item.uniquePath, item.lastModified)
             Text(
                 text = rightText,
                 fontSize = smallFontSize,
+                fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = textColor,

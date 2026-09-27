@@ -90,7 +90,11 @@ fun TabLayout(
     val draggedTabBackgroundColor = MaterialTheme.colorScheme.primary
     val draggedTabTextColor = MaterialTheme.colorScheme.surfaceContainerLowest
     val hideToolbar = globalClass.preferencesManager.hideToolbar
-    val tabShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    val tabShape = if (isAtBottom) {
+        RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+    } else {
+        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    }
 
     val mainActivityManager = globalClass.mainActivityManager
 
@@ -127,7 +131,7 @@ fun TabLayout(
             .fillMaxWidth()
             .height(if (hideToolbar) 50.dp else 42.dp)
             .background(color = MaterialTheme.colorScheme.surfaceContainer),
-        verticalAlignment = Alignment.Bottom
+        verticalAlignment = if (isAtBottom) Alignment.Top else Alignment.Bottom
     ) {
         if (!hideToolbar) {
             IconButton(
@@ -225,7 +229,10 @@ fun TabLayout(
                                     if (!globalClass.preferencesManager.disableNavigationGestures) {
                                         Modifier.detectVerticalSwipe(
                                             onSwipeDown = {
-                                                mainActivityManager.removeTabAt(index)
+                                                if (!isAtBottom) mainActivityManager.removeTabAt(index)
+                                            },
+                                            onSwipeUp = {
+                                                if (isAtBottom) mainActivityManager.removeTabAt(index)
                                             }
                                         )
                                     } else Modifier

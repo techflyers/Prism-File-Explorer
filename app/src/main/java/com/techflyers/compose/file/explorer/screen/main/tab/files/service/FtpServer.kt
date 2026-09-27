@@ -132,7 +132,11 @@ class FtpSession(
         if (!path.startsWith("/")) {
             path = if (currentDir == "/") "/$path" else "$currentDir/$path"
         }
-        val file = File(homeDir, path)
+        val file = if (homeDir == "/" || homeDir.isEmpty()) {
+            File(path)
+        } else {
+            File(homeDir, path.removePrefix("/"))
+        }
         return file.canonicalPath
     }
 

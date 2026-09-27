@@ -30,8 +30,24 @@ data class CalculationProgress(
     val isCalculating: Boolean = false,
     val current: Long = 0,
     val total: Long = 0,
-    val message: String = emptyString
-)
+    val message: String = emptyString,
+    val etaSeconds: Long = -1L,
+    val filesProcessed: Long = 0L,
+    val totalFiles: Long = 0L
+) {
+    val percentage: Int
+        get() = if (total > 0) ((current * 100) / total).toInt().coerceIn(0, 100) else 0
+
+    val formattedEta: String?
+        get() {
+            if (etaSeconds < 0) return null
+            return when {
+                etaSeconds < 60 -> "${etaSeconds}s"
+                etaSeconds < 3600 -> "${etaSeconds / 60}m ${etaSeconds % 60}s"
+                else -> "${etaSeconds / 3600}h ${(etaSeconds % 3600) / 60}m"
+            }
+        }
+}
 
 sealed interface PropertiesState {
     object Loading : PropertiesState
@@ -179,11 +195,12 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             val job = calculationScope.launch {
                 checksumProgressFlow.value = CalculationProgress(isCalculating = true)
                 try {
-                    val checksum = calculateMD5WithProgress(file) { bytesProcessed, totalBytes ->
+                    val checksum = calculateMD5WithProgress(file) { bytesProcessed, totalBytes, eta ->
                         checksumProgressFlow.value = CalculationProgress(
                             isCalculating = true,
                             current = bytesProcessed,
-                            total = totalBytes
+                            total = totalBytes,
+                            etaSeconds = eta
                         )
                     }
                     checksumFlow.value = checksum
@@ -198,11 +215,12 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             val sha256Job = calculationScope.launch {
                 sha256ProgressFlow.value = CalculationProgress(isCalculating = true)
                 try {
-                    val sha256 = calculateSha256(file) { bytesProcessed, totalBytes ->
+                    val sha256 = calculateSha256(file) { bytesProcessed, totalBytes, eta ->
                         sha256ProgressFlow.value = CalculationProgress(
                             isCalculating = true,
                             current = bytesProcessed,
-                            total = totalBytes
+                            total = totalBytes,
+                            etaSeconds = eta
                         )
                     }
                     sha256Flow.value = sha256
@@ -315,19 +333,29 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 return@launch
             }
             checksumProgressFlow.value =
-                CalculationProgress(isCalculating = true, total = localFiles.size.toLong())
+                CalculationProgress(isCalculating = true, total = localFiles.size.toLong(), totalFiles = localFiles.size.toLong())
             val checksumMap = mutableMapOf<String, MutableList<ContentHolder>>()
             var processed = 0L
+            val startTime = System.currentTimeMillis()
             try {
                 for (file in localFiles) {
                     if (!isActive) return@launch
                     processed++
+                    val now = System.currentTimeMillis()
+                    val elapsed = now - startTime
+                    val eta = if (elapsed > 500 && processed > 0) {
+                        val avgTime = elapsed / processed
+                        ((localFiles.size - processed) * avgTime) / 1000L
+                    } else -1L
                     checksumProgressFlow.value = CalculationProgress(
                         isCalculating = true,
                         current = processed,
-                        total = localFiles.size.toLong()
+                        total = localFiles.size.toLong(),
+                        filesProcessed = processed,
+                        totalFiles = localFiles.size.toLong(),
+                        etaSeconds = eta
                     )
-                    val md5 = calculateMD5WithProgress(file) { _, _ -> }
+                    val md5 = calculateMD5WithProgress(file) { _, _, _ -> }
                     if (md5.isNotBlank() && md5 != globalClass.getString(R.string.error_calculating)) {
                         checksumMap.getOrPut(md5) { mutableListOf() }.add(file)
                     }
@@ -335,11 +363,19 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 }
                 val duplicates = checksumMap.filter { it.value.size > 1 }.map { it.key to it.value.toList() }
                 duplicateGroupsFlow.value = duplicates
+                val hashedCount = checksumMap.values.sumOf { it.size }
                 if (duplicates.isEmpty()) {
-                    checksumStatusFlow.value = globalClass.getString(R.string.all_files_distinct)
+                    if (hashedCount == 0 && localFiles.isNotEmpty()) {
+                        // All files failed to hash (e.g. permission denied)
+                        checksumStatusFlow.value = globalClass.getString(R.string.error_calculating)
+                    } else {
+                        checksumStatusFlow.value = globalClass.getString(R.string.all_files_distinct)
+                    }
                 } else {
                     checksumStatusFlow.value = globalClass.getString(R.string.duplicates_found, duplicates.size)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (_: Exception) {
                 checksumStatusFlow.value = globalClass.getString(R.string.error_calculating)
             } finally {
@@ -457,7 +493,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
 
     private suspend fun calculateSha256(
         file: LocalFileHolder,
-        onProgress: (Long, Long) -> Unit
+        onProgress: (Long, Long, Long) -> Unit
     ): String {
         if (file.isFolder) return emptyString
 
@@ -465,19 +501,31 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             val md = MessageDigest.getInstance("SHA-256")
             val fileSize = file.size
             var bytesProcessed = 0L
+            val startTime = System.currentTimeMillis()
+            var lastUpdateTime = startTime
 
             try {
                 FileInputStream(file.file).use { fis ->
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(64 * 1024)
                     var read: Int
                     while (fis.read(buffer).also { read = it } isNot -1) {
                         if (!currentCoroutineContext().isActive) break
                         md.update(buffer, 0, read)
                         bytesProcessed += read
-                        onProgress(bytesProcessed, fileSize)
 
-                        if (bytesProcessed % (64 * 1024) == 0L) {
-                            yield() // Yield every 64KB
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateTime >= 150L || bytesProcessed == fileSize) {
+                            val elapsed = now - startTime
+                            val eta = if (elapsed > 300 && bytesProcessed > 0) {
+                                val rate = (bytesProcessed * 1000L) / elapsed
+                                if (rate > 0) (fileSize - bytesProcessed).coerceAtLeast(0L) / rate else -1L
+                            } else -1L
+                            onProgress(bytesProcessed, fileSize, eta)
+                            lastUpdateTime = now
+                        }
+
+                        if (bytesProcessed % (256 * 1024) == 0L) {
+                            yield()
                         }
                     }
                 }
@@ -485,6 +533,8 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 val digest = md.digest()
                 val bigInt = BigInteger(1, digest)
                 bigInt.toString(16).padStart(64, '0')
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (_: Exception) {
                 globalClass.getString(R.string.error_calculating)
             }
@@ -493,7 +543,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
 
     private suspend fun calculateMD5WithProgress(
         file: LocalFileHolder,
-        onProgress: (Long, Long) -> Unit
+        onProgress: (Long, Long, Long) -> Unit
     ): String {
         if (file.isFolder) return emptyString
 
@@ -501,19 +551,31 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             val md = MessageDigest.getInstance("MD5")
             val fileSize = file.size
             var bytesProcessed = 0L
+            val startTime = System.currentTimeMillis()
+            var lastUpdateTime = startTime
 
             try {
                 FileInputStream(file.file).use { fis ->
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(64 * 1024)
                     var read: Int
                     while (fis.read(buffer).also { read = it } isNot -1) {
                         if (!currentCoroutineContext().isActive) break
                         md.update(buffer, 0, read)
                         bytesProcessed += read
-                        onProgress(bytesProcessed, fileSize)
 
-                        if (bytesProcessed % (64 * 1024) == 0L) {
-                            yield() // Yield every 64KB
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateTime >= 150L || bytesProcessed == fileSize) {
+                            val elapsed = now - startTime
+                            val eta = if (elapsed > 300 && bytesProcessed > 0) {
+                                val rate = (bytesProcessed * 1000L) / elapsed
+                                if (rate > 0) (fileSize - bytesProcessed).coerceAtLeast(0L) / rate else -1L
+                            } else -1L
+                            onProgress(bytesProcessed, fileSize, eta)
+                            lastUpdateTime = now
+                        }
+
+                        if (bytesProcessed % (256 * 1024) == 0L) {
+                            yield()
                         }
                     }
                 }
@@ -521,6 +583,8 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 val digest = md.digest()
                 val bigInt = BigInteger(1, digest)
                 bigInt.toString(16).padStart(32, '0')
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (_: Exception) {
                 globalClass.getString(R.string.error_calculating)
             }

@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Sort
@@ -195,6 +197,23 @@ fun Toolbar(
                     )
                 } else {
                     Icon(imageVector = Icons.Rounded.Menu, contentDescription = null)
+                }
+            }
+        }
+
+        if (isFilesTab) {
+            val filesTab = activeTab as FilesTab
+            if (filesTab.canGoForward()) {
+                TooltipIconButton(
+                    tooltip = stringResource(R.string.forward),
+                    onClick = { filesTab.goForward() },
+                    modifier = buttonModifier
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                        contentDescription = stringResource(R.string.forward),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -565,6 +584,23 @@ fun MoreOptionsButton(modifier: Modifier = Modifier) {
             }
 
             if (activeTab is FilesTab) {
+                if (activeTab.canGoForward()) {
+                    DropdownMenuItem(
+                        text = { Text(text = stringResource(R.string.forward)) },
+                        onClick = {
+                            activeTab.goForward()
+                            showOptionsMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                }
+
                 val isRecycleBin = activeTab.activeFolder is LocalFileHolder &&
                         ((activeTab.activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                                 activeTab.activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
@@ -1056,7 +1092,12 @@ fun InlineToolbarBreadcrumb(
     val highlightedColor = MaterialTheme.colorScheme.primary
 
     if (tab.showCategories || tab.activeFolder is VirtualFileHolder) {
-        // No breadcrumb for categories/virtual folders
+        Column(modifier = modifier) {
+            if (tab.showCategories) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.ui.CategoriesRow(tab)
+            }
+            com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FormatRibbon(tab, compact = true)
+        }
         return
     }
 

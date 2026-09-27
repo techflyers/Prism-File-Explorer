@@ -48,6 +48,16 @@
     <string name="dismiss">Descartar</string>
     <string name="delete_confirmation">Confirmación de Eliminación</string>
     <string name="move_to_recycle_bin">Mover a la Papelera</string>
+    <string name="auto_empty_recycle_bin">Vaciar papelera automáticamente</string>
+    <string name="auto_empty_recycle_bin_enabled_desc">Eliminar automáticamente archivos de más de %d días</string>
+    <string name="auto_empty_recycle_bin_disabled_desc">Conservar los archivos eliminados hasta vaciar manualmente</string>
+    <string name="recycle_bin_retention">Período de retención de papelera</string>
+    <string name="recycle_bin_retention_desc">Los archivos con más antigüedad que este período se eliminarán permanentemente</string>
+    <string name="recycle_bin_retention_days_format">%d días</string>
+    <string name="empty_recycle_bin">Vaciar papelera</string>
+    <string name="empty_recycle_bin_warning">¿Eliminar permanentemente todos los archivos de la papelera? Esta acción no se puede deshacer.</string>
+    <string name="recycle_bin_empty">La papelera está vacía</string>
+    <string name="recycle_bin_already_empty">La papelera ya está vacía</string>
     <string name="create_archive">Crear archivo</string>
     <string name="cancel">Cancelar</string>
     <string name="added_to_bookmarks">Agregado a marcadores</string>
@@ -456,4 +466,10 @@
     <string name="folders">Carpetas</string>
     <string name="apk">APK</string>
     <string name="no_results_found">No se encontraron resultados</string>
+
+    <!-- Checksum Progress & Media Playback -->
+    <string name="eta_format">Tiempo restante: %s</string>
+    <string name="files_progress_format">%1$d / %2$d archivos</string>
+    <string name="media_playback">Reproducción de medios</string>
+    <string name="video_playback">Reproducción de video</string>
 </resources>

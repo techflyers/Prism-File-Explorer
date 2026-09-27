@@ -19,6 +19,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Merge
 import androidx.compose.material.icons.rounded.OpenInNewOff
 import androidx.compose.material.icons.rounded.PushPin
@@ -403,6 +404,20 @@ fun FileOptionsMenuDialog(
                         }
                         context.startActivity(intent)
                         tab.unselectAllFiles()
+                    }
+
+                    val isLocked = com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.hasLock(targetContentHolder.uniquePath)
+                    FileOption(
+                        Icons.Rounded.Lock,
+                        stringResource(if (isLocked) R.string.remove_folder_lock else R.string.lock_folder)
+                    ) {
+                        onDismissRequest()
+                        tab.pendingLockPath = targetContentHolder.uniquePath
+                        tab.pendingLockMode = if (isLocked) {
+                            com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.REMOVE
+                        } else {
+                            com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.CREATE
+                        }
                     }
                 }
             }

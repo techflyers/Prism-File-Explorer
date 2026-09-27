@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,12 +50,14 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -228,6 +232,7 @@ private fun SingleFileContent(
     var showSetOwnerDialog by remember { mutableStateOf(false) }
     var showSetGroupDialog by remember { mutableStateOf(false) }
     var showSetSeLinuxDialog by remember { mutableStateOf(false) }
+    var showExtendedMetadata by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Basic properties
@@ -329,6 +334,24 @@ private fun SingleFileContent(
                 progressFlow = details.sha256Progress
             )
         }
+
+        if (details.fileHolder != null && details.fileHolder.isFile()) {
+            OutlinedButton(
+                onClick = { showExtendedMetadata = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(18.dp))
+                Space(8.dp)
+                Text(stringResource(R.string.extended_metadata))
+            }
+        }
+    }
+
+    if (showExtendedMetadata && details.fileHolder != null) {
+        ExtendedMetadataSheet(
+            holder = details.fileHolder,
+            onDismiss = { showExtendedMetadata = false }
+        )
     }
 
     if (showSetModeDialog && details.fileHolder != null) {
@@ -723,7 +746,7 @@ fun AsyncPropertyRow(
     val progress by progressFlow.collectAsState()
 
     if (value.isNotBlank()) {
-        Column {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -754,6 +777,74 @@ fun AsyncPropertyRow(
                             color = if (progress.isCalculating)
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+            if (progress.isCalculating) {
+                Spacer(modifier = Modifier.height(6.dp))
+                if (progress.total > 0L) {
+                    LinearProgressIndicator(
+                        progress = {
+                            val total = progress.total
+                            if (total > 0L) {
+                                val frac = progress.current.toFloat() / total.toFloat()
+                                if (frac.isNaN() || frac.isInfinite()) 0f else frac.coerceIn(0f, 1f)
+                            } else 0f
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 32.dp)
+                            .height(4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 32.dp)
+                            .height(4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 32.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val context = LocalContext.current
+                    val progressText = if (progress.totalFiles > 0) {
+                        val baseText = try {
+                            context.getString(R.string.files_progress_format, progress.filesProcessed, progress.totalFiles)
+                        } catch (_: Exception) {
+                            "${progress.filesProcessed} / ${progress.totalFiles} files"
+                        }
+                        baseText + if (progress.percentage > 0) " (${progress.percentage}%)" else ""
+                    } else if (progress.total > 0) {
+                        "${progress.percentage}%"
+                    } else ""
+                    if (progressText.isNotBlank()) {
+                        Text(
+                            text = progressText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    progress.formattedEta?.let { eta ->
+                        val etaText = try {
+                            context.getString(R.string.eta_format, eta)
+                        } catch (_: Exception) {
+                            "ETA: $eta"
+                        }
+                        Text(
+                            text = etaText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }

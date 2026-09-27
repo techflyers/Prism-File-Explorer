@@ -412,13 +412,59 @@ class SearchManager {
                         matchType = SearchResult.MatchType.FILENAME
                     )
                 )
+            } else if (item is LocalFileHolder && (item.isApk() || item.isApkBundle())) {
+                val apkInfo = item.getApkPackageInfo()
+                if (apkInfo != null && (matchesQuery(apkInfo.first, searchPattern) || matchesQuery(apkInfo.second, searchPattern))) {
+                    addSearchResult(
+                        SearchResult(
+                            file = item,
+                            matchType = SearchResult.MatchType.FILENAME,
+                            matchedLine = "${apkInfo.first} (${apkInfo.second})"
+                        )
+                    )
+                }
             }
         }
 
         // Search in file content
-        if (searchOptions.searchInFileContent && searchQuery.isNotEmpty() && item.isFile() && isEditableFile(item)) {
-            searchInFileContent(item, searchPattern)
+        if (searchOptions.searchInFileContent && searchQuery.isNotEmpty() && item.isFile()) {
+            if (isEditableFile(item)) {
+                searchInFileContent(item, searchPattern)
+            } else if (item is LocalFileHolder && item.extension.lowercase() in FileMimeType.documentFileType) {
+                searchInDocumentContent(item, searchPattern)
+            }
         }
+    }
+
+    private suspend fun searchInDocumentContent(
+        file: LocalFileHolder,
+        searchPattern: Pattern?
+    ) {
+        if (!isSearching || !file.isValid() || file.size > searchOptions.maxFileSize) return
+
+        try {
+            val text = withContext(Dispatchers.IO) {
+                DocumentTextExtractor.extract(file.file)
+            }
+            if (text.isNotBlank() && isSearching) {
+                var lineNumber = 0
+                for (line in text.lineSequence()) {
+                    lineNumber++
+                    if (matchesQuery(line, searchPattern)) {
+                        addSearchResult(
+                            SearchResult(
+                                file = file,
+                                matchType = SearchResult.MatchType.CONTENT,
+                                lineNumber = lineNumber,
+                                matchedLine = line.trim().take(100)
+                            )
+                        )
+                        return
+                    }
+                    if (lineNumber % 500 == 0) yield()
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     private suspend fun searchInFileContent(

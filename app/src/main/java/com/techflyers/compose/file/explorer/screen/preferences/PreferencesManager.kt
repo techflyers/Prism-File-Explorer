@@ -21,6 +21,8 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.RecentOpe
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewType
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.getDefaultHomeLayout
 import com.techflyers.compose.file.explorer.screen.preferences.constant.FileItemSize
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
@@ -195,6 +197,12 @@ class PreferencesManager {
 
     var showSourceBadges by prefMutableState(
         keyName = "showSourceBadges",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var folderScanForTint by prefMutableState(
+        keyName = "folderScanForTint",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -387,6 +395,19 @@ class PreferencesManager {
         defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
+
+    var autoEmptyRecycleBin by prefMutableState(
+        keyName = "autoEmptyRecycleBin",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var recycleBinRetentionDays by prefMutableState(
+        keyName = "recycleBinRetentionDays",
+        defaultValue = 30,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
 
     var defaultOpeningMethods by prefMutableState(
         keyName = "defaultOpeningMethods",
@@ -634,8 +655,22 @@ class PreferencesManager {
         return runBlocking {
             fromJson(
                 globalClass.prefDataStore.data.first()[stringPreferencesKey("viewConfigPrefs_${content.uniquePath}")]
-            ) ?: getDefaultViewConfigPrefs()
+            ) ?: categoryGalleryDefault(content) ?: getDefaultViewConfigPrefs()
         }
+    }
+
+    private fun categoryGalleryDefault(content: ContentHolder): ViewConfigs? {
+        val type = (content as? VirtualFileHolder)?.type ?: return null
+        if (type == VirtualFileHolder.IMAGE || type == VirtualFileHolder.VIDEO ||
+            type == VirtualFileHolder.APK || type == VirtualFileHolder.DOCUMENT
+        ) {
+            return getDefaultViewConfigPrefs().copy(
+                viewType = ViewType.GRID,
+                galleryMode = true,
+                columnCount = maxOf(getDefaultViewConfigPrefs().columnCount, 3)
+            )
+        }
+        return null
     }
 
     fun setViewConfigPrefsFor(content: ContentHolder, prefs: ViewConfigs) {

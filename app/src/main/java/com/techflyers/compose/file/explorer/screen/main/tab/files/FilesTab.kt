@@ -27,6 +27,7 @@ import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.orIf
 import com.techflyers.compose.file.explorer.common.removeIf
 import com.techflyers.compose.file.explorer.screen.main.MainActivity
+import com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActivity
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
@@ -94,6 +95,10 @@ class FilesTab(
     var showCategories by mutableStateOf(false)
     var categories = mutableStateListOf<FileListCategory>()
     var selectedCategory by mutableStateOf<FileListCategory?>(null)
+    var selectedFormats by mutableStateOf<Set<String>>(emptySet())
+    var pendingLockPath by mutableStateOf<String?>(null)
+    var pendingLockMode by mutableStateOf(com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.UNLOCK)
+    var showCreateTaskDialog by mutableStateOf(false)
 
     // Holds the file that has been long-clicked
     var targetFile: ContentHolder? = null
@@ -219,22 +224,87 @@ class FilesTab(
         else -> globalClass.getString(R.string.files_tab_title)
     }
 
-    override fun onBackPressed(): Boolean {
+    val historyBackStack = mutableStateListOf<ContentHolder>()
+    val historyForwardStack = mutableStateListOf<ContentHolder>()
+    private var isNavigatingHistory = false
+
+    fun canGoBack(): Boolean = historyBackStack.isNotEmpty() || (handleBackGesture && (activeFolder as? LocalFileHolder)?.file?.parentFile != null)
+
+    fun canGoForward(): Boolean = historyForwardStack.isNotEmpty()
+
+    fun goBack(): Boolean {
         if (unselectAnySelectedFiles()) {
+            return true
+        }
+        if (historyBackStack.isNotEmpty()) {
+            val target = historyBackStack.removeAt(historyBackStack.lastIndex)
+            val current = activeFolder
+            historyForwardStack.add(current)
+            if (historyForwardStack.size > 50) {
+                historyForwardStack.removeAt(0)
+            }
+            scope.launch {
+                isNavigatingHistory = true
+                try {
+                    highlightedFiles.apply {
+                        clear()
+                        add(current.uniquePath)
+                    }
+                    openFolderImpl(target, rememberSelectedFiles = false)
+                } finally {
+                    isNavigatingHistory = false
+                }
+            }
             return true
         } else if (handleBackGesture) {
             scope.launch {
-                highlightedFiles.apply {
-                    clear()
-                    add(activeFolder.uniquePath)
+                val parent = activeFolder.getParent()
+                if (parent != null) {
+                    val current = activeFolder
+                    historyForwardStack.add(current)
+                    if (historyForwardStack.size > 50) {
+                        historyForwardStack.removeAt(0)
+                    }
+                    highlightedFiles.apply {
+                        clear()
+                        add(current.uniquePath)
+                    }
+                    isNavigatingHistory = true
+                    try {
+                        openFolderImpl(parent)
+                    } finally {
+                        isNavigatingHistory = false
+                    }
                 }
-                openFolderImpl(activeFolder.getParent()!!)
             }
+            return (activeFolder as? LocalFileHolder)?.file?.parentFile != null
+        }
+        return false
+    }
 
+    fun goForward(): Boolean {
+        if (historyForwardStack.isNotEmpty()) {
+            val target = historyForwardStack.removeAt(historyForwardStack.lastIndex)
+            val current = activeFolder
+            historyBackStack.add(current)
+            if (historyBackStack.size > 50) {
+                historyBackStack.removeAt(0)
+            }
+            scope.launch {
+                isNavigatingHistory = true
+                try {
+                    openFolderImpl(target, rememberSelectedFiles = false)
+                } finally {
+                    isNavigatingHistory = false
+                }
+            }
             return true
         }
-
         return false
+    }
+
+    override fun onBackPressed(): Boolean {
+        return goBack()
     }
 
     /**
@@ -294,9 +364,28 @@ class FilesTab(
         // Prevent opening invalid files
         if (!item.isValid()) return
 
+        if (item is LocalFileHolder && com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.isLocked(item.uniquePath)) {
+            pendingLockPath = item.uniquePath
+            pendingLockMode = com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.UNLOCK
+            return
+        }
+
         // For virtual folders, update the category
         if (item is VirtualFileHolder) {
             item.selectedCategory = selectedCategory
+        }
+
+        if (item != activeFolder) {
+            selectedFormats = emptySet()
+        }
+
+        val previousFolder = activeFolder
+        if (!isNavigatingHistory && item.uniquePath != previousFolder.uniquePath) {
+            historyBackStack.add(previousFolder)
+            if (historyBackStack.size > 50) {
+                historyBackStack.removeAt(0)
+            }
+            historyForwardStack.clear()
         }
 
         // Switch to the new folder
@@ -867,15 +956,27 @@ class FilesTab(
 
     fun addToHomeScreen(context: Context, file: LocalFileHolder) {
         val shortcutManager = context.getSystemService(ShortcutManager::class.java)
+        val targetIntent = if (file.isFolder) {
+            Intent(context, MainActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                putExtra("filePath", file.uniquePath)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        } else {
+            val fileUri = file.createUri()
+            Intent(context, OpenWithDispatchActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                setDataAndType(fileUri, file.mimeType)
+                putExtra("extra_file_path", file.file.absolutePath)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            }
+        }
         val pinShortcutInfo = ShortcutInfo
             .Builder(context, file.uniquePath)
-            .setIntent(
-                Intent(context, MainActivity::class.java).apply {
-                    action = Intent.ACTION_VIEW
-                    putExtra("filePath", file.uniquePath)
-                    flags = Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT
-                }
-            )
+            .setIntent(targetIntent)
             .setIcon(
                 android.graphics.drawable.Icon.createWithResource(
                     context,

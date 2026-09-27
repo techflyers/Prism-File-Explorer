@@ -77,20 +77,22 @@ fun DeleteConfirmationDialog(
                                 globalClass.recycleBinDir.createSubFolder(
                                     timestamp
                                 ) { newDir ->
-                                    if (newDir != null) {
-                                        // Save metadata.json with original paths for restore
-                                        saveRecycleBinMetadata(newDir, filesToProcess)
-                                        // Unselect after snapshotting
-                                        tab.unselectAllFiles()
-                                        globalClass.taskManager.addTaskAndRun(
-                                            CopyTask(filesToProcess, true),
-                                            CopyTaskParameters(
-                                                newDir
+                                    tab.scope.launch {
+                                        if (newDir != null) {
+                                            // Save metadata.json with original paths for restore (streamed on IO)
+                                            saveRecycleBinMetadata(newDir, filesToProcess)
+                                            // Unselect after snapshotting
+                                            tab.unselectAllFiles()
+                                            globalClass.taskManager.addTaskAndRun(
+                                                CopyTask(filesToProcess, true),
+                                                CopyTaskParameters(
+                                                    newDir
+                                                )
                                             )
-                                        )
-                                    } else {
-                                        tab.unselectAllFiles()
-                                        globalClass.showMsg(globalClass.getString(R.string.unable_to_move_to_recycle_bin))
+                                        } else {
+                                            tab.unselectAllFiles()
+                                            globalClass.showMsg(globalClass.getString(R.string.unable_to_move_to_recycle_bin))
+                                        }
                                     }
                                 }
                             } else {
@@ -138,6 +140,7 @@ fun DeleteConfirmationDialog(
 
                         if (showRememberChoice) {
                             Space(size = 4.dp)
+
                             CheckableText(
                                 modifier = Modifier.fillMaxWidth(),
                                 checked = rememberChoice,
@@ -160,27 +163,31 @@ fun DeleteConfirmationDialog(
 /**
  * Saves a metadata.json file in the recycle bin folder that records the original
  * paths of deleted files, enabling restore to their original locations.
+ * Uses buffered streaming on Dispatchers.IO to prevent OutOfMemoryError and ANRs on large batches.
  */
-private fun saveRecycleBinMetadata(recycleBinFolder: ContentHolder, files: List<ContentHolder>) {
-    try {
-        if (recycleBinFolder is LocalFileHolder) {
-            val metadataFile = File(recycleBinFolder.file, "metadata.json")
-            val jsonArray = JSONArray()
-            files.forEach { file ->
-                val entry = JSONObject().apply {
-                    put("name", file.displayName)
-                    put("originalPath", file.uniquePath)
-                    put("isDirectory", file.isFolder)
-                    put("deletedAt", System.currentTimeMillis())
+private suspend fun saveRecycleBinMetadata(recycleBinFolder: ContentHolder, files: List<ContentHolder>) {
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            if (recycleBinFolder is LocalFileHolder) {
+                val metadataFile = File(recycleBinFolder.file, "metadata.json")
+                metadataFile.bufferedWriter().use { writer ->
+                    writer.write("{\"items\":[\n")
+                    files.forEachIndexed { index, file ->
+                        val isDir = runCatching { file.isFolder }.getOrDefault(false)
+                        val nameEscaped = JSONObject.quote(file.displayName)
+                        val pathEscaped = JSONObject.quote(file.uniquePath)
+                        writer.write("  {\"name\":$nameEscaped,\"originalPath\":$pathEscaped,\"isDirectory\":$isDir,\"deletedAt\":${System.currentTimeMillis()}}")
+                        if (index < files.size - 1) {
+                            writer.write(",\n")
+                        } else {
+                            writer.write("\n")
+                        }
+                    }
+                    writer.write("]}\n")
                 }
-                jsonArray.put(entry)
             }
-            val root = JSONObject().apply {
-                put("items", jsonArray)
-            }
-            metadataFile.writeText(root.toString(2))
+        } catch (_: Exception) {
+            // Non-critical: metadata save failure should not block deletion
         }
-    } catch (_: Exception) {
-        // Non-critical: metadata save failure should not block deletion
     }
 }

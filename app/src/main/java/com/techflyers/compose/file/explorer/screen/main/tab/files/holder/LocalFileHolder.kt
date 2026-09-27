@@ -54,7 +54,10 @@ class LocalFileHolder(file: File) : ContentHolder() {
         if (p.startsWith("/storage_root")) {
             p = p.removePrefix("/storage_root")
         } else {
-            p = p.substringAfter("storage_root")
+            // substringAfterLast keeps only the suffix after the last occurrence;
+            // ensure it starts with "/" to form a valid absolute path.
+            val suffix = p.substringAfterLast("storage_root")
+            p = if (suffix.startsWith("/")) suffix else "/$suffix"
         }
         File(p)
     } else {
@@ -143,6 +146,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
         private val archiveRatioCache = android.util.LruCache<String, String>(500)
         private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
         private val videoDurationCache = android.util.LruCache<String, String>(500)
+        private val apkLabelCache = android.util.LruCache<String, Pair<String, String>>(500)
 
         fun getCachedDetails(file: File, lastModified: Long): String? {
             val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}"
@@ -192,11 +196,15 @@ class LocalFileHolder(file: File) : ContentHolder() {
                 file.extension.uppercase() else null
 
             when {
-                // PDF: show page count
-                ext == "pdf" -> {
-                    val pages = getPdfPageCount()
-                    if (pages > 0) "$sizeStr • $pages ${if (pages == 1) "page" else "pages"}"
-                    else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
+                // PDF / office: show page count
+                ext == "pdf" || ext in FileMimeType.officeFileType -> {
+                    val pages = com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DocumentPageCount.get(file)
+                    val pagePart = if (pages != null && pages.value > 0) "$sizeStr • ${pages.value} ${pages.unit}" else sizeStr
+                    if (pages == null && extLabel != null) "$sizeStr • $extLabel" else pagePart
+                }
+                (isApk() || isApkBundle()) -> {
+                    val label = apkSubtitle()
+                    if (label != null) "$label • $sizeStr" else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
                 }
                 // Video: show duration
                 ext in FileMimeType.videoFileType && globalClass.preferencesManager.showVideoDuration -> {
@@ -235,6 +243,32 @@ class LocalFileHolder(file: File) : ContentHolder() {
         } catch (_: Exception) { 0 }
         pdfPageCache.put(cacheKey, pages)
         return pages
+    }
+
+    fun getApkPackageInfo(): Pair<String, String>? {
+        if (!isApk()) return null
+        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
+        apkLabelCache.get(cacheKey)?.let { return it }
+
+        return try {
+            val pm = globalClass.packageManager
+            val pkg = pm.getPackageArchiveInfo(file.absolutePath, 0)
+            pkg?.applicationInfo?.sourceDir = file.absolutePath
+            pkg?.applicationInfo?.publicSourceDir = file.absolutePath
+            val label = pkg?.applicationInfo?.loadLabel(pm)?.toString()
+            val pkgName = pkg?.packageName ?: ""
+            if (!label.isNullOrBlank() || pkgName.isNotEmpty()) {
+                val pair = Pair(label ?: file.nameWithoutExtension, pkgName)
+                apkLabelCache.put(cacheKey, pair)
+                pair
+            } else null
+        } catch (_: Exception) { null }
+    }
+
+    private fun apkSubtitle(): String? {
+        val info = getApkPackageInfo() ?: return null
+        val label = info.first
+        return if (label.isNotBlank() && !label.equals(file.nameWithoutExtension, ignoreCase = true)) label else null
     }
 
     private fun getVideoDuration(): String {

@@ -50,6 +50,14 @@ object VaultService {
         return hash == checkHash
     }
 
+    fun resetVault(context: Context) {
+        val prefs = context.getSharedPreferences("vault_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+        try {
+            getVaultDir(context).deleteRecursively()
+        } catch (_: Exception) {}
+    }
+
     fun getVaultDir(context: Context): File {
         val vaultDir = File(context.filesDir, "vault")
         if (!vaultDir.exists()) {

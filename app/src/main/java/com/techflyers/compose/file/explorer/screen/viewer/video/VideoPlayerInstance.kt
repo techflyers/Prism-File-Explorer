@@ -13,6 +13,7 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.name
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
+import com.techflyers.compose.file.explorer.screen.viewer.media.MediaNotificationHelper
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.VideoPlayerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ class VideoPlayerInstance(
     val playerState: StateFlow<VideoPlayerState> = _playerState.asStateFlow()
     private var exoPlayer: ExoPlayer? = null
     private var positionTrackingJob: Job? = null
+    private var mediaNotificationHelper: MediaNotificationHelper? = null
 
     suspend fun initializePlayer(context: Context, uri: Uri) {
         _playerState.update {
@@ -89,6 +91,7 @@ class VideoPlayerInstance(
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         _playerState.update { currentState -> currentState.copy(isPlaying = isPlaying) }
+                        updateNotification()
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -126,6 +129,7 @@ class VideoPlayerInstance(
                                 duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
                             )
                         }
+                        updateNotification()
                         archiveSession?.let { session ->
                             ArchiveMediaQueueManager.prefetchWindow(session, currentIndex, windowSize = 2)
                         }
@@ -133,7 +137,26 @@ class VideoPlayerInstance(
                 })
             }
         }
+
+        mediaNotificationHelper = MediaNotificationHelper(
+            context = context,
+            sessionTag = "PrismVideo",
+            notificationId = 1002,
+            targetActivityClass = VideoPlayerActivity::class.java,
+            initialUri = uri,
+            instanceId = id,
+            onPlayPause = { playPause() },
+            onNext = { playNext() },
+            onPrevious = { playPrevious() },
+            onSeekTo = { pos -> seekTo(pos) },
+            onStop = {
+                exoPlayer?.stop()
+                _playerState.update { it.copy(isPlaying = false) }
+            }
+        )
+
         startPositionTracking()
+        updateNotification()
     }
 
     private fun startPositionTracking() {
@@ -277,8 +300,33 @@ class VideoPlayerInstance(
 
     fun getPlayer() = exoPlayer
 
+    private fun updateNotification() {
+        val player = exoPlayer ?: return
+        val state = _playerState.value
+        val title = state.title.ifEmpty {
+            val curUri = playlist.getOrNull(state.currentPlaylistIndex) ?: uri
+            curUri.lastPathSegment ?: globalClass.getString(R.string.unknown)
+        }
+        val hasPrev = playlist.size > 1 && (state.currentPlaylistIndex > 0 || state.repeatMode != Player.REPEAT_MODE_OFF)
+        val hasNext = playlist.size > 1 && (state.currentPlaylistIndex < playlist.lastIndex || state.repeatMode != Player.REPEAT_MODE_OFF)
+
+        mediaNotificationHelper?.update(
+            title = title,
+            artist = globalClass.getString(R.string.video_playback),
+            album = null,
+            albumArt = null,
+            isPlaying = state.isPlaying,
+            hasPrevious = hasPrev,
+            hasNext = hasNext,
+            positionMs = player.currentPosition,
+            durationMs = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
+        )
+    }
+
     override fun onClose() {
         positionTrackingJob?.cancel()
+        mediaNotificationHelper?.release()
+        mediaNotificationHelper = null
         exoPlayer?.release()
         exoPlayer = null
     }

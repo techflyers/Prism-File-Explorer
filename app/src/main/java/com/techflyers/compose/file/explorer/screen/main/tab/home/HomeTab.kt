@@ -141,6 +141,15 @@ class HomeTab : Tab() {
                 }
             ),
             HomeCategory(
+                name = globalClass.getString(R.string.apk_and_bundles),
+                icon = Icons.Rounded.Android,
+                onClick = {
+                    mainActivityManager.replaceCurrentTabWith(
+                        FilesTab(VirtualFileHolder(VirtualFileHolder.APK))
+                    )
+                }
+            ),
+            HomeCategory(
                 name = globalClass.getString(R.string.apps),
                 icon = Icons.Rounded.Android,
                 onClick = {

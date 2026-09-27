@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -64,6 +65,7 @@ import com.techflyers.compose.file.explorer.common.ConvertioService
 import com.techflyers.compose.file.explorer.common.ui.SafeSurface
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.theme.FileExplorerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -309,6 +311,7 @@ private fun DocumentViewerScreen(
     var sortType by remember { mutableStateOf("none") }
     var sortColumnIndex by remember { mutableStateOf<Int?>(null) }
     var showFilterDialog by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(filePath) {
         if (filePath == null) {
@@ -383,11 +386,23 @@ private fun DocumentViewerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = fileName,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column {
+                        Text(
+                            text = fileName,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val pageCount = remember(filePath) {
+                            if (filePath != null) com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DocumentPageCount.get(java.io.File(filePath)) else null
+                        }
+                        if (pageCount != null && pageCount.value > 0) {
+                            Text(
+                                text = "${pageCount.value} ${pageCount.unit}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBackPress) {
@@ -402,6 +417,11 @@ private fun DocumentViewerScreen(
                                 contentDescription = "Filter Columns",
                                 tint = if (filterColumnIndex != null || sortType != "none") MaterialTheme.colorScheme.primary else LocalContentColor.current
                             )
+                        }
+                    }
+                    if (filePath != null) {
+                        IconButton(onClick = { showMetadataSheet = true }) {
+                            Icon(Icons.Rounded.Info, contentDescription = "Details")
                         }
                     }
                     // Open With
@@ -430,6 +450,14 @@ private fun DocumentViewerScreen(
             )
         }
     ) { paddingValues ->
+        if (showMetadataSheet && filePath != null) {
+            val holder = remember(filePath) { LocalFileHolder(java.io.File(filePath)) }
+            com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet(
+                holder = holder,
+                onDismiss = { showMetadataSheet = false }
+            )
+        }
+
         Box(
             modifier = Modifier
                 .padding(paddingValues)

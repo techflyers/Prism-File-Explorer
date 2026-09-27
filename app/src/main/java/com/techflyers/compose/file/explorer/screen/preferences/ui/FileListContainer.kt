@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ShortText
 import androidx.compose.material.icons.automirrored.rounded.WrapText
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
 import androidx.compose.material.icons.rounded.Numbers
@@ -260,6 +261,14 @@ fun FileListContainer() {
             icon = Icons.Rounded.Badge,
             switchState = prefs.showSourceBadges,
             onSwitchChange = { prefs.showSourceBadges = it }
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.folder_scan_for_tint),
+            supportingText = stringResource(R.string.folder_scan_for_tint_desc),
+            icon = Icons.Rounded.FolderOpen,
+            switchState = prefs.folderScanForTint,
+            onSwitchChange = { prefs.folderScanForTint = it }
         )
     }
 }

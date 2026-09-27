@@ -27,20 +27,31 @@ class DeleteTask(
     private var pendingContent = arrayListOf<DeleteContentItem>()
 
     override val metadata = System.currentTimeMillis().toFormattedDate().let { time ->
+        val maxPreview = 10
+        val previewItems = sourceContent.take(maxPreview)
+        val remainingCount = sourceContent.size - previewItems.size
+        val display = if (remainingCount > 0) {
+            "${previewItems.joinToString(", ") { it.displayName }} ... and $remainingCount more"
+        } else {
+            previewItems.joinToString(", ") { it.displayName }
+        }
+        val full = buildString {
+            previewItems.forEach { source ->
+                appendLine(source.displayName)
+            }
+            if (remainingCount > 0) {
+                appendLine("... and $remainingCount more files")
+            }
+            appendLine()
+            append(time)
+        }
         TaskMetadata(
             id = id,
             creationTime = time,
             title = globalClass.resources.getString(R.string.delete),
             subtitle = globalClass.resources.getString(R.string.task_subtitle, sourceContent.size),
-            displayDetails = sourceContent.joinToString(", ") { it.displayName },
-            fullDetails = buildString {
-                sourceContent.forEachIndexed { index, source ->
-                    append(source.displayName)
-                    append("\n")
-                }
-                append("\n")
-                append(time)
-            },
+            displayDetails = display,
+            fullDetails = full,
             isCancellable = true,
             canMoveToBackground = true
         )
@@ -53,7 +64,13 @@ class DeleteTask(
 
     override fun getCurrentStatus() = progressMonitor.status
 
-    override suspend fun validate() = sourceContent.find { !it.isValid() } == null
+    override suspend fun validate() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (sourceContent.size > 50) {
+            sourceContent.take(20).all { it.isValid() }
+        } else {
+            sourceContent.all { it.isValid() }
+        }
+    }
 
     private fun markAsFailed(info: String) {
         progressMonitor.apply {
@@ -104,6 +121,9 @@ class DeleteTask(
                 pendingContent.add(
                     DeleteContentItem(source = content, status = TaskContentStatus.PENDING)
                 )
+                if (content is LocalFileHolder) {
+                    content.file.parent?.let { DeleteTimestampJournal.record(it) }
+                }
             }
         }
 
@@ -163,6 +183,10 @@ class DeleteTask(
     }
 
     private suspend fun handleLocalFileDeletion() {
+        var lastUpdateMs = 0L
+        var failedCount = 0
+        val total = pendingContent.size
+
         pendingContent.forEachIndexed { index, itemToDelete ->
             if (aborted) {
                 markAsAborted()
@@ -170,14 +194,19 @@ class DeleteTask(
             }
 
             if (itemToDelete.status == TaskContentStatus.PENDING) {
-                val progressPercent = (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
-                val pct = (progressPercent * 100).toInt()
-
-                progressMonitor.apply {
-                    contentName = itemToDelete.source.displayName
-                    remainingContent = pendingContent.size - (index + 1)
-                    progress = progressPercent
-                    processName = "${globalClass.getString(R.string.deleting)} ($pct%)"
+                val now = System.currentTimeMillis()
+                val isFirst = index == 0
+                val isLast = index == total - 1
+                if (isFirst || isLast || now - lastUpdateMs >= 150L) {
+                    lastUpdateMs = now
+                    val progressPercent = (index.toFloat() / total).coerceIn(0f, 0.99f)
+                    val pct = (progressPercent * 100).toInt()
+                    progressMonitor.apply {
+                        contentName = itemToDelete.source.displayName
+                        remainingContent = total - (index + 1)
+                        progress = progressPercent
+                        processName = "${globalClass.getString(R.string.deleting)} ($pct%)"
+                    }
                 }
 
                 try {
@@ -189,23 +218,27 @@ class DeleteTask(
                     if (deleted) {
                         itemToDelete.status = TaskContentStatus.SUCCESS
                     } else {
-                        throw Exception(globalClass.getString(R.string.failed_to_delete_file))
+                        itemToDelete.status = TaskContentStatus.FAILED
+                        failedCount++
                     }
                 } catch (e: Exception) {
                     logger.logError(e)
-                    markAsFailed(
-                        globalClass.resources.getString(
-                            R.string.task_summary_failed,
-                            e.message ?: emptyString
-                        )
-                    )
-                    return
+                    itemToDelete.status = TaskContentStatus.FAILED
+                    failedCount++
                 }
             }
+        }
+
+        if (failedCount > 0 && failedCount == total) {
+            markAsFailed(globalClass.resources.getString(R.string.task_summary_failed, "Failed to delete files"))
         }
     }
 
     private suspend fun handleShizukuFileDeletion() {
+        var lastUpdateMs = 0L
+        var failedCount = 0
+        val total = pendingContent.size
+
         pendingContent.forEachIndexed { index, itemToDelete ->
             if (aborted) {
                 markAsAborted()
@@ -213,14 +246,19 @@ class DeleteTask(
             }
 
             if (itemToDelete.status == TaskContentStatus.PENDING) {
-                val progressPercent = (index.toFloat() / pendingContent.size).coerceIn(0f, 0.99f)
-                val pct = (progressPercent * 100).toInt()
-
-                progressMonitor.apply {
-                    contentName = itemToDelete.source.displayName
-                    remainingContent = pendingContent.size - (index + 1)
-                    progress = progressPercent
-                    processName = "${globalClass.getString(R.string.deleting)} ($pct%)"
+                val now = System.currentTimeMillis()
+                val isFirst = index == 0
+                val isLast = index == total - 1
+                if (isFirst || isLast || now - lastUpdateMs >= 150L) {
+                    lastUpdateMs = now
+                    val progressPercent = (index.toFloat() / total).coerceIn(0f, 0.99f)
+                    val pct = (progressPercent * 100).toInt()
+                    progressMonitor.apply {
+                        contentName = itemToDelete.source.displayName
+                        remainingContent = total - (index + 1)
+                        progress = progressPercent
+                        processName = "${globalClass.getString(R.string.deleting)} ($pct%)"
+                    }
                 }
 
                 try {
@@ -228,19 +266,19 @@ class DeleteTask(
                     if (ShizukuManager.delete(shizukuFile.uniquePath)) {
                         itemToDelete.status = TaskContentStatus.SUCCESS
                     } else {
-                        throw Exception(globalClass.getString(R.string.failed_to_delete_file))
+                        itemToDelete.status = TaskContentStatus.FAILED
+                        failedCount++
                     }
                 } catch (e: Exception) {
                     logger.logError(e)
-                    markAsFailed(
-                        globalClass.resources.getString(
-                            R.string.task_summary_failed,
-                            e.message ?: emptyString
-                        )
-                    )
-                    return
+                    itemToDelete.status = TaskContentStatus.FAILED
+                    failedCount++
                 }
             }
+        }
+
+        if (failedCount > 0 && failedCount == total) {
+            markAsFailed(globalClass.resources.getString(R.string.task_summary_failed, "Failed to delete files"))
         }
     }
 

@@ -16,6 +16,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFi
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RootFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
@@ -112,6 +113,24 @@ object StorageProvider {
             externalUsedSize,
             INTERNAL_STORAGE
         )
+    }
+
+    fun getAvailableStorageRoots(context: Context): List<Pair<String, File>> {
+        val list = mutableListOf<Pair<String, File>>()
+        list.add(Pair(context.getString(R.string.internal_storage), Environment.getExternalStorageDirectory()))
+        val externalPairs = getExternalStorageDirectories(context)
+        for (pair in externalPairs) {
+            if (pair.second.absolutePath != Environment.getExternalStorageDirectory().absolutePath &&
+                list.none { it.second.absolutePath == pair.second.absolutePath }
+            ) {
+                list.add(pair)
+            }
+        }
+        val rootDir = File("/")
+        if (rootDir.exists()) {
+            list.add(Pair(context.getString(R.string.root_dir), rootDir))
+        }
+        return list
     }
 
     private fun getExternalStorageDirectories(context: Context): List<Pair<String, File>> {
@@ -278,7 +297,12 @@ object StorageProvider {
             "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation" // PPTX
         )
-        return getFilesByMimeTypes(documentMimeTypes, sortingPrefs)
+        val media = getFilesByMimeTypes(documentMimeTypes, sortingPrefs)
+        return CategoryFileScanner.mergeMediaAndWalk(
+            "documents",
+            media,
+            FileMimeType.documentFileType
+        )
     }
 
     /**
@@ -294,7 +318,29 @@ object StorageProvider {
             "application/gzip",
             "application/x-7z-compressed"
         )
-        return getFilesByMimeTypes(archiveMimeTypes, sortingPrefs)
+        val media = getFilesByMimeTypes(archiveMimeTypes, sortingPrefs)
+        return CategoryFileScanner.mergeMediaAndWalk(
+            "archives",
+            media,
+            FileMimeType.archiveFileType
+        )
+    }
+
+    fun getApkFiles(
+        sortingPrefs: FileSortingPrefs?
+    ): ArrayList<LocalFileHolder> {
+        val mime = getFilesByMimeTypes(
+            arrayOf("application/vnd.android.package-archive"),
+            sortingPrefs
+        )
+        val byName = CategoryFileScanner.queryMediaByNameSuffixes(
+            listOf(".apk", ".apks", ".xapk", ".apkm")
+        )
+        return CategoryFileScanner.mergeMediaAndWalk(
+            "apk",
+            mime + byName,
+            setOf("apk", "apks", "xapk", "apkm")
+        )
     }
 
     /**
@@ -368,7 +414,8 @@ object StorageProvider {
     fun getImageFiles(
         sortingPrefs: FileSortingPrefs?
     ): ArrayList<LocalFileHolder> {
-        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE, sortingPrefs)
+        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE, sortingPrefs)
+        return CategoryFileScanner.mergeMediaAndWalk("images", media, FileMimeType.imageFileType)
     }
 
     /**
@@ -377,7 +424,8 @@ object StorageProvider {
     fun getVideoFiles(
         sortingPrefs: FileSortingPrefs?
     ): ArrayList<LocalFileHolder> {
-        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO, sortingPrefs)
+        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO, sortingPrefs)
+        return CategoryFileScanner.mergeMediaAndWalk("videos", media, FileMimeType.videoFileType)
     }
 
     /**
@@ -386,7 +434,8 @@ object StorageProvider {
     fun getAudioFiles(
         sortingPrefs: FileSortingPrefs?
     ): ArrayList<LocalFileHolder> {
-        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO, sortingPrefs)
+        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO, sortingPrefs)
+        return CategoryFileScanner.mergeMediaAndWalk("audio", media, FileMimeType.audioFileType)
     }
 
     fun getBookmarks() = globalClass.preferencesManager.bookmarks

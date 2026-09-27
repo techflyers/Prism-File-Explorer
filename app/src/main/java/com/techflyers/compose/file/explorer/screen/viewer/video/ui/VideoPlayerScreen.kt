@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Repeat
@@ -118,6 +119,10 @@ import android.os.Build
 import androidx.compose.material3.ModalBottomSheet
 import net.engawapg.lib.zoomable.rememberZoomState
 import net.engawapg.lib.zoomable.zoomable
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
+import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
+import java.io.File
 import kotlin.math.abs
 
 private val SPEED_OPTIONS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
@@ -205,6 +210,7 @@ fun VideoPlayerScreen(
 
     // Playlist bottom sheet visibility
     var showPlaylist by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -440,6 +446,10 @@ fun VideoPlayerScreen(
                         )
                         interactionCount++
                     },
+                    onInfoClick = {
+                        showMetadataSheet = true
+                        interactionCount++
+                    },
                     onLock = {
                         isLocked = true
                         videoPlayerInstance.setControlsVisible(false)
@@ -546,6 +556,23 @@ fun VideoPlayerScreen(
                     },
                     onDismiss = { showPlaylist = false }
                 )
+            }
+
+            if (showMetadataSheet && !playerState.isInPictureInPicture) {
+                val currentVideoUri = playerState.playlist
+                    .getOrNull(playerState.currentPlaylistIndex) ?: videoUri
+                val currentPath = remember(currentVideoUri) {
+                    VideoPlayerActivity.resolveFilePath(context, currentVideoUri)
+                }
+                val holder = remember(currentPath) {
+                    currentPath?.let { LocalFileHolder(File(it)) }
+                }
+                if (holder != null) {
+                    ExtendedMetadataSheet(
+                        holder = holder,
+                        onDismiss = { showMetadataSheet = false }
+                    )
+                }
             }
 
             if (showDeleteConfirmation && !playerState.isInPictureInPicture) {
@@ -674,6 +701,7 @@ fun VideoControls(
     onPlayNext: () -> Unit,
     onPlayPrevious: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
+    onInfoClick: () -> Unit = {},
     onDelete: () -> Unit,
     onLock: () -> Unit,
     onToggleRepeat: () -> Unit,
@@ -714,6 +742,7 @@ fun VideoControls(
                 onEnterPiP = onEnterPiP,
                 onPlaylistClick = onPlaylistClick,
                 onOpenWith = onOpenWith,
+                onInfoClick = onInfoClick,
                 onDelete = onDelete,
                 onLock = onLock,
                 onToggleRepeat = onToggleRepeat,
@@ -799,6 +828,7 @@ fun TopBar(
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
+    onInfoClick: () -> Unit = {},
     onDelete: () -> Unit,
     onLock: () -> Unit,
     onToggleRepeat: () -> Unit,
@@ -953,6 +983,14 @@ fun TopBar(
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Delete",
+                    tint = Color.White
+                )
+            }
+
+            IconButton(onClick = onInfoClick) {
+                Icon(
+                    imageVector = Icons.Rounded.Info,
+                    contentDescription = stringResource(R.string.extended_metadata),
                     tint = Color.White
                 )
             }

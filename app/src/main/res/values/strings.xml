@@ -56,9 +56,26 @@
     <string name="move_here">Move here</string>
     <string name="delete_confirmation">Delete Confirmation</string>
     <string name="move_to_recycle_bin">Move to Recycle Bin</string>
+    <string name="auto_empty_recycle_bin">Auto-empty Recycle Bin</string>
+    <string name="auto_empty_recycle_bin_enabled_desc">Automatically delete files older than %d days</string>
+    <string name="auto_empty_recycle_bin_disabled_desc">Keep deleted files until manually emptied</string>
+    <string name="recycle_bin_retention">Recycle Bin retention period</string>
+    <string name="recycle_bin_retention_desc">Files older than this retention period will be permanently deleted</string>
+    <string name="recycle_bin_retention_days_format">%d days</string>
+    <string name="empty_recycle_bin">Empty Recycle Bin</string>
+    <string name="empty_recycle_bin_warning">Permanently delete all files currently in the Recycle Bin? This action cannot be undone.</string>
+    <string name="recycle_bin_empty">Recycle Bin is empty</string>
+    <string name="recycle_bin_already_empty">Recycle Bin is already empty</string>
     <string name="create_archive">Create Archive</string>
     <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+    <string name="forward">Forward</string>
     <string name="added_to_bookmarks">Added to bookmarks</string>
+    <string name="add_current_folder">Add Current Folder</string>
+    <string name="add_folder_path">Add Custom Folder</string>
+    <string name="enter_folder_path">Enter folder path</string>
+    <string name="folder_does_not_exist">Folder does not exist</string>
+    <string name="folder_already_bookmarked">Folder is already bookmarked</string>
     <string name="open_in_new_tab">Open in new tab</string>
     <string name="open_with">Open with</string>
     <string name="share">Share</string>
@@ -617,6 +634,8 @@
     <string name="loading">Loading…</string>
     <string name="show_source_folder_badges">Show source folder badges</string>
     <string name="show_source_folder_badges_desc">Display originating app or folder logo on files in category views</string>
+    <string name="folder_scan_for_tint">Scan folder sizes for size tint</string>
+    <string name="folder_scan_for_tint_desc">Calculate total size of folders to include them in the size-relative background tint. May be slower in large directories</string>
 
     <!-- Search Tag Filters -->
     <string name="folders">Folders</string>
@@ -715,4 +734,32 @@
     <string name="set_gid">Set GID</string>
     <string name="sticky_bit">Sticky</string>
     <string name="others">Others</string>
+
+    <!-- Explorer Feature Suite -->
+    <string name="apk_and_bundles">APK &amp; Bundles</string>
+    <string name="create_task">Create Task</string>
+    <string name="source_folder">Source folder</string>
+    <string name="destination_folder">Destination folder</string>
+    <string name="filename_regex">Filename regex</string>
+    <string name="dest_name_pattern">Destination pattern</string>
+    <string name="delay_minutes">Delay (minutes)</string>
+    <string name="periodic_minutes">Periodic interval (minutes)</string>
+    <string name="extended_metadata">Extended Metadata</string>
+    <string name="no_extended_metadata">No extended metadata available</string>
+    <string name="unlock_folder">Unlock Folder</string>
+    <string name="lock_folder">Lock Folder</string>
+    <string name="remove_folder_lock">Remove folder lock</string>
+    <string name="reset_folder_locks">Reset Folder Locks</string>
+    <string name="pin">PIN</string>
+    <string name="pattern">Pattern</string>
+    <string name="incorrect_pin_or_pattern">Incorrect PIN or pattern</string>
+    <string name="scheduled_tasks">Scheduled Tasks</string>
+    <string name="run_now">Run Now</string>
+    <string name="reset_vault">Reset Vault</string>
+    <string name="reset_vault_confirm">Reset Vault &amp; Folder Locks</string>
+    <string name="reset_vault_warning">This will erase vault encryption keys and remove all folder locks. Files on disk will remain untouched.</string>
+    <string name="eta_format">ETA: %s</string>
+    <string name="files_progress_format">%1$d / %2$d files</string>
+    <string name="media_playback">Media Playback</string>
+    <string name="video_playback">Video Playback</string>
 </resources>
