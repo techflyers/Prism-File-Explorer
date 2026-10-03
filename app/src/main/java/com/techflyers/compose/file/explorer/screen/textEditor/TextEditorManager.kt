@@ -468,7 +468,8 @@ class TextEditorManager {
             }
 
             globalClass.preferencesManager.let {
-                editable = !it.readOnly
+                it.readOnly = true
+                editable = false
                 setPinLineNumber(it.pinLineNumber)
                 getComponent(Magnifier::class.java).isEnabled = it.enableMagnifier
                 getComponent(EditorAutoCompletion::class.java).apply {

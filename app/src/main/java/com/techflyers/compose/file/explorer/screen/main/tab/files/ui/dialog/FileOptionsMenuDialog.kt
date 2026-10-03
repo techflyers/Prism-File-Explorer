@@ -23,13 +23,20 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Merge
 import androidx.compose.material.icons.rounded.OpenInNewOff
 import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.RestoreFromTrash
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Share
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.BottomBarConfigUtils
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.BottomBarSelectionAction
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,8 +74,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FileIcon
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.ItemRow
 import android.content.Intent
 import androidx.compose.material.icons.rounded.Terminal
-import com.techflyers.compose.file.explorer.screen.terminal.TerminalActivity
-import com.techflyers.compose.file.explorer.screen.terminal.openFolderInTerminal
+import com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher
 
 @Composable
 fun FileOptionsMenuDialog(
@@ -244,95 +250,173 @@ fun FileOptionsMenuDialog(
                         Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
                     }
                 } else {
-                    // Delete
-                    IconButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            onDismissRequest()
-                            tab.toggleDeleteConfirmationDialog(true)
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Delete,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                    val selectionConfigs = remember(globalClass.preferencesManager.selectionRibbonActions) {
+                        BottomBarConfigUtils.parseSelectionActions(globalClass.preferencesManager.selectionRibbonActions)
+                    }
+                    val topActions = remember(selectionConfigs) {
+                        val enabled = selectionConfigs.filter { it.isEnabled }
+                        (if (enabled.size >= 6) enabled else selectionConfigs).take(6)
                     }
 
-                    // Cut
-                    IconButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            onDismissRequest()
-                            tab.unselectAllFiles()
-                            globalClass.taskManager.addTask(
-                                CopyTask(
-                                    targetFiles,
-                                    deleteSourceFiles = true
-                                )
-                            )
-                        }
-                    ) {
-                        Icon(imageVector = Icons.Rounded.ContentCut, contentDescription = null)
-                    }
-
-                    // Copy
-                    IconButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            onDismissRequest()
-                            tab.unselectAllFiles()
-                            globalClass.taskManager.addTask(
-                                CopyTask(
-                                    targetFiles,
-                                    deleteSourceFiles = false
-                                )
-                            )
-                        }
-                    ) {
-                        Icon(imageVector = Icons.Rounded.FileCopy, contentDescription = null)
-                    }
-
-                    // Rename
-                    IconButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            onDismissRequest()
-                            tab.toggleRenameDialog(true)
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FormatColorText,
-                            contentDescription = null
-                        )
-                    }
-
-                    // Share
-                    if (targetContentHolder is LocalFileHolder) {
-                        IconButton(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onDismissRequest()
-                                if (hasFolders) {
-                                    tab.toggleShareFolderCompressDialog(true)
-                                } else {
-                                    tab.shareSelectedFiles(context)
+                    @Composable
+                    fun RenderTopAction(actionId: String) {
+                        when (actionId) {
+                            BottomBarSelectionAction.SELECT_ALL.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        if (tab.selectedFiles.size == tab.activeFolderContent.size) {
+                                            tab.unselectAllFiles()
+                                        } else {
+                                            tab.unselectAllFiles(false)
+                                            tab.activeFolderContent.forEach {
+                                                tab.selectedFiles[it.uniquePath] = it
+                                            }
+                                            tab.quickReloadFiles()
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.SelectAll,
+                                        contentDescription = stringResource(R.string.select_all)
+                                    )
                                 }
                             }
-                        ) {
-                            Icon(imageVector = Icons.Rounded.Share, contentDescription = null)
+                            BottomBarSelectionAction.DELETE.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.toggleDeleteConfirmationDialog(true)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = stringResource(R.string.delete),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.CUT.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.unselectAllFiles()
+                                        globalClass.taskManager.addTask(
+                                            CopyTask(
+                                                targetFiles,
+                                                deleteSourceFiles = true
+                                            )
+                                        )
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ContentCut,
+                                        contentDescription = stringResource(R.string.cut)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.COPY.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.unselectAllFiles()
+                                        globalClass.taskManager.addTask(
+                                            CopyTask(
+                                                targetFiles,
+                                                deleteSourceFiles = false
+                                            )
+                                        )
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FileCopy,
+                                        contentDescription = stringResource(R.string.copy)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.RENAME.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.toggleRenameDialog(true)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FormatColorText,
+                                        contentDescription = stringResource(R.string.rename)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.SHARE.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        if (hasFolders) {
+                                            tab.toggleShareFolderCompressDialog(true)
+                                        } else {
+                                            tab.shareSelectedFiles(context)
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Share,
+                                        contentDescription = stringResource(R.string.share)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.OPEN_WITH.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.targetFile = targetContentHolder
+                                        tab.toggleOpenWithDialog(true)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                        contentDescription = stringResource(R.string.open_with)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.PROPERTIES.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                        tab.toggleFilePropertiesDialog(true)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Info,
+                                        contentDescription = stringResource(R.string.file_properties)
+                                    )
+                                }
+                            }
+                            BottomBarSelectionAction.MORE.id -> {
+                                IconButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onDismissRequest()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MoreHoriz,
+                                        contentDescription = stringResource(R.string.options)
+                                    )
+                                }
+                            }
                         }
                     }
 
-                    // Properties
-                    IconButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            onDismissRequest()
-                            tab.toggleFilePropertiesDialog(true)
-                        }
-                    ) {
-                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                    topActions.forEach { config ->
+                        RenderTopAction(config.id)
                     }
                 }
             }
@@ -395,14 +479,10 @@ fun FileOptionsMenuDialog(
                 if (targetContentHolder is LocalFileHolder) {
                     FileOption(
                         Icons.Rounded.Terminal,
-                        "Open in Terminal"
+                        stringResource(R.string.open_in_terminal)
                     ) {
                         onDismissRequest()
-                        openFolderInTerminal(context, targetContentHolder.file.absolutePath)
-                        val intent = Intent(context, TerminalActivity::class.java).apply {
-                            putExtra("cwd", targetContentHolder.file.absolutePath)
-                        }
-                        context.startActivity(intent)
+                        TerminalLauncher.openTerminal(context, targetContentHolder.file.absolutePath)
                         tab.unselectAllFiles()
                     }
 
@@ -494,6 +574,8 @@ fun FileOptionsMenuDialog(
                         onDismissRequest()
                         val oldList = globalClass.preferencesManager.pinnedFiles
                         globalClass.preferencesManager.pinnedFiles = oldList - targetFiles.map { it.uniquePath }.toSet()
+                        globalClass.preferencesManager.pinnedFileNames =
+                            globalClass.preferencesManager.pinnedFileNames - targetFiles.map { it.uniquePath }.toSet()
                         globalClass.showMsg(R.string.done)
                         tab.unselectAllFiles()
                     }
@@ -510,10 +592,43 @@ fun FileOptionsMenuDialog(
             }
 
             if (isRequestPinShortcutSupported(context) && tab.activeFolder is LocalFileHolder && (isSingleFile || isSingleFolder)) {
+                var showShortcutNameDialog by remember { mutableStateOf(false) }
+
                 FileOption(Icons.Rounded.Home, stringResource(R.string.add_to_home_screen)) {
-                    onDismissRequest()
-                    tab.addToHomeScreen(context, targetContentHolder as LocalFileHolder)
-                    tab.unselectAllFiles()
+                    showShortcutNameDialog = true
+                }
+
+                if (showShortcutNameDialog) {
+                    var shortcutName by remember { mutableStateOf(targetContentHolder.displayName) }
+                    AlertDialog(
+                        onDismissRequest = { showShortcutNameDialog = false },
+                        title = { Text(stringResource(R.string.add_to_home_screen)) },
+                        text = {
+                            OutlinedTextField(
+                                value = shortcutName,
+                                onValueChange = { shortcutName = it },
+                                label = { Text(stringResource(R.string.shortcut_name)) },
+                                singleLine = true
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showShortcutNameDialog = false
+                                onDismissRequest()
+                                tab.addToHomeScreen(
+                                    context,
+                                    targetContentHolder as LocalFileHolder,
+                                    shortcutName.trim().ifBlank { targetContentHolder.displayName }
+                                )
+                                tab.unselectAllFiles()
+                            }) { Text(stringResource(R.string.add_to_home_screen)) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showShortcutNameDialog = false }) {
+                                Text(stringResource(R.string.cancel))
+                            }
+                        }
+                    )
                 }
             }
 

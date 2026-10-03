@@ -85,6 +85,8 @@
     <string name="format">Format</string>
     <string name="word_wrap">Retour à la ligne automatique</string>
     <string name="read_only">Lecture seule</string>
+    <string name="lock_editor">Verrouiller l’éditeur</string>
+    <string name="unlock_editor">Déverrouiller l’éditeur</string>
     <string name="jump_to_line">Aller à la ligne</string>
     <string name="preferences">Préférences</string>
     <string name="use_icu_selection">Utiliser la sélection ICU</string>
@@ -414,8 +416,13 @@
     <string name="gallery_mode">Mode galerie</string>
     <string name="crop_in_thumbnails">Recadrer dans les miniatures</string>
     <string name="pinned_files">Fichiers épinglés</string>
+    <string name="file_size_tint">Teinte selon la taille des fichiers</string>
+    <string name="file_size_tint_desc">Afficher une légère teinte d’arrière-plan proportionnelle à la taille de chaque élément</string>
     <string name="pinned_files_desc">Accès rapide aux fichiers importants</string>
     <string name="pin_to_home_tab">Épingler à l\'onglet d\'accueil</string>
+    <string name="rename_shortcut">Renommer le raccourci</string>
+    <string name="remove_shortcut">Supprimer le raccourci</string>
+    <string name="shortcut_name">Nom du raccourci</string>
     <string name="extensive_recent_files_scan">Analyse approfondie des fichiers récents</string>
     <string name="scan_hidden_files_and_folders">Analyser les fichiers et dossiers cachés</string>
     <string name="manage_excluded_paths">Gérer les chemins exclus</string>
@@ -453,6 +460,7 @@
     <string name="close_tab_on_back_nav">Navigation arrière pour fermer les onglets</string>
     <string name="remember_last_session">Se souvenir de la dernière session</string>
     <string name="confirm_before_exit">Confirmer avant de quitter l\'application</string>
+    <string name="auto_brightness">Auto</string>
     <string name="folders">Dossiers</string>
     <string name="apk">APK</string>
     <string name="no_results_found">Aucun résultat trouvé</string>

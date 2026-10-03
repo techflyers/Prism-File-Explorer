@@ -80,6 +80,8 @@
     <string name="open_with">Open with</string>
     <string name="share">Share</string>
     <string name="add_to_home_screen">Add to home screen</string>
+    <string name="show_file_list_divider">Show file list separator</string>
+    <string name="show_file_list_divider_desc">Show separator lines between items in the file list</string>
     <string name="edit_with_text_editor">Edit with text editor</string>
     <string name="compress">Compress</string>
     <string name="selected">selected</string>
@@ -140,6 +142,8 @@
     <string name="format">Format</string>
     <string name="word_wrap">Word wrap</string>
     <string name="read_only">Read only</string>
+    <string name="lock_editor">Lock editor</string>
+    <string name="unlock_editor">Unlock editor</string>
     <string name="jump_to_line">Jump to line</string>
     <string name="preferences">Preferences</string>
     <string name="use_icu_selection">Use ICU selection</string>
@@ -344,6 +348,9 @@
     <string name="unknown_album">Unknown Album</string>
     <string name="volume">Volume</string>
     <string name="equalizer">Equalizer</string>
+    <string name="open_device_equalizer">System Equalizer</string>
+    <string name="no_equalizer_found">No system equalizer found on this device</string>
+    <string name="no_direct_equalizer_opening_sound_settings">Opening device sound settings</string>
     <string name="reset">Reset</string>
     <string name="done">Done</string>
     <string name="title_activity_logs">Logs</string>
@@ -480,6 +487,9 @@
     <string name="pinned_files">Pinned Files</string>
     <string name="pinned_files_desc">Quick access important files</string>
     <string name="pin_to_home_tab">Pin to home tab</string>
+    <string name="rename_shortcut">Rename shortcut</string>
+    <string name="remove_shortcut">Remove shortcut</string>
+    <string name="shortcut_name">Shortcut name</string>
     <string name="extensive_recent_files_scan">Extensive recent files scan</string>
     <string name="scan_hidden_files_and_folders">Scan hidden files and folders</string>
     <string name="hide_temp_and_db_files">Hide temporary and database files</string>
@@ -617,6 +627,31 @@
     <string name="no_custom_runners">No custom runners configured</string>
     <string name="delete_runner">Delete runner</string>
     <string name="terminal_rootfs_missing">Terminal environment is corrupted. Please reinstall from Settings → Terminal.</string>
+    <string name="open_in_terminal">Open in Terminal</string>
+    <string name="terminal_app">Terminal application</string>
+    <string name="select_terminal_app_desc">Choose which terminal to use when opening folders</string>
+    <string name="terminal_app_builtin">Built-in (Ubuntu / PRoot)</string>
+    <string name="terminal_app_termux">Termux</string>
+    <string name="terminal_app_custom">Custom app</string>
+    <string name="termux_integration">Termux integration</string>
+    <string name="termux_installed">Termux is installed</string>
+    <string name="termux_not_installed">Termux is not installed (tap to download)</string>
+    <string name="termux_not_installed_error">Termux is not installed. Please install Termux from F-Droid or GitHub.</string>
+    <string name="termux_setup_info">Prism sends commands directly to Termux via RUN_COMMAND and opens the target folder.\n\nFor automatic command execution in Termux:\n1. Set \'allow-external-apps=true\' in ~/.termux/termux.properties\n2. In Android Settings → Apps → Prism → Permissions, allow \"Run commands in Termux environment\".</string>
+    <string name="termux_permission_status">Command execution permission</string>
+    <string name="termux_permission_granted">Permission granted (direct execution enabled)</string>
+    <string name="termux_permission_not_granted">Permission not granted (tap to configure)</string>
+    <string name="termux_permission_granted_toast">Termux command permission granted!</string>
+    <string name="termux_permission_copy_notice">Grant \'Run commands in Termux\' in Settings for direct execution. Command copied to clipboard!</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="custom_terminal_package">Custom terminal package</string>
+    <string name="custom_terminal_package_desc">Package name of the terminal or external app to launch (e.g. com.termux, jackpal.androidterm)</string>
+    <string name="custom_terminal_command">Command template</string>
+    <string name="custom_terminal_command_desc">Command to run in the terminal. Use {dir} or {path} for folder path.</string>
+    <string name="opening_termux">Opening Termux…</string>
+    <string name="opening_terminal">Opening %1$s…</string>
+    <string name="terminal_package_not_installed">%1$s is not installed</string>
+    <string name="builtin_terminal_env">Built-in Ubuntu environment</string>
 
     <!-- File Picker & Open With Strings -->
     <string name="file_picker_title">Prism File Picker</string>
@@ -636,6 +671,8 @@
     <string name="show_source_folder_badges_desc">Display originating app or folder logo on files in category views</string>
     <string name="folder_scan_for_tint">Scan folder sizes for size tint</string>
     <string name="folder_scan_for_tint_desc">Calculate total size of folders to include them in the size-relative background tint. May be slower in large directories</string>
+    <string name="file_size_tint">File size tint</string>
+    <string name="file_size_tint_desc">Show a subtle background tint based on the size of each item</string>
 
     <!-- Search Tag Filters -->
     <string name="folders">Folders</string>
@@ -758,8 +795,11 @@
     <string name="reset_vault">Reset Vault</string>
     <string name="reset_vault_confirm">Reset Vault &amp; Folder Locks</string>
     <string name="reset_vault_warning">This will erase vault encryption keys and remove all folder locks. Files on disk will remain untouched.</string>
+    <string name="auto_brightness">Auto</string>
     <string name="eta_format">ETA: %s</string>
     <string name="files_progress_format">%1$d / %2$d files</string>
     <string name="media_playback">Media Playback</string>
     <string name="video_playback">Video Playback</string>
+    <string name="deep_scan_categories">Deep scan for categories</string>
+    <string name="deep_scan_categories_desc">Scan local storage tree in the background for media files not indexed by Android MediaStore</string>
 </resources>

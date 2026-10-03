@@ -40,6 +40,12 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.CheckCircle
+import com.techflyers.compose.file.explorer.screen.preferences.constant.TerminalAppPreference
+import com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher
 import com.techflyers.compose.file.explorer.screen.terminal.isTerminalInstalled
 import com.techflyers.compose.file.explorer.screen.terminal.uninstallTerminal
 
@@ -48,9 +54,148 @@ fun TerminalContainer() {
     val context = LocalContext.current
     var confirmUninstall by remember { mutableStateOf(false) }
     var showCodeRunners by remember { mutableStateOf(false) }
+    var showCustomPackageDialog by remember { mutableStateOf(false) }
+    var showCustomCommandDialog by remember { mutableStateOf(false) }
+    var showTermuxInfoDialog by remember { mutableStateOf(false) }
+
     val installed = remember { isTerminalInstalled(context) }
+    val prefs = globalClass.preferencesManager
+
+    val terminalAppChoices = listOf(
+        stringResource(R.string.terminal_app_builtin),
+        stringResource(R.string.terminal_app_termux),
+        stringResource(R.string.terminal_app_custom)
+    )
+    val currentTerminalApp = prefs.terminalApp.coerceIn(0, terminalAppChoices.size - 1)
+    val isTermuxInstalled = remember {
+        TerminalLauncher.isPackageInstalled(context, TerminalLauncher.TERMUX_PACKAGE)
+    }
+    var hasTermuxPermission by remember {
+        mutableStateOf(TerminalLauncher.hasTermuxPermission(context))
+    }
+
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        hasTermuxPermission = TerminalLauncher.hasTermuxPermission(context)
+    }
 
     Container(title = stringResource(R.string.terminal)) {
+        PreferenceItem(
+            label = stringResource(R.string.terminal_app),
+            supportingText = terminalAppChoices[currentTerminalApp],
+            icon = Icons.Rounded.Terminal,
+            onClick = {
+                prefs.singleChoiceDialog.show(
+                    title = globalClass.getString(R.string.terminal_app),
+                    description = globalClass.getString(R.string.select_terminal_app_desc),
+                    choices = terminalAppChoices,
+                    selectedChoice = currentTerminalApp,
+                    onSelect = {
+                        prefs.terminalApp = it
+                    }
+                )
+            }
+        )
+
+        if (prefs.terminalApp == TerminalAppPreference.TERMUX.ordinal) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+            )
+            PreferenceItem(
+                label = stringResource(R.string.termux_integration),
+                supportingText = if (isTermuxInstalled) {
+                    stringResource(R.string.termux_installed)
+                } else {
+                    stringResource(R.string.termux_not_installed)
+                },
+                icon = if (isTermuxInstalled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                onClick = {
+                    if (isTermuxInstalled) {
+                        showTermuxInfoDialog = true
+                    } else {
+                        try {
+                            val marketIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("market://details?id=${TerminalLauncher.TERMUX_PACKAGE}")
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(marketIntent)
+                        } catch (_: Exception) {
+                            val browserIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/termux/termux-app/releases")
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(browserIntent)
+                        }
+                    }
+                }
+            )
+
+            if (isTermuxInstalled) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    thickness = 3.dp
+                )
+                PreferenceItem(
+                    label = stringResource(R.string.termux_permission_status),
+                    supportingText = if (hasTermuxPermission) {
+                        stringResource(R.string.termux_permission_granted)
+                    } else {
+                        stringResource(R.string.termux_permission_not_granted)
+                    },
+                    icon = if (hasTermuxPermission) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                    onClick = {
+                        if (!hasTermuxPermission) {
+                            if (TerminalLauncher.tryGrantPermissionViaShizuku(context)) {
+                                hasTermuxPermission = true
+                                android.widget.Toast.makeText(
+                                    context,
+                                    context.getString(R.string.termux_permission_granted_toast),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                TerminalLauncher.openAppSettings(context)
+                            }
+                        } else {
+                            showTermuxInfoDialog = true
+                        }
+                    }
+                )
+            }
+        }
+
+        if (prefs.terminalApp == TerminalAppPreference.CUSTOM.ordinal) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+            )
+            PreferenceItem(
+                label = stringResource(R.string.custom_terminal_package),
+                supportingText = prefs.customTerminalPackage.ifBlank { "com.termux" },
+                icon = Icons.Rounded.Apps,
+                onClick = { showCustomPackageDialog = true }
+            )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+            )
+            PreferenceItem(
+                label = stringResource(R.string.custom_terminal_command),
+                supportingText = prefs.customTerminalCommand.ifBlank { "cd {dir}" },
+                icon = Icons.Rounded.Code,
+                onClick = { showCustomCommandDialog = true }
+            )
+        }
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
         PreferenceItem(
             label = stringResource(R.string.terminal_status),
             supportingText = if (installed) {
@@ -83,6 +228,111 @@ fun TerminalContainer() {
             supportingText = stringResource(R.string.uninstall_terminal_desc),
             icon = Icons.Rounded.DeleteForever,
             onClick = { confirmUninstall = true }
+        )
+    }
+
+    if (showCustomPackageDialog) {
+        var tempPackage by remember { mutableStateOf(prefs.customTerminalPackage) }
+        AlertDialog(
+            onDismissRequest = { showCustomPackageDialog = false },
+            title = { Text(stringResource(R.string.custom_terminal_package)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.custom_terminal_package_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = tempPackage,
+                        onValueChange = { tempPackage = it.trim() },
+                        label = { Text("Package name") },
+                        placeholder = { Text("e.g. com.termux") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.customTerminalPackage = tempPackage.ifBlank { "com.termux" }
+                    showCustomPackageDialog = false
+                }) {
+                    Text(stringResource(R.string.save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomPackageDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showCustomCommandDialog) {
+        var tempCommand by remember { mutableStateOf(prefs.customTerminalCommand) }
+        AlertDialog(
+            onDismissRequest = { showCustomCommandDialog = false },
+            title = { Text(stringResource(R.string.custom_terminal_command)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.custom_terminal_command_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = tempCommand,
+                        onValueChange = { tempCommand = it },
+                        label = { Text("Command template") },
+                        placeholder = { Text("cd {dir}") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.customTerminalCommand = tempCommand.ifBlank { "cd {dir}" }
+                    showCustomCommandDialog = false
+                }) {
+                    Text(stringResource(R.string.save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomCommandDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showTermuxInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showTermuxInfoDialog = false },
+            icon = { Icon(Icons.Rounded.Terminal, contentDescription = null) },
+            title = { Text(stringResource(R.string.termux_integration)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.termux_setup_info),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showTermuxInfoDialog = false }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showTermuxInfoDialog = false
+                    TerminalLauncher.openAppSettings(context)
+                }) {
+                    Text(stringResource(R.string.open_settings))
+                }
+            }
         )
     }
 

@@ -1,8 +1,8 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
 import android.content.res.Configuration
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier

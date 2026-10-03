@@ -210,6 +210,15 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
                     val newFile = File(itemToRename.newPath)
 
                     var renamed = localFile.file.renameTo(newFile)
+                    if (!renamed && localFile.file.name.equals(newFile.name, ignoreCase = true)) {
+                        val tempFile = File(localFile.file.parentFile, "${localFile.file.name}_tmp_${System.currentTimeMillis()}")
+                        if (localFile.file.renameTo(tempFile)) {
+                            renamed = tempFile.renameTo(newFile)
+                            if (!renamed) {
+                                tempFile.renameTo(localFile.file)
+                            }
+                        }
+                    }
                     if (!renamed && ShizukuManager.isPrivileged) {
                         renamed = ShizukuManager.rename(localFile.uniquePath, itemToRename.newPath)
                     }

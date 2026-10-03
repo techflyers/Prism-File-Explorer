@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Save
@@ -75,6 +77,23 @@ fun ToolbarView(codeEditor: CodeEditor, onBackPressedDispatcher: OnBackPressedDi
 
         IconButton(enabled = textEditorManager.canRedo, onClick = { codeEditor.redo() }) {
             Icon(imageVector = Icons.AutoMirrored.Rounded.Redo, contentDescription = null)
+        }
+
+        IconButton(
+            onClick = {
+                val newLockedState = !globalClass.preferencesManager.readOnly
+                globalClass.preferencesManager.readOnly = newLockedState
+                codeEditor.editable = !newLockedState
+            }
+        ) {
+            val isLocked = globalClass.preferencesManager.readOnly
+            Icon(
+                imageVector = if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                contentDescription = stringResource(
+                    if (isLocked) R.string.unlock_editor else R.string.lock_editor
+                ),
+                tint = if (isLocked) colorScheme.primary else colorScheme.onSurfaceVariant
+            )
         }
 
         IconButton(

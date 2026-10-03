@@ -25,6 +25,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.getDefaultHomeLayout
 import com.techflyers.compose.file.explorer.screen.preferences.constant.FileItemSize
+import com.techflyers.compose.file.explorer.screen.preferences.constant.TerminalAppPreference
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefDataStore
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefMutableState
@@ -189,6 +190,12 @@ class PreferencesManager {
         getPreferencesKey = { intPreferencesKey(it) }
     )
 
+    var showFileListDivider by prefMutableState(
+        keyName = "showFileListDivider",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var showParentDirectoryEntry by prefMutableState(
         keyName = "showParentDirectoryEntry",
         defaultValue = true,
@@ -204,6 +211,18 @@ class PreferencesManager {
     var folderScanForTint by prefMutableState(
         keyName = "folderScanForTint",
         defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var deepScanCategories by prefMutableState(
+        keyName = "deepScanCategories",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var sizeTintEnabled by prefMutableState(
+        keyName = "sizeTintEnabled",
+        defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -328,6 +347,17 @@ class PreferencesManager {
         }
         set(value) {
             pinnedFilesJson = value.toJson()
+        }
+
+    private var pinnedFileNamesJson by prefMutableState(
+        keyName = "pinnedFileNamesJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+    var pinnedFileNames: Map<String, String>
+        get() = fromJson<Map<String, String>>(pinnedFileNamesJson) ?: emptyMap()
+        set(value) {
+            pinnedFileNamesJson = value.toJson()
         }
 
     var hideRootStorage by prefMutableState(
@@ -570,6 +600,25 @@ class PreferencesManager {
     var customCodeRunners by prefMutableState(
         keyName = "customCodeRunners",
         defaultValue = "{}",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    //---------- Terminal -------------//
+    var terminalApp by prefMutableState(
+        keyName = "terminalApp",
+        defaultValue = TerminalAppPreference.BUILT_IN.ordinal,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
+    var customTerminalPackage by prefMutableState(
+        keyName = "customTerminalPackage",
+        defaultValue = "com.termux",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var customTerminalCommand by prefMutableState(
+        keyName = "customTerminalCommand",
+        defaultValue = "cd {dir}",
         getPreferencesKey = { stringPreferencesKey(it) }
     )
 

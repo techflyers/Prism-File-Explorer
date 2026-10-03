@@ -1,13 +1,20 @@
 package com.techflyers.compose.file.explorer.screen.viewer.audio
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.audiofx.AudioEffect
 import android.net.Uri
+import android.provider.Settings
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
+import com.techflyers.compose.file.explorer.common.findActivity
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -63,12 +70,15 @@ class AudioPlayerInstance(
 
     private var defaultColorScheme: AudioPlayerColorScheme = AudioPlayerColorScheme()
     private var exoPlayer: ExoPlayer? = null
+    private var appContext: Context? = null
+    private var activeAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private var positionTrackingJob: Job? = null
     private var sleepTimerJob: Job? = null
     private var mediaNotificationHelper: MediaNotificationHelper? = null
 
     @OptIn(UnstableApi::class)
     suspend fun initializePlayer(context: Context, uri: Uri) {
+        appContext = context.applicationContext
         withContext(Dispatchers.Main) {
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -94,6 +104,10 @@ class AudioPlayerInstance(
                 playWhenReady = true
 
                 addListener(object : Player.Listener {
+                    override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                        handleAudioSessionIdChanged(context, audioSessionId)
+                    }
+
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         _playerState.update {
                             it.copy(isPlaying = isPlaying)
@@ -163,6 +177,11 @@ class AudioPlayerInstance(
                         }
                     }
                 })
+            }
+
+            val initialSessionId = exoPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+            if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                handleAudioSessionIdChanged(context, initialSessionId)
             }
         }
 
@@ -476,7 +495,113 @@ class AudioPlayerInstance(
         )
     }
 
+    private fun handleAudioSessionIdChanged(context: Context, newSessionId: Int) {
+        if (newSessionId == activeAudioSessionId) return
+        if (activeAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            notifyAudioSessionClosed(context, activeAudioSessionId)
+        }
+        activeAudioSessionId = newSessionId
+        if (activeAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            notifyAudioSessionOpened(context, activeAudioSessionId)
+        }
+    }
+
+    private fun notifyAudioSessionOpened(context: Context, sessionId: Int) {
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        try {
+            val openIntent = Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+            }
+            context.sendBroadcast(openIntent)
+        } catch (e: Exception) {
+            logger.logError(e)
+        }
+    }
+
+    private fun notifyAudioSessionClosed(context: Context, sessionId: Int) {
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        try {
+            val closeIntent = Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+            }
+            context.sendBroadcast(closeIntent)
+        } catch (e: Exception) {
+            logger.logError(e)
+        }
+    }
+
+    fun openSystemEqualizer(context: Context) {
+        val sessionId = if (activeAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            activeAudioSessionId
+        } else {
+            exoPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+        }
+
+        val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+            if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+            }
+            putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+            putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+        }
+
+        val activity = context.findActivity()
+        val targetContext = activity ?: context
+        if (targetContext !is Activity) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        try {
+            targetContext.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            try {
+                val soundSettingsIntent = Intent(Settings.ACTION_SOUND_SETTINGS).apply {
+                    if (targetContext !is Activity) {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                }
+                targetContext.startActivity(soundSettingsIntent)
+                Toast.makeText(
+                    targetContext,
+                    targetContext.getString(R.string.no_direct_equalizer_opening_sound_settings),
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (_: Exception) {
+                Toast.makeText(
+                    targetContext,
+                    targetContext.getString(R.string.no_equalizer_found),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        } catch (e: Exception) {
+            logger.logError(e)
+            Toast.makeText(
+                targetContext,
+                targetContext.getString(R.string.no_equalizer_found),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    fun getAudioSessionId(): Int {
+        return if (activeAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            activeAudioSessionId
+        } else {
+            exoPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+        }
+    }
+
     override fun onClose() {
+        if (activeAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            appContext?.let { ctx ->
+                notifyAudioSessionClosed(ctx, activeAudioSessionId)
+            }
+            activeAudioSessionId = C.AUDIO_SESSION_ID_UNSET
+        }
+        appContext = null
         positionTrackingJob?.cancel()
         sleepTimerJob?.cancel()
         mediaNotificationHelper?.release()

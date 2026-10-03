@@ -21,7 +21,7 @@ val PrismIcons.SortNameAscending: ImageVector by lazy {
             pathFillType = PathFillType.EvenOdd
         ) {
             // Letter 'A' outer
-            moveTo(7.0f, 4.5f)
+            moveTo(7.0f, 4.0f)
             lineTo(2.5f, 19.5f)
             lineTo(5.1f, 19.5f)
             lineTo(6.2f, 15.6f)
@@ -29,10 +29,10 @@ val PrismIcons.SortNameAscending: ImageVector by lazy {
             lineTo(8.9f, 19.5f)
             lineTo(11.5f, 19.5f)
             close()
-            // Letter 'A' inner cutout
-            moveTo(7.0f, 8.0f)
-            lineTo(8.2f, 13.0f)
-            lineTo(5.8f, 13.0f)
+            // Letter 'A' inner cutout — apex lowered so counter is visible
+            moveTo(7.0f, 9.5f)
+            lineTo(8.35f, 13.5f)
+            lineTo(5.65f, 13.5f)
             close()
 
             // Letter 'Z'
@@ -78,7 +78,7 @@ val PrismIcons.SortNameDescending: ImageVector by lazy {
             close()
 
             // Letter 'A' outer
-            moveTo(17.0f, 4.5f)
+            moveTo(17.0f, 4.0f)
             lineTo(12.5f, 19.5f)
             lineTo(15.1f, 19.5f)
             lineTo(16.2f, 15.6f)
@@ -86,10 +86,10 @@ val PrismIcons.SortNameDescending: ImageVector by lazy {
             lineTo(18.9f, 19.5f)
             lineTo(21.5f, 19.5f)
             close()
-            // Letter 'A' inner cutout
-            moveTo(17.0f, 8.0f)
-            lineTo(18.2f, 13.0f)
-            lineTo(15.8f, 13.0f)
+            // Letter 'A' inner cutout — apex lowered so counter is visible
+            moveTo(17.0f, 9.5f)
+            lineTo(18.35f, 13.5f)
+            lineTo(15.65f, 13.5f)
             close()
         }
     }.build()

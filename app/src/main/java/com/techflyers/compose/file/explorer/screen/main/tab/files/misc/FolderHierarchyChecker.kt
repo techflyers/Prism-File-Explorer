@@ -12,16 +12,12 @@ object FolderHierarchyChecker {
      */
     fun hasAnyFilesRecursively(
         dir: File,
-        maxDepth: Int = 15,
+        maxDepth: Int = 5,
         visited: MutableSet<String> = mutableSetOf()
     ): Boolean {
-        if (maxDepth <= 0) return false
-        val canonical = try {
-            dir.canonicalPath
-        } catch (_: Exception) {
-            dir.absolutePath
-        }
-        if (!visited.add(canonical)) return false
+        if (maxDepth <= 0 || visited.size > 50) return false
+        val path = dir.absolutePath
+        if (!visited.add(path)) return false
 
         val children = dir.listFiles() ?: return false
         for (child in children) {
@@ -48,7 +44,7 @@ object FolderHierarchyChecker {
         // Must have at least one subdirectory directly or nested
         val children = dir.listFiles() ?: return false
         val subDirs = children.filter { it.isDirectory && it.name != "metadata.json" }
-        if (subDirs.isEmpty()) {
+        if (subDirs.isEmpty() || subDirs.size > 20) {
             emptyWithinCache.put(cacheKey, false)
             return false
         }

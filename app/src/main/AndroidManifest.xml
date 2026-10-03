@@ -43,6 +43,9 @@
          the open-source Shizuku project (https://github.com/RikkaApps/Shizuku). -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- Optional: Required to send commands to Termux via RUN_COMMAND Intent -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
     <queries>
         <intent>
             <action android:name="moe.shizuku.privileged.api.intent.action.REQUEST_PERMISSION" />
@@ -51,6 +54,13 @@
             <action android:name="rikka.shizuku.intent.action.REQUEST_BINDER" />
         </intent>
         <provider android:authorities="moe.shizuku.privileged.api.shizuku" />
+        <package android:name="com.termux" />
+        <intent>
+            <action android:name="com.termux.RUN_COMMAND" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL" />
+        </intent>
     </queries>
 
     <uses-feature

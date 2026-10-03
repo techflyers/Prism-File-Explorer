@@ -10,6 +10,20 @@ import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Arrangement
@@ -55,6 +69,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -139,6 +154,9 @@ fun ColumnScope.FilesList(tab: FilesTab) {
     var parentFolder by remember(tab.activeFolder.uniquePath) {
         mutableStateOf<ContentHolder?>(null)
     }
+    var parentFolderResolved by remember(tab.activeFolder.uniquePath) {
+        mutableStateOf(false)
+    }
     LaunchedEffect(tab.activeFolder.uniquePath) {
         parentFolder = withContext(IO) {
             if (preferencesManager.showParentDirectoryEntry
@@ -148,6 +166,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 if (p != null && p.isValid() && p.canRead) p else null
             } else null
         }
+        parentFolderResolved = true
     }
 
     Box(Modifier.weight(1f)) {
@@ -159,7 +178,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
         val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
         CompositionLocalProvider(LocalOverscrollConfiguration provides overscrollConfig) {
         if (preferencesManager.disablePullDownToRefresh) {
-            FilesListContent(tab, parentFolder)
+            FilesListContent(tab, parentFolder, parentFolderResolved)
         } else if (preferencesManager.disableSpringEffect) {
             val noSpringState = rememberPullToRefreshState()
             PullToRefreshBox(
@@ -182,7 +201,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                     )
                 }
             ) {
-                FilesListContent(tab, parentFolder)
+                FilesListContent(tab, parentFolder, parentFolderResolved)
             }
         } else {
             PullToRefreshBox(
@@ -197,7 +216,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                FilesListContent(tab, parentFolder)
+                FilesListContent(tab, parentFolder, parentFolderResolved)
             }
         }
         } // end CompositionLocalProvider
@@ -598,16 +617,24 @@ private fun LoadingOverlay(tab: FilesTab) {
 }
 
 @Composable
-private fun FilesListContent(tab: FilesTab, parentFolder: ContentHolder?) {
+private fun FilesListContent(
+    tab: FilesTab,
+    parentFolder: ContentHolder?,
+    parentFolderResolved: Boolean
+) {
     when (tab.viewConfig.viewType) {
-        ViewType.LIST -> FilesListColumns(tab, parentFolder)
-        ViewType.GRID -> FilesListGrid(tab, parentFolder)
+        ViewType.LIST -> FilesListColumns(tab, parentFolder, parentFolderResolved)
+        ViewType.GRID -> FilesListGrid(tab, parentFolder, parentFolderResolved)
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
+fun FilesListColumns(
+    tab: FilesTab,
+    parentFolder: ContentHolder?,
+    parentFolderResolved: Boolean
+) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
@@ -617,7 +644,7 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
     // on a live SnapshotStateList returns a structural view; if the IO thread
     // clears/reloads the list while Compose iterates it, the iterator throws
     // ConcurrentModificationException — the root cause of the repeated crashes.
-    val snapshot: List<ContentHolder> = tab.activeFolderContent.toList()
+    val snapshot: List<ContentHolder> = tab.contentSnapshot
     val totalItems = snapshot.size
     val chunkSize = if (totalItems == 0) 1 else kotlin.math.ceil(totalItems.toDouble() / cols).toInt()
     val columnSlices = (0 until cols).map { colIndex ->
@@ -627,14 +654,15 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
     }
 
     // --- Folder size scanning for size-relative tint (optional, default Disabled) ---
-    val folderScanEnabled = globalClass.preferencesManager.folderScanForTint
+    val sizeTintEnabled = globalClass.preferencesManager.sizeTintEnabled
+    val folderScanEnabled = sizeTintEnabled && globalClass.preferencesManager.folderScanForTint
     // Keyed by uniquePath -> scanned recursive size. Populated lazily on IO as each
     // folder's walk completes; writing into a SnapshotStateMap triggers recomposition.
     val folderScanSizes = remember(snapshot) { mutableStateMapOf<String, Long>() }
-    if (folderScanEnabled) {
+    if (folderScanEnabled && snapshot.size <= 200) {
         LaunchedEffect(snapshot) {
             folderScanSizes.clear()
-            snapshot.forEach { item ->
+            snapshot.take(50).forEach { item ->
                 if (item.isFolder) {
                     launch(IO) {
                         val scanned = when (item) {
@@ -646,7 +674,7 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
                                 // actual directories on the filesystem.
                                 if (item.file.isDirectory) {
                                     try {
-                                        item.file.walkTopDown().maxDepth(50).onFail { _, _ -> }.forEach { f ->
+                                        item.file.walkTopDown().maxDepth(10).onFail { _, _ -> }.forEach { f ->
                                             if (f.isFile) total += f.length()
                                         }
                                     } catch (_: Throwable) {} // AssertionError extends Error, not Exception
@@ -679,8 +707,58 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
         if (folderScanEnabled && item.isFolder) folderScanSizes[item.uniquePath] ?: 0L
         else item.size
 
-    val maxSiblingSize = snapshot.maxOfOrNull { effectiveSizeOf(it) }?.coerceAtLeast(1L) ?: 1L
+    val maxSiblingSize = if (folderScanEnabled) (snapshot.maxOfOrNull { effectiveSizeOf(it) }?.coerceAtLeast(1L) ?: tab.maxSiblingSize) else tab.maxSiblingSize
     val listStates = List(cols) { rememberLazyListState() }
+    val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val viewConfiguration = LocalViewConfiguration.current
+
+    fun findColumnItemIndex(offset: Offset, viewportWidth: Float): Int? {
+        if (tab.activeFolderContent.isEmpty()) return null
+        val x = offset.x
+        val y = offset.y.toInt()
+        val colWidth = if (cols > 0) viewportWidth / cols else viewportWidth
+        val colIndex = (x / colWidth).toInt().coerceIn(0, cols - 1)
+        val listState = listStates.getOrNull(colIndex) ?: return null
+        val slice = columnSlices.getOrNull(colIndex) ?: return null
+        if (slice.isEmpty()) return null
+
+        val exact = listState.layoutInfo.visibleItemsInfo.find { info ->
+            y >= info.offset && y <= info.offset + info.size
+        }
+        val itemInfo = exact ?: listState.layoutInfo.visibleItemsInfo.minByOrNull { info ->
+            val centerY = info.offset + info.size / 2
+            kotlin.math.abs(y - centerY)
+        } ?: return null
+
+        val sliceIndex = itemInfo.index
+        val globalIndex = colIndex * chunkSize + sliceIndex
+        return if (globalIndex in 0 until tab.activeFolderContent.size) globalIndex else null
+    }
+
+    fun getScrollStateForOffset(offset: Offset, viewportWidth: Float): LazyListState? {
+        val colWidth = if (cols > 0) viewportWidth / cols else viewportWidth
+        val colIndex = (offset.x / colWidth).toInt().coerceIn(0, cols - 1)
+        return listStates.getOrNull(colIndex)
+    }
+
+    LaunchedEffect(
+        tab.pendingLocateFilePath,
+        tab.activeFolder.uniquePath,
+        snapshot.size,
+        parentFolderResolved,
+        tab.viewConfig.columnCount
+    ) {
+        val path = tab.pendingLocateFilePath
+        if (path != null && parentFolderResolved) {
+            val targetIndex = snapshot.indexOfFirst { it.uniquePath == path }
+            if (targetIndex >= 0) {
+                val targetColumn = (targetIndex / chunkSize).coerceIn(0, listStates.lastIndex)
+                listStates[targetColumn].scrollToItem(targetIndex % chunkSize)
+                if (tab.pendingLocateFilePath == path) tab.pendingLocateFilePath = null
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (parentFolder != null) {
@@ -691,6 +769,124 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f)
+                .pointerInput(tab.activeFolder.uniquePath, tab.activeFolderContent.size) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val initialIndex = findColumnItemIndex(down.position, size.width.toFloat()) ?: return@awaitEachGesture
+                        val longPressTimeout = if (tab.selectedFiles.isNotEmpty()) 220L else viewConfiguration.longPressTimeoutMillis
+
+                        var currentDown = down
+                        val longPress = try {
+                            withTimeout(longPressTimeout) {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.find { it.id == currentDown.id } ?: return@withTimeout null
+                                    if (!change.pressed) return@withTimeout null
+                                    val dist = (change.position - down.position).getDistance()
+                                    if (dist > viewConfiguration.touchSlop) return@withTimeout null
+                                    currentDown = change
+                                }
+                                null
+                            }
+                        } catch (_: PointerEventTimeoutCancellationException) {
+                            currentDown
+                        }
+
+                        if (longPress != null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val startIndex = initialIndex
+                            var hasDragged = false
+                            var currentPosition = down.position
+                            val initialSelectedPaths = tab.selectedFiles.keys.toSet()
+                            var lastSelectedBatch = setOf<String>()
+                            var autoScrollJob: Job? = null
+
+                            fun updateSelectionForIndex(idx: Int) {
+                                val minIdx = minOf(startIndex, idx)
+                                val maxIdx = maxOf(startIndex, idx)
+                                val currentBatch = mutableSetOf<String>()
+                                for (i in minIdx..maxIdx) {
+                                    if (i in 0 until tab.activeFolderContent.size) {
+                                        val file = tab.activeFolderContent[i]
+                                        currentBatch.add(file.uniquePath)
+                                        tab.selectedFiles[file.uniquePath] = file
+                                    }
+                                }
+                                lastSelectedBatch.forEach { path ->
+                                    if (path !in currentBatch && path !in initialSelectedPaths) {
+                                        tab.selectedFiles.remove(path)
+                                    }
+                                }
+                                lastSelectedBatch = currentBatch
+                                tab.selectedFilesCount = tab.selectedFiles.size
+                                tab.dragSelectionVersion++
+                            }
+
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.find { it.id == down.id } ?: break
+                                if (change.pressed) {
+                                    val dist = (change.position - down.position).getDistance()
+                                    if (!hasDragged && dist > viewConfiguration.touchSlop) {
+                                        hasDragged = true
+                                    }
+
+                                    if (hasDragged) {
+                                        change.consume()
+                                        currentPosition = change.position
+                                        val currentIdx = findColumnItemIndex(currentPosition, size.width.toFloat()) ?: startIndex
+                                        updateSelectionForIndex(currentIdx)
+
+                                        val viewportHeight = size.height.toFloat()
+                                        val edgeThreshold = 80.dp.toPx()
+                                        val activeScrollState = getScrollStateForOffset(currentPosition, size.width.toFloat())
+                                        if (currentPosition.y < edgeThreshold) {
+                                            if (autoScrollJob == null || !autoScrollJob!!.isActive) {
+                                                autoScrollJob = coroutineScope.launch {
+                                                    while (isActive && currentPosition.y < edgeThreshold) {
+                                                        val factor = ((edgeThreshold - currentPosition.y) / edgeThreshold).coerceIn(0.1f, 1f)
+                                                        activeScrollState?.scrollBy(-35f * factor)
+                                                        findColumnItemIndex(currentPosition, size.width.toFloat())?.let { updateSelectionForIndex(it) }
+                                                        delay(16)
+                                                    }
+                                                }
+                                            }
+                                        } else if (currentPosition.y > viewportHeight - edgeThreshold) {
+                                            if (autoScrollJob == null || !autoScrollJob!!.isActive) {
+                                                autoScrollJob = coroutineScope.launch {
+                                                    while (isActive && currentPosition.y > viewportHeight - edgeThreshold) {
+                                                        val factor = ((currentPosition.y - (viewportHeight - edgeThreshold)) / edgeThreshold).coerceIn(0.1f, 1f)
+                                                        activeScrollState?.scrollBy(35f * factor)
+                                                        findColumnItemIndex(currentPosition, size.width.toFloat())?.let { updateSelectionForIndex(it) }
+                                                        delay(16)
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            autoScrollJob?.cancel()
+                                            autoScrollJob = null
+                                        }
+                                    }
+                                } else {
+                                    autoScrollJob?.cancel()
+                                    autoScrollJob = null
+                                    if (!hasDragged) {
+                                        val item = tab.activeFolderContent.getOrNull(startIndex)
+                                        if (item != null) {
+                                            handleLongClick(tab, item.uniquePath, item, startIndex)
+                                        }
+                                    } else {
+                                        tab.lastSelectedFileIndex = findColumnItemIndex(currentPosition, size.width.toFloat()) ?: startIndex
+                                        tab.selectedFilesCount = tab.selectedFiles.size
+                                        tab.dragSelectionVersion++
+                                        tab.onSelectionChange()
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
         ) {
             columnSlices.forEachIndexed { colIndex, slice ->
                 val listState = listStates[colIndex]
@@ -706,9 +902,6 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
                         key = { _, item -> item.uniquePath }
                     ) { sliceIndex, item ->
                         val globalIndex = colIndex * chunkSize + sliceIndex
-                        val currentItemPath = item.uniquePath
-                        val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
-                        var isSelectedItem by remember(isAlreadySelected) { mutableStateOf(isAlreadySelected) }
                         ColumnFileItem(
                             item = item,
                             index = globalIndex,
@@ -717,10 +910,8 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
                             highlightColor = highlightColor,
                             context = context,
                             viewConfigs = tab.viewConfig,
-                            isSelectedItem = isSelectedItem,
                             effectiveSize = effectiveSizeOf(item),
-                            maxSiblingSize = maxSiblingSize,
-                            onSelection = { isSelectedItem = it }
+                            maxSiblingSize = maxSiblingSize
                         )
                     }
                 }
@@ -731,10 +922,49 @@ fun FilesListColumns(tab: FilesTab, parentFolder: ContentHolder?) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
+fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResolved: Boolean) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
+    val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val viewConfiguration = LocalViewConfiguration.current
+
+    LaunchedEffect(
+        tab.pendingLocateFilePath,
+        tab.activeFolder.uniquePath,
+        tab.activeFolderContent.size,
+        parentFolder,
+        parentFolderResolved
+    ) {
+        val path = tab.pendingLocateFilePath
+        if (path != null && parentFolderResolved) {
+            val targetIndex = tab.activeFolderContent.indexOfFirst { it.uniquePath == path }
+            if (targetIndex >= 0) {
+                tab.activeListState.scrollToItem(targetIndex + if (parentFolder != null) 1 else 0)
+                if (tab.pendingLocateFilePath == path) tab.pendingLocateFilePath = null
+            }
+        }
+    }
+
+    fun findGridItemIndex(offset: Offset): Int? {
+        if (tab.activeFolderContent.isEmpty()) return null
+        val x = offset.x.toInt()
+        val y = offset.y.toInt()
+        val itemInfo = tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
+            x >= info.offset.x && x <= info.offset.x + info.size.width &&
+            y >= info.offset.y && y <= info.offset.y + info.size.height
+        } ?: tab.activeListState.layoutInfo.visibleItemsInfo.minByOrNull { info ->
+            val centerX = info.offset.x + info.size.width / 2
+            val centerY = info.offset.y + info.size.height / 2
+            val dx = x - centerX
+            val dy = y - centerY
+            dx * dx + dy * dy
+        } ?: return null
+
+        val contentIndex = if (parentFolder != null) itemInfo.index - 1 else itemInfo.index
+        return if (contentIndex in 0 until tab.activeFolderContent.size) contentIndex else null
+    }
 
     LazyVerticalGrid(
         state = tab.activeListState,
@@ -742,8 +972,125 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
         modifier = Modifier
             .fillMaxSize()
             .fastScrollbar(tab.activeListState)
+            .pointerInput(tab.activeFolder.uniquePath, tab.activeFolderContent.size) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val initialIndex = findGridItemIndex(down.position) ?: return@awaitEachGesture
+                    val longPressTimeout = if (tab.selectedFiles.isNotEmpty()) 220L else viewConfiguration.longPressTimeoutMillis
+
+                    var currentDown = down
+                    val longPress = try {
+                        withTimeout(longPressTimeout) {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.find { it.id == currentDown.id } ?: return@withTimeout null
+                                if (!change.pressed) return@withTimeout null
+                                val dist = (change.position - down.position).getDistance()
+                                if (dist > viewConfiguration.touchSlop) return@withTimeout null
+                                currentDown = change
+                            }
+                            null
+                        }
+                    } catch (_: PointerEventTimeoutCancellationException) {
+                        currentDown
+                    }
+
+                    if (longPress != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val startIndex = initialIndex
+                        var hasDragged = false
+                        var currentPosition = down.position
+                        val initialSelectedPaths = tab.selectedFiles.keys.toSet()
+                        var lastSelectedBatch = setOf<String>()
+                        var autoScrollJob: Job? = null
+
+                        fun updateSelectionForIndex(idx: Int) {
+                            val minIdx = minOf(startIndex, idx)
+                            val maxIdx = maxOf(startIndex, idx)
+                            val currentBatch = mutableSetOf<String>()
+                            for (i in minIdx..maxIdx) {
+                                if (i in 0 until tab.activeFolderContent.size) {
+                                    val file = tab.activeFolderContent[i]
+                                    currentBatch.add(file.uniquePath)
+                                    tab.selectedFiles[file.uniquePath] = file
+                                }
+                            }
+                            lastSelectedBatch.forEach { path ->
+                                if (path !in currentBatch && path !in initialSelectedPaths) {
+                                    tab.selectedFiles.remove(path)
+                                }
+                            }
+                            lastSelectedBatch = currentBatch
+                            tab.selectedFilesCount = tab.selectedFiles.size
+                            tab.dragSelectionVersion++
+                        }
+
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.find { it.id == down.id } ?: break
+                            if (change.pressed) {
+                                val dist = (change.position - down.position).getDistance()
+                                if (!hasDragged && dist > viewConfiguration.touchSlop) {
+                                    hasDragged = true
+                                }
+
+                                if (hasDragged) {
+                                    change.consume()
+                                    currentPosition = change.position
+                                    val currentIdx = findGridItemIndex(currentPosition) ?: startIndex
+                                    updateSelectionForIndex(currentIdx)
+
+                                    val viewportHeight = size.height.toFloat()
+                                    val edgeThreshold = 80.dp.toPx()
+                                    if (currentPosition.y < edgeThreshold) {
+                                        if (autoScrollJob == null || !autoScrollJob!!.isActive) {
+                                            autoScrollJob = coroutineScope.launch {
+                                                while (isActive && currentPosition.y < edgeThreshold) {
+                                                    val factor = ((edgeThreshold - currentPosition.y) / edgeThreshold).coerceIn(0.1f, 1f)
+                                                    tab.activeListState.scrollBy(-35f * factor)
+                                                    findGridItemIndex(currentPosition)?.let { updateSelectionForIndex(it) }
+                                                    delay(16)
+                                                }
+                                            }
+                                        }
+                                    } else if (currentPosition.y > viewportHeight - edgeThreshold) {
+                                        if (autoScrollJob == null || !autoScrollJob!!.isActive) {
+                                            autoScrollJob = coroutineScope.launch {
+                                                while (isActive && currentPosition.y > viewportHeight - edgeThreshold) {
+                                                    val factor = ((currentPosition.y - (viewportHeight - edgeThreshold)) / edgeThreshold).coerceIn(0.1f, 1f)
+                                                    tab.activeListState.scrollBy(35f * factor)
+                                                    findGridItemIndex(currentPosition)?.let { updateSelectionForIndex(it) }
+                                                    delay(16)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        autoScrollJob?.cancel()
+                                        autoScrollJob = null
+                                    }
+                                }
+                            } else {
+                                autoScrollJob?.cancel()
+                                autoScrollJob = null
+                                if (!hasDragged) {
+                                    val item = tab.activeFolderContent.getOrNull(startIndex)
+                                    if (item != null) {
+                                        handleLongClick(tab, item.uniquePath, item, startIndex)
+                                    }
+                                } else {
+                                    tab.lastSelectedFileIndex = findGridItemIndex(currentPosition) ?: startIndex
+                                    tab.selectedFilesCount = tab.selectedFiles.size
+                                    tab.dragSelectionVersion++
+                                    tab.onSelectionChange()
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
+            }
     ) {
-        val maxSiblingSize = tab.activeFolderContent.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+        val maxSiblingSize = tab.maxSiblingSize
 
         // `..` parent directory entry (spans full width)
         if (parentFolder != null) {
@@ -753,15 +1100,11 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
         }
 
         itemsIndexed(
-            tab.activeFolderContent,
+            tab.contentSnapshot,
             key = { _, item -> item.uniquePath }
         ) { index, item ->
-            val currentItemPath = item.uniquePath
-            val isAlreadySelected = tab.selectedFiles.containsKey(currentItemPath)
-            var isSelectedItem by remember(isAlreadySelected) { mutableStateOf(isAlreadySelected) }
             GridFileItem(
-                itemPath = currentItemPath,
-                isSelected = isSelectedItem,
+                itemPath = item.uniquePath,
                 item = item,
                 index = index,
                 tab = tab,
@@ -769,15 +1112,12 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?) {
                 highlightColor = highlightColor,
                 context = context,
                 viewConfigs = tab.viewConfig,
-                isSelectedItem = isSelectedItem,
-                maxSiblingSize = maxSiblingSize,
-                onSelection = { isSelectedItem = it }
+                maxSiblingSize = maxSiblingSize
             )
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ColumnFileItem(
     item: ContentHolder,
@@ -787,24 +1127,22 @@ private fun ColumnFileItem(
     highlightColor: Color,
     context: Context,
     viewConfigs: ViewConfigs,
-    isSelectedItem: Boolean,
     effectiveSize: Long = item.size,
-    maxSiblingSize: Long = 1L,
-    onSelection: (Boolean) -> Unit
+    maxSiblingSize: Long = 1L
 ) {
     val currentItemPath = item.uniquePath
-    val isSelected = isSelectedItem || tab.selectedFiles.containsKey(currentItemPath)
+    val isSelected = tab.dragSelectionVersion >= 0 && tab.selectedFiles.containsKey(currentItemPath)
+    val sizeTintEnabled = globalClass.preferencesManager.sizeTintEnabled
 
     fun toggleSelection() {
         if (isSelected) {
             tab.selectedFiles.remove(currentItemPath)
             tab.lastSelectedFileIndex = -1
-            onSelection(false)
         } else {
             tab.selectedFiles[currentItemPath] = item
             tab.lastSelectedFileIndex = index
-            onSelection(true)
         }
+        tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
     }
@@ -830,7 +1168,7 @@ private fun ColumnFileItem(
                 }
             )
             .drawBehind {
-                if (!isSelected && maxSiblingSize > 0L && effectiveSize > 0L) {
+                if (sizeTintEnabled && !isSelected && maxSiblingSize > 0L && effectiveSize > 0L) {
                     val fraction = (effectiveSize.toFloat() / maxSiblingSize).coerceIn(0f, 1f)
                     drawRect(
                         color = tintColor,
@@ -838,24 +1176,19 @@ private fun ColumnFileItem(
                     )
                 }
             }
-            .combinedClickable(
-                onClick = {
-                    if (tab.selectedFiles.isNotEmpty()) {
-                        toggleSelection()
+            .clickable {
+                if (tab.selectedFiles.isNotEmpty()) {
+                    toggleSelection()
+                } else {
+                    if (item.isSymbolicLink && item.isSymbolicLinkBroken) {
+                        showMsg(globalClass.getString(R.string.symbolic_link_broken))
+                    } else if (item.isFile()) {
+                        tab.openFile(context, item)
                     } else {
-                        if (item.isSymbolicLink && item.isSymbolicLinkBroken) {
-                            showMsg(globalClass.getString(R.string.symbolic_link_broken))
-                        } else if (item.isFile()) {
-                            tab.openFile(context, item)
-                        } else {
-                            tab.openFolder(item, false)
-                        }
+                        tab.openFolder(item, false)
                     }
-                },
-                onLongClick = {
-                    handleLongClick(tab, currentItemPath, item, index)
                 }
-            )
+            }
     ) {
         Space(size = FileItemSizeMap.getSpace(viewConfigs.itemSize).dp)
 
@@ -868,7 +1201,6 @@ private fun ColumnFileItem(
                 size = FileItemSizeMap.getIconSize(viewConfigs.itemSize).dp,
                 viewConfigs = viewConfigs,
                 onClick = { toggleSelection() },
-                onLongClick = { handleLongClick(tab, currentItemPath, item, index) },
                 sourceInfo = sourceInfo
             )
 
@@ -909,18 +1241,18 @@ private fun ColumnFileItem(
 
         Space(size = FileItemSizeMap.getSpace(viewConfigs.itemSize).dp)
 
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 56.dp),
-            thickness = 0.5.dp
-        )
+        if (globalClass.preferencesManager.showFileListDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 56.dp),
+                thickness = 0.5.dp
+            )
+        }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GridFileItem(
     itemPath: String,
-    isSelected: Boolean,
     item: ContentHolder,
     index: Int,
     tab: FilesTab,
@@ -928,20 +1260,19 @@ private fun GridFileItem(
     highlightColor: Color,
     context: Context,
     viewConfigs: ViewConfigs,
-    isSelectedItem: Boolean,
-    maxSiblingSize: Long = 1L,
-    onSelection: (Boolean) -> Unit
+    maxSiblingSize: Long = 1L
 ) {
+    val isSelected = tab.dragSelectionVersion >= 0 && tab.selectedFiles.containsKey(itemPath)
+
     fun toggleSelection() {
         if (isSelected) {
             tab.selectedFiles.remove(itemPath)
             tab.lastSelectedFileIndex = -1
-            onSelection(false)
         } else {
             tab.selectedFiles[itemPath] = item
             tab.lastSelectedFileIndex = index
-            onSelection(true)
         }
+        tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
     }
@@ -953,29 +1284,25 @@ private fun GridFileItem(
         }
     } else null
 
+    val sizeTintEnabled = globalClass.preferencesManager.sizeTintEnabled
     val tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (viewConfigs.galleryMode) Modifier.aspectRatio(1f) else Modifier)
-            .combinedClickable(
-                onClick = {
-                    if (tab.selectedFiles.isNotEmpty()) {
-                        toggleSelection()
+            .clickable {
+                if (tab.selectedFiles.isNotEmpty()) {
+                    toggleSelection()
+                } else {
+                    if (item.isSymbolicLink && item.isSymbolicLinkBroken) {
+                        showMsg(globalClass.getString(R.string.symbolic_link_broken))
+                    } else if (item.isFile()) {
+                        tab.openFile(context, item)
                     } else {
-                        if (item.isSymbolicLink && item.isSymbolicLinkBroken) {
-                            showMsg(globalClass.getString(R.string.symbolic_link_broken))
-                        } else if (item.isFile()) {
-                            tab.openFile(context, item)
-                        } else {
-                            tab.openFolder(item, false)
-                        }
+                        tab.openFolder(item, false)
                     }
-                },
-                onLongClick = {
-                    handleLongClick(tab, itemPath, item, index)
                 }
-            )
+            }
             .background(
                 color = if (isSelected) {
                     selectionHighlightColor
@@ -986,7 +1313,7 @@ private fun GridFileItem(
                 }
             )
             .drawBehind {
-                if (!isSelected && maxSiblingSize > 0L && item.size > 0L) {
+                if (sizeTintEnabled && !isSelected && maxSiblingSize > 0L && item.size > 0L) {
                     val fraction = (item.size.toFloat() / maxSiblingSize).coerceIn(0f, 1f)
                     drawRect(
                         color = tintColor,
@@ -1024,9 +1351,6 @@ private fun GridFileItem(
                         }
                     },
                     viewConfigs = viewConfigs,
-                    onLongClick = {
-                        handleLongClick(tab, itemPath, item, index)
-                    },
                     sourceInfo = sourceInfo
                 )
                 if (isSelected) {
@@ -1108,7 +1432,6 @@ private fun FileIcon(
     size: Dp,
     viewConfigs: ViewConfigs,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
     sourceInfo: SourceFolderInfo? = null
 ) {
     val sizeModifier = if (viewConfigs.viewType == ViewType.GRID && viewConfigs.galleryMode) {
@@ -1122,10 +1445,7 @@ private fun FileIcon(
             modifier = Modifier
                 .then(sizeModifier)
                 .clip(RoundedCornerShape(4.dp))
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = onLongClick
-                )
+                .clickable(onClick = onClick)
                 .graphicsLayer { alpha = if (item.isHidden()) 0.4f else 1f },
         ) {
             var useCoil by remember(item.uniquePath) {

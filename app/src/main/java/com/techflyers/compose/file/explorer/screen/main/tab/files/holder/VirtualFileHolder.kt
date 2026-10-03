@@ -29,6 +29,10 @@ class VirtualFileHolder(
     var selectedCategory: FileListCategory? = null
     var selectedFormats: Set<String> = emptySet()
 
+    var hasMoreContent = true
+        private set
+    private var currentOffset = 0
+
     override val displayName = when (type) {
         BOOKMARKS -> globalClass.getString(R.string.bookmarks)
         AUDIO -> globalClass.getString(R.string.audios)
@@ -63,37 +67,56 @@ class VirtualFileHolder(
         }
 
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
-        if (type == RECENT && sortingPrefs == globalClass.preferencesManager.getDefaultSortingPrefs()) {
-            return listContent().apply {
-                if (!globalClass.preferencesManager.showHiddenFiles) {
-                    removeIf { it.isHidden() }
-                }
-            }
+        val content = listContent()
+        if (!globalClass.preferencesManager.showHiddenFiles) {
+            content.removeIf { it.isHidden() }
+        }
+
+        // MediaStore already applies SQL ORDER BY for name, date, and size.
+        // Since category views only contain files, folders-first has no effect;
+        // skipping second in-memory sort prevents expensive O(n log n) passes.
+        if (sortingPrefs.sortMethod in listOf(
+                com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME,
+                com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE,
+                com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SIZE
+            )
+        ) {
+            return content
         }
         return super.listSortedContent()
     }
 
     override suspend fun listContent(): ArrayList<out ContentHolder> {
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
-        when (type) {
+        currentOffset = 0
+        hasMoreContent = true
+
+        val rawItems = when (type) {
             BOOKMARKS -> getBookmarks()
-            AUDIO -> getAudioFiles(sortingPrefs)
-            VIDEO -> getVideoFiles(sortingPrefs)
-            IMAGE -> getImageFiles(sortingPrefs)
-            ARCHIVE -> getArchiveFiles(sortingPrefs)
-            DOCUMENT -> getDocumentFiles(sortingPrefs)
-            RECENT -> getRecentFiles()
+            AUDIO -> getAudioFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            VIDEO -> getVideoFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            IMAGE -> getImageFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            RECENT -> getRecentFiles(limit = PAGE_SIZE, offset = 0)
             SEARCH -> getSearchResult()
             DUPLICATES -> ArrayList(customItems ?: emptyList())
-            APK -> getApkFiles(sortingPrefs)
+            APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
             else -> arrayListOf()
-        }.also {
-            contentList.apply {
-                clear()
-                addAll(it)
-            }
-            if (type != BOOKMARKS && type != DUPLICATES) fetchCategories()
         }
+
+        if (type != BOOKMARKS && type != SEARCH && type != DUPLICATES) {
+            if (rawItems.size < PAGE_SIZE) {
+                hasMoreContent = false
+            }
+            currentOffset = rawItems.size
+        } else {
+            hasMoreContent = false
+        }
+
+        contentList.clear()
+        contentList.addAll(rawItems)
+        if (type != BOOKMARKS && type != DUPLICATES) fetchCategories()
 
         return contentList.filter {
             val categoryOk = selectedCategory == null ||
@@ -103,12 +126,43 @@ class VirtualFileHolder(
         }.toCollection(arrayListOf()).also { fileCount = it.size }
     }
 
+    suspend fun loadNextPage(): List<ContentHolder> {
+        if (!hasMoreContent || currentOffset >= MAX_PAGED_CAP) return emptyList()
+        val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
+        val nextPage = when (type) {
+            AUDIO -> getAudioFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            VIDEO -> getVideoFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            IMAGE -> getImageFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            RECENT -> getRecentFiles(limit = PAGE_SIZE, offset = currentOffset)
+            APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            else -> arrayListOf()
+        }
+
+        if (nextPage.size < PAGE_SIZE || currentOffset + nextPage.size >= MAX_PAGED_CAP) {
+            hasMoreContent = false
+        }
+        currentOffset += nextPage.size
+
+        contentList.addAll(nextPage)
+        fetchCategories()
+
+        return nextPage.filter {
+            val categoryOk = selectedCategory == null ||
+                it.uniquePath == (selectedCategory!!.data as File).path + File.separator + it.displayName
+            val formatOk = selectedFormats.isEmpty() || it.extension.lowercase() in selectedFormats
+            categoryOk && formatOk
+        }.also { fileCount = contentList.size }
+    }
+
     private fun fetchCategories() {
         categories.clear()
+        val seen = HashSet<String>()
         contentList.forEach { content ->
             if (content is LocalFileHolder) {
                 val parentPath = content.file.parent
-                if (parentPath != null && !categories.contains(parentPath)) {
+                if (parentPath != null && seen.add(parentPath)) {
                     categories.add(parentPath)
                 }
             }
@@ -143,6 +197,8 @@ class VirtualFileHolder(
     override suspend fun getContentCount() = ContentCount(files = fileCount)
 
     companion object {
+        const val PAGE_SIZE = 200
+        const val MAX_PAGED_CAP = 5000
         const val BOOKMARKS = 0
         const val AUDIO = 1
         const val VIDEO = 2

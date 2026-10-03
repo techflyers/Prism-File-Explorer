@@ -28,6 +28,41 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import java.io.File
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Dialog
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.common.emptyString
+import com.techflyers.compose.file.explorer.common.isValidAsFileName
+import com.techflyers.compose.file.explorer.common.joinFileName
+import com.techflyers.compose.file.explorer.common.splitFileName
+import com.techflyers.compose.file.explorer.common.ui.Space
+import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
+import com.techflyers.compose.file.explorer.screen.main.MainActivity
+import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateRight
@@ -116,6 +151,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
     var showControls by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
     var imageInfo by remember { mutableStateOf<ImageInfo?>(null) }
     var rotationAngle by remember { mutableFloatStateOf(0f) }
@@ -134,6 +170,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 
     val safeIndex = pagerState.currentPage.coerceIn(0, (imageList.size - 1).coerceAtLeast(0))
     val currentUri = imageList.getOrNull(safeIndex)
+    val currentResolvedPath = imagePaths.getOrNull(safeIndex) ?: imageInfo?.path ?: (context as? ImageViewerActivity)?.let { ImageViewerActivity.resolveFilePath(it, currentUri ?: instance.uri) }
 
     val archiveSession = remember { (context as? ImageViewerActivity)?.intent?.let { ArchiveMediaQueueManager.getOrCreateSession(it) } }
 
@@ -363,15 +400,32 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
         ) {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = imageInfo?.name ?: (currentUri.lastPathSegment
-                                ?: stringResource(R.string.unknown)),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(enabled = currentResolvedPath != null) {
+                                showRenameDialog = true
+                            }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = imageInfo?.name ?: (currentUri.lastPathSegment
+                                    ?: stringResource(R.string.unknown)),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (currentResolvedPath != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = stringResource(R.string.rename),
+                                    modifier = Modifier.size(13.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
                         val subtitle = buildString {
                             imageInfo?.let { info ->
                                 append("${info.size} • ${info.dimensions}")
@@ -400,6 +454,33 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                     }
                 },
                 actions = {
+                    if (currentResolvedPath != null) {
+                        IconButton(onClick = {
+                            val file = File(currentResolvedPath)
+                            if (file.exists()) {
+                                val localHolder = LocalFileHolder(file)
+                                val activeTab = globalClass.mainActivityManager.getActiveTab()
+                                if (activeTab is FilesTab) {
+                                    globalClass.mainActivityManager.replaceCurrentTabWith(FilesTab(source = localHolder))
+                                } else {
+                                    globalClass.mainActivityManager.addTabAndSelect(FilesTab(source = localHolder))
+                                }
+                                val intent = Intent(context, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                }
+                                context.startActivity(intent)
+                                (context as? ViewerActivity)?.finish()
+                            } else {
+                                globalClass.showMsg(R.string.file_not_found)
+                            }
+                        }) {
+                            Icon(
+                                imageVector = Icons.Rounded.MyLocation,
+                                contentDescription = stringResource(R.string.locate),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                     IconButton(onClick = {
                         val openIntent = Intent(Intent.ACTION_VIEW).apply {
                             data = currentUri
@@ -577,6 +658,242 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                     }
                 }
             )
+        }
+
+        if (showRenameDialog && currentResolvedPath != null) {
+            val currentFile = File(currentResolvedPath)
+            val split = remember(currentFile.absolutePath, currentFile.name) {
+                splitFileName(currentFile.name, isFolder = false)
+            }
+            var nameInput by remember(currentFile.absolutePath, currentFile.name) {
+                mutableStateOf(TextFieldValue(split.first, TextRange(split.first.length)))
+            }
+            var extensionInput by remember(currentFile.absolutePath, currentFile.name) {
+                mutableStateOf(TextFieldValue(split.second, TextRange(split.second.length)))
+            }
+            val newNameInput = joinFileName(nameInput.text, extensionInput.text)
+            var error by remember(currentFile.absolutePath) { mutableStateOf("") }
+            val extensionFocusRequester = remember { FocusRequester() }
+            val moveToExtension = {
+                extensionInput = extensionInput.copy(selection = TextRange(extensionInput.text.length))
+                extensionFocusRequester.requestFocus()
+            }
+
+            LaunchedEffect(newNameInput) {
+                val parent = currentFile.parentFile
+                val targetFile = if (parent != null) File(parent, newNameInput) else null
+                val isSameFileCaseChange = targetFile != null && targetFile.exists() && targetFile.name.equals(currentFile.name, ignoreCase = true)
+                error = if (newNameInput.isBlank() || newNameInput == currentFile.name) {
+                    emptyString
+                } else if (!newNameInput.isValidAsFileName()) {
+                    globalClass.getString(R.string.invalid_file_name)
+                } else if (targetFile != null && targetFile.exists() && !isSameFileCaseChange) {
+                    globalClass.getString(R.string.similar_file_exists)
+                } else {
+                    emptyString
+                }
+            }
+
+            val canRename = error.isEmpty() && nameInput.text.isNotBlank() && newNameInput != currentFile.name
+
+            val executeRename: () -> Unit = {
+                if (canRename) {
+                    scope.launch {
+                        val parent = currentFile.parentFile
+                        if (parent != null) {
+                            val newFile = File(parent, newNameInput)
+                            val isSameFileCaseChange = newFile.exists() && newFile.name.equals(currentFile.name, ignoreCase = true)
+                            if (newFile.exists() && !isSameFileCaseChange) {
+                                globalClass.showMsg(R.string.similar_file_exists)
+                                return@launch
+                            }
+                            var renamed = currentFile.renameTo(newFile)
+                            if (!renamed && currentFile.name.equals(newNameInput, ignoreCase = true)) {
+                                val tempFile = File(parent, "${currentFile.name}_tmp_${System.currentTimeMillis()}")
+                                if (currentFile.renameTo(tempFile)) {
+                                    renamed = tempFile.renameTo(newFile)
+                                    if (!renamed) {
+                                        tempFile.renameTo(currentFile)
+                                    }
+                                }
+                            }
+                            if (renamed) {
+                                android.media.MediaScannerConnection.scanFile(
+                                    context,
+                                    arrayOf(currentFile.absolutePath, newFile.absolutePath),
+                                    null,
+                                    null
+                                )
+                                val newUri = try {
+                                    androidx.core.content.FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        newFile
+                                    )
+                                } catch (_: Exception) {
+                                    android.net.Uri.fromFile(newFile)
+                                }
+                                withContext(Dispatchers.Main) {
+                                    val newPaths = imagePaths.toMutableList()
+                                    val newUris = imageUris.toMutableList()
+                                    if (safeIndex in newPaths.indices) {
+                                        newPaths[safeIndex] = newFile.absolutePath
+                                        imagePaths = newPaths
+                                    }
+                                    if (safeIndex in newUris.indices) {
+                                        newUris[safeIndex] = newUri
+                                        imageUris = newUris
+                                    }
+                                    imageInfo = extractImageInfo(newUri, explicitPath = newFile.absolutePath)
+                                    showRenameDialog = false
+                                    globalClass.mainActivityManager.refreshAllTabs()
+                                }
+                            } else {
+                                globalClass.showMsg(R.string.unable_to_continue_task)
+                            }
+                        }
+                    }
+                } else if (newNameInput == currentFile.name) {
+                    showRenameDialog = false
+                } else if (error.isNotEmpty()) {
+                    globalClass.showMsg(error)
+                }
+            }
+
+            Dialog(onDismissRequest = { showRenameDialog = false }) {
+                Card(
+                    shape = RoundedCornerShape(6.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Column {
+                            Text(
+                                modifier = Modifier.fillMaxWidth(),
+                                text = stringResource(R.string.rename),
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Space(8.dp)
+                            HorizontalDivider(
+                                thickness = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            TextField(
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .autoShowKeyboard()
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
+                                            moveToExtension()
+                                            true
+                                        } else false
+                                    },
+                                value = nameInput,
+                                onValueChange = { nameInput = it },
+                                label = { Text(text = stringResource(R.string.name)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                keyboardActions = KeyboardActions(
+                                    onNext = { moveToExtension() },
+                                    onDone = { moveToExtension() },
+                                    onGo = { moveToExtension() }
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = TextFieldDefaults.colors(
+                                    errorIndicatorColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                isError = error.isNotEmpty()
+                            )
+                            TextField(
+                                modifier = Modifier
+                                    .weight(0.8f)
+                                    .focusRequester(extensionFocusRequester)
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
+                                            executeRename()
+                                            true
+                                        } else false
+                                    },
+                                value = extensionInput,
+                                onValueChange = {
+                                    val clean = it.text.replace(".", "")
+                                    val newSelection = if (clean != it.text) TextRange(clean.length) else it.selection
+                                    extensionInput = it.copy(text = clean, selection = newSelection)
+                                },
+                                label = { Text(text = stringResource(R.string.extension)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = { executeRename() },
+                                    onNext = { executeRename() },
+                                    onGo = { executeRename() }
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = TextFieldDefaults.colors(
+                                    errorIndicatorColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                )
+                            )
+                        }
+
+                        if (error.isNotEmpty()) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                onClick = { showRenameDialog = false },
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.cancel),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = executeRename,
+                                enabled = canRename,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.rename),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

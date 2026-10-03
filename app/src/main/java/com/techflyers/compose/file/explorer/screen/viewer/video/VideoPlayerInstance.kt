@@ -193,6 +193,20 @@ class VideoPlayerInstance(
         exoPlayer?.seekTo(position)
     }
 
+    fun seekBy(offsetMs: Long) {
+        exoPlayer?.let { player ->
+            val targetPosition = (player.currentPosition + offsetMs).coerceAtLeast(0L)
+            val duration = player.duration
+            player.seekTo(
+                if (duration != TIME_UNSET && duration >= 0L) {
+                    targetPosition.coerceAtMost(duration)
+                } else {
+                    targetPosition
+                }
+            )
+        }
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         exoPlayer?.setPlaybackSpeed(speed)
         _playerState.update { it.copy(playbackSpeed = speed) }

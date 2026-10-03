@@ -285,6 +285,9 @@ class TextViewerInstance(
                 }
             }
 
+            // Opening a text/code file should never make it editable by accident.
+            // The existing Read only option remains the explicit way to enable edits.
+            globalClass.preferencesManager.readOnly = true
             globalClass.preferencesManager.let {
                 editable = !it.readOnly
                 setPinLineNumber(it.pinLineNumber)

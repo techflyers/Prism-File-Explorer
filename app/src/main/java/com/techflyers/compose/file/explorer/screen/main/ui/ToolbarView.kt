@@ -203,7 +203,20 @@ fun Toolbar(
 
         if (isFilesTab) {
             val filesTab = activeTab as FilesTab
-            if (filesTab.canGoForward()) {
+            val isSelectionActive = filesTab.selectedFiles.isNotEmpty() || filesTab.selectedFilesCount > 0
+            if (isSelectionActive) {
+                TooltipIconButton(
+                    tooltip = stringResource(R.string.deselect_all),
+                    onClick = { filesTab.unselectAllFiles() },
+                    modifier = buttonModifier
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.deselect_all),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else if (filesTab.canGoForward()) {
                 TooltipIconButton(
                     tooltip = stringResource(R.string.forward),
                     onClick = { filesTab.goForward() },

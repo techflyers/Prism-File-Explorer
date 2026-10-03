@@ -92,6 +92,17 @@ import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+
 @Composable
 fun RenameDialog(
     show: Boolean,
@@ -100,26 +111,72 @@ fun RenameDialog(
 ) {
     if (show) {
         if (tab.selectedFiles.size == 1) {
-            val target by remember { mutableStateOf(tab.selectedFiles.values.first()) }
-            val listContent by remember {
-                mutableStateOf(tab.activeFolderContent.map { it.displayName }.toTypedArray())
+            val target = tab.selectedFiles.values.firstOrNull() ?: return
+            val otherFileNames = remember(tab.activeFolderContent.size, target.uniquePath) {
+                tab.activeFolderContent.filter { it.uniquePath != target.uniquePath }.map { it.displayName }.toSet()
             }
-            val split = remember(target.displayName, target.isFolder) {
+            val split = remember(target.uniquePath, target.displayName) {
                 splitFileName(target.displayName, target.isFolder)
             }
-            var nameInput by remember {
-                mutableStateOf(TextFieldValue(split.first, TextRange(0, split.first.length)))
+            var nameInput by remember(target.uniquePath, target.displayName) {
+                mutableStateOf(TextFieldValue(split.first, TextRange(split.first.length)))
             }
-            var extensionInput by remember { mutableStateOf(split.second) }
-            val newNameInput = joinFileName(nameInput.text, if (target.isFolder) emptyString else extensionInput)
-            var error by remember { mutableStateOf("") }
+            var extensionInput by remember(target.uniquePath, target.displayName) {
+                mutableStateOf(TextFieldValue(split.second, TextRange(split.second.length)))
+            }
+            val newNameInput = joinFileName(nameInput.text, if (target.isFolder) emptyString else extensionInput.text)
+            var error by remember(target.uniquePath) { mutableStateOf("") }
+            val extensionFocusRequester = remember { FocusRequester() }
+            val moveToExtension = {
+                extensionInput = extensionInput.copy(selection = TextRange(extensionInput.text.length))
+                extensionFocusRequester.requestFocus()
+            }
 
-            LaunchedEffect(newNameInput) {
+            val canRename = error.isEmpty() && nameInput.text.isNotBlank() && newNameInput isNot target.displayName
+
+            val executeRename: () -> Unit = {
+                if (canRename) {
+                    val finalNewName = newNameInput
+                    val targetFile = target
+                    tab.scope.launch {
+                        if (finalNewName.isValidAsFileName()) {
+                            val similarFile =
+                                tab.activeFolder.findFile(finalNewName)
+                            val isSameTargetFile = similarFile != null && (
+                                similarFile.uniquePath == targetFile.uniquePath ||
+                                similarFile.uniquePath.equals(targetFile.uniquePath, ignoreCase = true)
+                            )
+                            if (similarFile == null || isSameTargetFile) {
+                                onDismissRequest()
+                                globalClass.taskManager.addTaskAndRun(
+                                    task = RenameTask(sourceContent = listOf(targetFile)),
+                                    parameters = RenameTaskParameters(
+                                        newName = finalNewName,
+                                        toFind = emptyString,
+                                        toReplace = emptyString,
+                                        useRegex = false
+                                    )
+                                )
+                            } else {
+                                globalClass.showMsg(R.string.similar_file_exists)
+                            }
+                        } else {
+                            globalClass.showMsg(R.string.invalid_file_name)
+                        }
+                    }
+                } else if (newNameInput == target.displayName) {
+                    onDismissRequest()
+                } else if (error.isNotEmpty()) {
+                    globalClass.showMsg(error)
+                }
+            }
+
+            LaunchedEffect(newNameInput, target.displayName) {
                 error = if (newNameInput.isBlank() || newNameInput == target.displayName) {
                     emptyString
                 } else if (!newNameInput.isValidAsFileName()) {
                     globalClass.getString(R.string.invalid_file_name)
-                } else if (listContent.contains(newNameInput)) {
+                } else if (otherFileNames.contains(newNameInput)) {
                     globalClass.getString(R.string.similar_file_exists)
                 } else {
                     emptyString
@@ -161,11 +218,23 @@ fun RenameDialog(
                             TextField(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .autoShowKeyboard(),
+                                    .autoShowKeyboard()
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
+                                            executeRename()
+                                            true
+                                        } else false
+                                    },
                                 value = nameInput,
                                 onValueChange = { nameInput = it },
                                 label = { Text(text = stringResource(R.string.name)) },
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = { executeRename() },
+                                    onNext = { executeRename() },
+                                    onGo = { executeRename() }
+                                ),
                                 shape = RoundedCornerShape(6.dp),
                                 colors = TextFieldDefaults.colors(
                                     errorIndicatorColor = Color.Transparent,
@@ -187,11 +256,23 @@ fun RenameDialog(
                                 TextField(
                                     modifier = Modifier
                                         .weight(1.4f)
-                                        .autoShowKeyboard(),
+                                        .autoShowKeyboard()
+                                        .onPreviewKeyEvent { keyEvent ->
+                                            if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
+                                                moveToExtension()
+                                                true
+                                            } else false
+                                        },
                                     value = nameInput,
                                     onValueChange = { nameInput = it },
                                     label = { Text(text = stringResource(R.string.name)) },
                                     singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                    keyboardActions = KeyboardActions(
+                                        onNext = { moveToExtension() },
+                                        onDone = { moveToExtension() },
+                                        onGo = { moveToExtension() }
+                                    ),
                                     shape = RoundedCornerShape(6.dp),
                                     colors = TextFieldDefaults.colors(
                                         errorIndicatorColor = Color.Transparent,
@@ -202,11 +283,29 @@ fun RenameDialog(
                                     isError = error.isNotEmpty()
                                 )
                                 TextField(
-                                    modifier = Modifier.weight(0.8f),
+                                    modifier = Modifier
+                                        .weight(0.8f)
+                                        .focusRequester(extensionFocusRequester)
+                                        .onPreviewKeyEvent { keyEvent ->
+                                            if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
+                                                executeRename()
+                                                true
+                                            } else false
+                                        },
                                     value = extensionInput,
-                                    onValueChange = { extensionInput = it.replace(".", "") },
+                                    onValueChange = {
+                                        val clean = it.text.replace(".", "")
+                                        val newSelection = if (clean != it.text) TextRange(clean.length) else it.selection
+                                        extensionInput = it.copy(text = clean, selection = newSelection)
+                                    },
                                     label = { Text(text = stringResource(R.string.extension)) },
                                     singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = { executeRename() },
+                                        onNext = { executeRename() },
+                                        onGo = { executeRename() }
+                                    ),
                                     shape = RoundedCornerShape(6.dp),
                                     colors = TextFieldDefaults.colors(
                                         errorIndicatorColor = Color.Transparent,
@@ -244,31 +343,8 @@ fun RenameDialog(
 
                             Button(
                                 modifier = Modifier.weight(1f),
-                                onClick = {
-                                    tab.scope.launch {
-                                        if (newNameInput.isValidAsFileName()) {
-                                            val similarFile =
-                                                tab.activeFolder.findFile(newNameInput)
-                                            if (similarFile == null) {
-                                                onDismissRequest()
-                                                globalClass.taskManager.addTaskAndRun(
-                                                    task = RenameTask(sourceContent = tab.selectedFiles.values.toList()),
-                                                    parameters = RenameTaskParameters(
-                                                        newName = newNameInput,
-                                                        toFind = emptyString,
-                                                        toReplace = emptyString,
-                                                        useRegex = false
-                                                    )
-                                                )
-                                            } else {
-                                                globalClass.showMsg(R.string.similar_file_exists)
-                                            }
-                                        } else {
-                                            globalClass.showMsg(R.string.invalid_file_name)
-                                        }
-                                    }
-                                },
-                                enabled = error.isEmpty() && nameInput.text.isNotBlank() && newNameInput isNot target.displayName,
+                                onClick = executeRename,
+                                enabled = canRename,
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
@@ -280,7 +356,7 @@ fun RenameDialog(
                     }
                 }
             }
-        } else {
+        } else if (tab.selectedFiles.size > 1) {
             AdvanceRenameDialog(
                 tab = tab,
                 onDismissRequest = onDismissRequest
@@ -296,8 +372,9 @@ fun AdvanceRenameDialog(
     onDismissRequest: () -> Unit
 ) {
     val useDarkIcons = !isSystemInDarkTheme()
+    val selectedPaths = tab.selectedFiles.keys.toList()
     val originalList =
-        remember {
+        remember(selectedPaths) {
             tab.selectedFiles.values.map { it.displayName to it }.toCollection(arrayListOf())
         }
     val remainingFiles = tab.activeFolderContent.map { it.displayName }
@@ -785,9 +862,10 @@ fun AdvanceRenameDialog(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             if (isReady && conflicts.isEmpty()) {
+                                val itemsToRename = originalList.map { it.second }
                                 onDismissRequest()
                                 globalClass.taskManager.addTaskAndRun(
-                                    task = RenameTask(tab.selectedFiles.values.toList()),
+                                    task = RenameTask(itemsToRename),
                                     parameters = RenameTaskParameters(
                                         newName = newNameInput.text,
                                         toFind = findInput,

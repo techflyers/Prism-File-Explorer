@@ -16,7 +16,10 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
 import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.ViewStream
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -263,12 +266,39 @@ fun FileListContainer() {
             onSwitchChange = { prefs.showSourceBadges = it }
         )
 
+        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+
+        PreferenceItem(
+            label = stringResource(R.string.show_file_list_divider),
+            supportingText = stringResource(R.string.show_file_list_divider_desc),
+            icon = Icons.Rounded.ViewStream,
+            switchState = prefs.showFileListDivider,
+            onSwitchChange = { prefs.showFileListDivider = it }
+        )
+
+
+        PreferenceItem(
+            label = stringResource(R.string.file_size_tint),
+            supportingText = stringResource(R.string.file_size_tint_desc),
+            icon = Icons.Rounded.Palette,
+            switchState = prefs.sizeTintEnabled,
+            onSwitchChange = { prefs.sizeTintEnabled = it }
+        )
+
         PreferenceItem(
             label = stringResource(R.string.folder_scan_for_tint),
             supportingText = stringResource(R.string.folder_scan_for_tint_desc),
             icon = Icons.Rounded.FolderOpen,
             switchState = prefs.folderScanForTint,
             onSwitchChange = { prefs.folderScanForTint = it }
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.deep_scan_categories),
+            supportingText = stringResource(R.string.deep_scan_categories_desc),
+            icon = Icons.Rounded.Search,
+            switchState = prefs.deepScanCategories,
+            onSwitchChange = { prefs.deepScanCategories = it }
         )
     }
 }

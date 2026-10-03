@@ -579,18 +579,8 @@ object ShizukuManager {
                             } else null
                             val target = if (rawTarget.isNullOrEmpty()) null else rawTarget
 
-                            val isDir = if (isSymlink) {
-                                // Test if symlink target is a directory
-                                val testDirCmd = "[ -d " + escapeShellArg(fullPath) + " ]"
-                                executeCommand(testDirCmd)?.isSuccess == true
-                            } else {
-                                type.contains("directory")
-                            }
-
-                            val isBroken = if (isSymlink) {
-                                val testExistsCmd = "[ -e " + escapeShellArg(fullPath) + " ]"
-                                executeCommand(testExistsCmd)?.isSuccess != true
-                            } else false
+                            val isDir = type.contains("directory")
+                            val isBroken = false
 
                             ShizukuFileEntry(
                                 name = name,

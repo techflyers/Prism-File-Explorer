@@ -48,7 +48,14 @@ import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActiv
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
-class LocalFileHolder(file: File) : ContentHolder() {
+class LocalFileHolder(
+    file: File,
+    private val cachedName: String? = null,
+    private val cachedIsDir: Boolean? = null,
+    private val cachedSize: Long? = null,
+    private val cachedLastModified: Long? = null,
+    private val cachedLstat: StructStat? = null
+) : ContentHolder() {
     val file: File = if (file.absolutePath.contains("storage_root")) {
         var p = file.absolutePath
         if (p.startsWith("/storage_root")) {
@@ -66,14 +73,14 @@ class LocalFileHolder(file: File) : ContentHolder() {
 
     private var folderCount = 0
     private var fileCount = 0
-    private var timestamp = -1L
+    private var timestamp = cachedLastModified ?: -1L
 
-    override val displayName: String by lazy { file.name }
+    override val displayName: String = cachedName ?: file.name
 
     var details = emptyString
 
     val lstat: StructStat? by lazy {
-        try {
+        cachedLstat ?: try {
             Os.lstat(file.absolutePath)
         } catch (_: Exception) {
             null
@@ -106,7 +113,9 @@ class LocalFileHolder(file: File) : ContentHolder() {
     }
 
     override val isFolder: Boolean by lazy {
-        if (isSymbolicLink && isSymbolicLinkBroken) {
+        if (cachedIsDir != null) {
+            cachedIsDir
+        } else if (isSymbolicLink && isSymbolicLinkBroken) {
             false
         } else {
             file.isDirectory
@@ -119,12 +128,12 @@ class LocalFileHolder(file: File) : ContentHolder() {
     val seLinuxContext: String? by lazy { SELinuxManager.getFileContext(file.absolutePath) }
 
     override val lastModified: Long
-        get() = file.lastModified().also {
+        get() = cachedLastModified ?: file.lastModified().also {
             if (timestamp == -1L) timestamp = it
         }
 
     override val size: Long
-        get() = file.length()
+        get() = cachedSize ?: file.length()
 
     override val uniquePath: String by lazy { file.absolutePath }
 
@@ -172,7 +181,7 @@ class LocalFileHolder(file: File) : ContentHolder() {
             if (prefs.showFolderContentCount && file.canRead()) {
                 val count = getContentCount()
                 buildString {
-                    if (prefs.deepEmptyFolderCheck && count.folders > 0 && count.files == 0 &&
+                    if (prefs.deepEmptyFolderCheck && count.folders in 1..20 && count.files == 0 &&
                         com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker.isFolderEmptyWithin(file)) {
                         append("○")
                     } else if (count.folders == 0 && count.files == 0) {
@@ -362,17 +371,117 @@ class LocalFileHolder(file: File) : ContentHolder() {
             combinedList.forEach {
                 if (it.isFolder) folderCount++ else fileCount++
             }
+            contentCountCache.put("${file.absolutePath}:$lastModified", ContentCount(fileCount, folderCount))
             return combinedList
         }
 
-        val list = file.listFiles()
-        if (list != null) {
-            // Also hide metadata.json if browsing a timestamp folder directly
-            val filtered = list.filter { it.name != "metadata.json" }
-            filtered.forEach {
-                if (it.isDirectory) folderCount++ else fileCount++
+        val result = ArrayList<LocalFileHolder>()
+        var listed = false
+
+        // Fast streaming directory read with single-stat lstat
+        try {
+            val dirPath = file.toPath()
+            java.nio.file.Files.newDirectoryStream(dirPath).use { stream ->
+                for (entry in stream) {
+                    val entryName = entry.fileName.toString()
+                    if (entryName == "metadata.json") continue
+
+                    val childFile = entry.toFile()
+                    var isDir = false
+                    var size = 0L
+                    var mtime = 0L
+                    var statObj: StructStat? = null
+
+                    try {
+                        val stat = Os.lstat(childFile.absolutePath)
+                        statObj = stat
+                        val isLnk = OsConstants.S_ISLNK(stat.st_mode)
+                        isDir = if (isLnk) {
+                            try {
+                                val targetStat = Os.stat(childFile.absolutePath)
+                                OsConstants.S_ISDIR(targetStat.st_mode)
+                            } catch (_: Exception) {
+                                false
+                            }
+                        } else {
+                            OsConstants.S_ISDIR(stat.st_mode)
+                        }
+                        size = stat.st_size
+                        mtime = stat.st_mtime * 1000L
+                    } catch (_: Exception) {
+                        isDir = childFile.isDirectory
+                        size = childFile.length()
+                        mtime = childFile.lastModified()
+                    }
+
+                    if (isDir) folderCount++ else fileCount++
+                    result.add(
+                        LocalFileHolder(
+                            file = childFile,
+                            cachedName = entryName,
+                            cachedIsDir = isDir,
+                            cachedSize = size,
+                            cachedLastModified = mtime,
+                            cachedLstat = statObj
+                        )
+                    )
+                }
             }
-            return ArrayList(filtered.map { LocalFileHolder(it) })
+            listed = true
+        } catch (_: Throwable) {
+            // Fallback to file.listFiles() with single-stat capture
+            val list = file.listFiles()
+            if (list != null) {
+                for (child in list) {
+                    val childName = child.name
+                    if (childName == "metadata.json") continue
+
+                    var isDir = false
+                    var size = 0L
+                    var mtime = 0L
+                    var statObj: StructStat? = null
+
+                    try {
+                        val stat = Os.lstat(child.absolutePath)
+                        statObj = stat
+                        val isLnk = OsConstants.S_ISLNK(stat.st_mode)
+                        isDir = if (isLnk) {
+                            try {
+                                val targetStat = Os.stat(child.absolutePath)
+                                OsConstants.S_ISDIR(targetStat.st_mode)
+                            } catch (_: Exception) {
+                                false
+                            }
+                        } else {
+                            OsConstants.S_ISDIR(stat.st_mode)
+                        }
+                        size = stat.st_size
+                        mtime = stat.st_mtime * 1000L
+                    } catch (_: Exception) {
+                        isDir = child.isDirectory
+                        size = child.length()
+                        mtime = child.lastModified()
+                    }
+
+                    if (isDir) folderCount++ else fileCount++
+                    result.add(
+                        LocalFileHolder(
+                            file = child,
+                            cachedName = childName,
+                            cachedIsDir = isDir,
+                            cachedSize = size,
+                            cachedLastModified = mtime,
+                            cachedLstat = statObj
+                        )
+                    )
+                }
+                listed = true
+            }
+        }
+
+        if (listed) {
+            contentCountCache.put("${file.absolutePath}:$lastModified", ContentCount(fileCount, folderCount))
+            return result
         }
 
         if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
@@ -465,14 +574,25 @@ class LocalFileHolder(file: File) : ContentHolder() {
             return count
         }
 
-        fileCount = 0
-        folderCount = 0
-        file.listFiles()?.let { list ->
-            list.forEach {
-                if (it.name != "metadata.json") {
-                    if (it.isFile) fileCount++ else folderCount++
+        var files = 0
+        var folders = 0
+        val names = file.list()
+        if (names != null) {
+            for (name in names) {
+                if (name != "metadata.json") {
+                    try {
+                        val stat = Os.lstat(File(file, name).absolutePath)
+                        if (OsConstants.S_ISDIR(stat.st_mode)) folders++ else files++
+                    } catch (_: Exception) {
+                        if (File(file, name).isDirectory) folders++ else files++
+                    }
                 }
             }
+            fileCount = files
+            folderCount = folders
+            val count = ContentCount(fileCount, folderCount)
+            contentCountCache.put(cacheKey, count)
+            return count
         }
 
         val count = ContentCount(fileCount, folderCount)

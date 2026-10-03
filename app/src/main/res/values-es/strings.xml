@@ -95,6 +95,8 @@
     <string name="format">Formato</string>
     <string name="word_wrap">Ajuste de línea</string>
     <string name="read_only">Solo lectura</string>
+    <string name="lock_editor">Bloquear editor</string>
+    <string name="unlock_editor">Desbloquear editor</string>
     <string name="jump_to_line">Ir a línea</string>
     <string name="preferences">Preferencias</string>
     <string name="use_icu_selection">Usar selección ICU</string>
@@ -424,8 +426,13 @@
     <string name="gallery_mode">Modo galería</string>
     <string name="crop_in_thumbnails">Recortar en miniaturas</string>
     <string name="pinned_files">Archivos fijados</string>
+    <string name="file_size_tint">Tinte por tamaño de archivo</string>
+    <string name="file_size_tint_desc">Mostrar un sutil fondo tintado según el tamaño de cada elemento</string>
     <string name="pinned_files_desc">Acceso rápido a archivos importantes</string>
     <string name="pin_to_home_tab">Fijar en pestaña de inicio</string>
+    <string name="rename_shortcut">Renombrar acceso directo</string>
+    <string name="remove_shortcut">Eliminar acceso directo</string>
+    <string name="shortcut_name">Nombre del acceso directo</string>
     <string name="extensive_recent_files_scan">Escaneo extenso de archivos recientes</string>
     <string name="scan_hidden_files_and_folders">Escanear archivos y carpetas ocultos</string>
     <string name="manage_excluded_paths">Administrar rutas excluidas</string>
@@ -469,6 +476,7 @@
 
     <!-- Checksum Progress & Media Playback -->
     <string name="eta_format">Tiempo restante: %s</string>
+    <string name="auto_brightness">Automático</string>
     <string name="files_progress_format">%1$d / %2$d archivos</string>
     <string name="media_playback">Reproducción de medios</string>
     <string name="video_playback">Reproducción de video</string>

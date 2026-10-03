@@ -95,6 +95,8 @@
     <string name="format">格式</string>
     <string name="word_wrap">自动换行</string>
     <string name="read_only">只读</string>
+    <string name="lock_editor">锁定编辑器</string>
+    <string name="unlock_editor">解锁编辑器</string>
     <string name="jump_to_line">跳转到行</string>
     <string name="preferences">首选项</string>
     <string name="use_icu_selection">使用ICU选择</string>
@@ -424,8 +426,13 @@
     <string name="gallery_mode">画廊模式</string>
     <string name="crop_in_thumbnails">裁剪缩略图</string>
     <string name="pinned_files">已固定的文件</string>
+    <string name="file_size_tint">按文件大小着色</string>
+    <string name="file_size_tint_desc">根据每个项目的大小显示柔和的背景色</string>
     <string name="pinned_files_desc">快速访问重要文件</string>
     <string name="pin_to_home_tab">固定到主页标签</string>
+    <string name="rename_shortcut">重命名快捷方式</string>
+    <string name="remove_shortcut">移除快捷方式</string>
+    <string name="shortcut_name">快捷方式名称</string>
     <string name="extensive_recent_files_scan">广泛扫描最近文件</string>
     <string name="scan_hidden_files_and_folders">扫描隐藏文件和文件夹</string>
     <string name="manage_excluded_paths">管理排除路径</string>
@@ -484,6 +491,7 @@
 
     <!-- Checksum Progress & Media Playback -->
     <string name="eta_format">预计剩余时间：%s</string>
+    <string name="auto_brightness">自动</string>
     <string name="files_progress_format">%1$d / %2$d 个文件</string>
     <string name="media_playback">媒体播放</string>
     <string name="video_playback">视频播放</string>

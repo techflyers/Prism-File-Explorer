@@ -207,6 +207,9 @@ fun VideoPlayerScreen(
     // Accumulators for smooth gestures
     var gestureAccumulatedVolume by remember { mutableFloatStateOf(0f) }
     var gestureAccumulatedBrightness by remember { mutableFloatStateOf(0f) }
+    var gestureSystemBrightness by remember { mutableFloatStateOf(0.5f) }
+    var gestureBrightnessIsAutomatic by remember { mutableStateOf(false) }
+    var gestureReachedAutomaticDuringGesture by remember { mutableStateOf(false) }
 
     // Playlist bottom sheet visibility
     var showPlaylist by remember { mutableStateOf(false) }
@@ -218,13 +221,33 @@ fun VideoPlayerScreen(
     fun adjustBrightness(delta: Float) {
         val act = context as? Activity ?: return
         val lp = act.window.attributes
-        
-        gestureAccumulatedBrightness = (gestureAccumulatedBrightness - delta).coerceIn(0.01f, 1f)
-        lp.screenBrightness = gestureAccumulatedBrightness
+
+        // Once the current gesture has reached Auto, continued downward movement keeps
+        // the device brightness override cleared. Moving upward resumes from system level.
+        if (gestureBrightnessIsAutomatic && gestureReachedAutomaticDuringGesture && delta >= 0f) {
+            lp.screenBrightness = -1f
+            act.window.attributes = lp
+            activeGestureType = "brightness"
+            gestureValue = gestureSystemBrightness
+            return
+        }
+
+        val baseBrightness = if (gestureBrightnessIsAutomatic) {
+            gestureSystemBrightness
+        } else {
+            gestureAccumulatedBrightness
+        }
+        val nextBrightness = (baseBrightness - delta).coerceIn(0f, 1f)
+        val useAutomaticBrightness = nextBrightness <= 0f
+        lp.screenBrightness = if (useAutomaticBrightness) -1f else nextBrightness
         act.window.attributes = lp
 
+        gestureBrightnessIsAutomatic = useAutomaticBrightness
+        gestureReachedAutomaticDuringGesture = useAutomaticBrightness
+        gestureAccumulatedBrightness = if (useAutomaticBrightness) 0f else nextBrightness
+
         activeGestureType = "brightness"
-        gestureValue = gestureAccumulatedBrightness
+        gestureValue = if (useAutomaticBrightness) gestureSystemBrightness else nextBrightness
     }
 
     fun adjustVolume(delta: Float) {
@@ -298,6 +321,17 @@ fun VideoPlayerScreen(
                                     interactionCount++
                                 }
                             },
+                            onDoubleTap = { positionX ->
+                                if (isLocked) {
+                                    showUnlockButton = true
+                                    unlockInteractionCount++
+                                    globalClass.showMsg(R.string.controls_locked_hint)
+                                } else {
+                                    val offsetMs = if (positionX < playerWidth / 2f) -10_000L else 10_000L
+                                    videoPlayerInstance.seekBy(offsetMs)
+                                    interactionCount++
+                                }
+                            },
                             onDragStart = { positionX ->
                                 if (!isLocked) {
                                     isInteractingWithGestures = true
@@ -316,7 +350,11 @@ fun VideoPlayerScreen(
                                         } else {
                                             lp.screenBrightness
                                         }
-                                        gestureAccumulatedBrightness = currentBrightness
+                                        val normalizedBrightness = currentBrightness.coerceIn(0f, 1f)
+                                        gestureSystemBrightness = normalizedBrightness
+                                        gestureAccumulatedBrightness = normalizedBrightness
+                                        gestureBrightnessIsAutomatic = lp == null || lp.screenBrightness < 0f
+                                        gestureReachedAutomaticDuringGesture = false
                                     } else {
                                         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                                         val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
@@ -352,6 +390,11 @@ fun VideoPlayerScreen(
                     visible = playerState.showControls && !playerState.isLoading,
                     onBackgroundTap = {
                         videoPlayerInstance.setControlsVisible(false)
+                    },
+                    onBackgroundDoubleTap = { positionX ->
+                        val offsetMs = if (positionX < playerWidth / 2f) -10_000L else 10_000L
+                        videoPlayerInstance.seekBy(offsetMs)
+                        interactionCount++
                     },
                     onPlayPause = {
                         videoPlayerInstance.playPause()
@@ -537,7 +580,11 @@ fun VideoPlayerScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "${(gestureValue * 100).toInt()}%",
+                        text = if (activeGestureType == "brightness" && gestureBrightnessIsAutomatic) {
+                            stringResource(R.string.auto_brightness)
+                        } else {
+                            "${(gestureValue * 100).toInt()}%"
+                        },
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
@@ -624,63 +671,66 @@ fun VideoPlayerScreen(
     }
 }
 
-// Modifier helper to detect vertical drags and single taps, respecting multi-touch pinch-to-zoom
+// Modifier helper to detect taps, double-tap seeks, and vertical drags while respecting multi-touch.
 fun Modifier.videoPlayerGestureDetector(
     enabled: Boolean,
     playerWidth: Int,
     playerHeight: Int,
     onTap: () -> Unit,
+    onDoubleTap: (positionX: Float) -> Unit,
     onDragStart: (positionX: Float) -> Unit,
     onVerticalDrag: (positionX: Float, dragAmount: Float) -> Unit,
     onDragEnd: () -> Unit
-): Modifier = if (!enabled || playerWidth <= 0 || playerHeight <= 0) this else this.pointerInput(enabled, playerWidth, playerHeight) {
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
-        val pointerId = down.id
-        var isDragging = false
-        var hasMultiTouch = false
-        val touchSlop = viewConfiguration.touchSlop
-        val startY = down.position.y
-        val startX = down.position.x
+): Modifier {
+    if (!enabled || playerWidth <= 0 || playerHeight <= 0) return this
 
-        while (true) {
-            val event = awaitPointerEvent()
+    return this
+        .pointerInput(enabled, playerWidth, playerHeight) {
+            detectTapGestures(
+                onTap = { onTap() },
+                onDoubleTap = { onDoubleTap(it.x) }
+            )
+        }
+        .pointerInput(enabled, playerWidth, playerHeight) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val pointerId = down.id
+                var isDragging = false
+                val touchSlop = viewConfiguration.touchSlop
+                val startY = down.position.y
+                val startX = down.position.x
 
-            // If multi-touch detected (e.g. pinch to zoom), abort without consuming so zoomable can handle it
-            if (event.changes.size > 1) {
-                hasMultiTouch = true
-                if (isDragging) {
-                    onDragEnd()
-                    isDragging = false
+                while (true) {
+                    val event = awaitPointerEvent()
+
+                    // If multi-touch is detected (e.g. pinch to zoom), leave it to zoomable.
+                    if (event.changes.size > 1) {
+                        if (isDragging) onDragEnd()
+                        break
+                    }
+
+                    val change = event.changes.firstOrNull { it.id == pointerId }
+                    if (change == null || change.changedToUp()) {
+                        if (isDragging) onDragEnd()
+                        break
+                    }
+
+                    if (!isDragging) {
+                        val dragY = change.position.y - startY
+                        val dragX = change.position.x - startX
+                        if (abs(dragY) > touchSlop && abs(dragY) > abs(dragX)) {
+                            isDragging = true
+                            onDragStart(startX)
+                            change.consume()
+                        }
+                    } else {
+                        val deltaY = change.positionChange().y
+                        onVerticalDrag(startX, deltaY)
+                        change.consume()
+                    }
                 }
-                break
-            }
-
-            val change = event.changes.firstOrNull { it.id == pointerId }
-            if (change == null || change.changedToUp()) {
-                if (!isDragging && !hasMultiTouch) {
-                    onTap()
-                } else if (isDragging) {
-                    onDragEnd()
-                }
-                break
-            }
-
-            if (!isDragging) {
-                val dragY = change.position.y - startY
-                val dragX = change.position.x - startX
-                if (abs(dragY) > touchSlop && abs(dragY) > abs(dragX)) {
-                    isDragging = true
-                    onDragStart(startX)
-                    change.consume()
-                }
-            } else {
-                val deltaY = change.positionChange().y
-                onVerticalDrag(startX, deltaY)
-                change.consume()
             }
         }
-    }
 }
 
 @Composable
@@ -688,6 +738,7 @@ fun VideoControls(
     state: VideoPlayerState,
     visible: Boolean,
     onBackgroundTap: () -> Unit,
+    onBackgroundDoubleTap: (positionX: Float) -> Unit = {},
     onToggleMute: () -> Unit,
     onPlayPause: () -> Unit,
     onSeekForward: () -> Unit,
@@ -709,13 +760,16 @@ fun VideoControls(
     onUserInteraction: () -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        // Tap anywhere on the empty video area dismisses controls immediately (like PDF viewer)
+        // Single-tap the empty video area to dismiss controls; double-tap to seek.
         if (visible) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onBackgroundTap() })
+                        detectTapGestures(
+                            onTap = { onBackgroundTap() },
+                            onDoubleTap = { onBackgroundDoubleTap(it.x) }
+                        )
                     }
             )
         }

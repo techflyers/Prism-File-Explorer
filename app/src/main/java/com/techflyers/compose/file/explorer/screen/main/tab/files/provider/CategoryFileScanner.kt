@@ -3,15 +3,15 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.provider
 import android.provider.MediaStore
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
-import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 object CategoryFileScanner {
     private const val CACHE_TTL_MS = 3 * 60 * 1000L
-    private const val MAX_DEPTH = 8
-    private const val MAX_FILES = 40_000
+    private const val MAX_DEPTH = 6
+    private const val MAX_FILES = 10_000
     private val skipDirNames = setOf(
         "Android", "lost+found", ".thumbnails", ".Trash", ".trashed",
         ".recycle", "recyclebin", "cache", ".cache"
@@ -37,13 +37,8 @@ object CategoryFileScanner {
 
         val byPath = LinkedHashMap<String, LocalFileHolder>()
         mediaFiles.forEach { holder ->
-            val key = canonicalKey(holder.file)
+            val key = holder.file.absolutePath
             if (key.isNotEmpty()) byPath[key] = holder
-        }
-
-        walkStorageRoots(extensions).forEach { holder ->
-            val key = canonicalKey(holder.file)
-            if (key.isNotEmpty()) byPath.putIfAbsent(key, holder)
         }
 
         val result = ArrayList(byPath.values)
@@ -51,10 +46,79 @@ object CategoryFileScanner {
         return ArrayList(result)
     }
 
+    suspend fun walkStorageRootsBackground(
+        extensions: Set<String>,
+        existingPaths: Set<String>,
+        onBatchFound: suspend (List<LocalFileHolder>) -> Unit
+    ) {
+        val seenPaths = HashSet<String>(existingPaths)
+        val batch = ArrayList<LocalFileHolder>()
+        val devices = StorageProvider.getStorageDevices(globalClass)
+        for (device in devices) {
+            if (!currentCoroutineContext().isActive) break
+            if (device.type != com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE &&
+                device.type != com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.EXTERNAL_STORAGE) continue
+            val root = (device.contentHolder as? LocalFileHolder)?.file ?: continue
+            walkDirectoryBackground(root, extensions, 0, seenPaths, batch, onBatchFound)
+            if (seenPaths.size >= MAX_FILES) break
+        }
+        if (currentCoroutineContext().isActive && batch.isNotEmpty()) {
+            onBatchFound(ArrayList(batch))
+            batch.clear()
+        }
+    }
+
+    private suspend fun walkDirectoryBackground(
+        dir: File,
+        extensions: Set<String>,
+        depth: Int,
+        seenPaths: HashSet<String>,
+        batch: ArrayList<LocalFileHolder>,
+        onBatchFound: suspend (List<LocalFileHolder>) -> Unit
+    ) {
+        if (!currentCoroutineContext().isActive) return
+        if (depth > MAX_DEPTH || seenPaths.size >= MAX_FILES) return
+        if (!dir.exists() || dir.name in skipDirNames) return
+
+        val children: Array<File>? = dir.listFiles()
+        if (children != null) {
+            for (child in children) {
+                if (!currentCoroutineContext().isActive || seenPaths.size >= MAX_FILES) return
+                if (child.isDirectory) {
+                    if (!child.name.startsWith(".") && child.name !in skipDirNames) {
+                        walkDirectoryBackground(child, extensions, depth + 1, seenPaths, batch, onBatchFound)
+                    }
+                } else if (child.extension.lowercase() in extensions) {
+                    val path = child.absolutePath
+                    if (seenPaths.add(path)) {
+                        batch.add(
+                            LocalFileHolder(
+                                file = child,
+                                cachedName = child.name,
+                                cachedIsDir = false,
+                                cachedSize = child.length(),
+                                cachedLastModified = child.lastModified()
+                            )
+                        )
+                        if (batch.size >= 50) {
+                            onBatchFound(ArrayList(batch))
+                            batch.clear()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun queryMediaByNameSuffixes(suffixes: List<String>): ArrayList<LocalFileHolder> {
         val files = ArrayList<LocalFileHolder>()
         val uri = MediaStore.Files.getContentUri("external")
-        val projection = arrayOf(MediaStore.Files.FileColumns.DATA)
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns.DATA,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_MODIFIED,
+            MediaStore.Files.FileColumns.SIZE
+        )
         val selection = suffixes.joinToString(" OR ") {
             "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
         }
@@ -62,78 +126,29 @@ object CategoryFileScanner {
         try {
             globalClass.contentResolver.query(uri, projection, selection, args, null)?.use { cursor ->
                 val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
                 while (cursor.moveToNext()) {
                     val path = cursor.getString(pathColumn)
                     if (!path.isNullOrEmpty()) {
-                        files.add(LocalFileHolder(File(path)))
+                        val name = cursor.getString(nameColumn) ?: File(path).name
+                        val mtime = cursor.getLong(dateColumn) * 1000L
+                        val size = cursor.getLong(sizeColumn)
+                        files.add(
+                            LocalFileHolder(
+                                file = File(path),
+                                cachedName = name,
+                                cachedIsDir = false,
+                                cachedSize = size,
+                                cachedLastModified = mtime
+                            )
+                        )
                     }
                 }
             }
         } catch (_: Exception) {
         }
         return files
-    }
-
-    private fun walkStorageRoots(extensions: Set<String>): List<LocalFileHolder> {
-        val found = ArrayList<LocalFileHolder>()
-        val devices = runBlocking { StorageProvider.getStorageDevices(globalClass) }
-        for (device in devices) {
-            if (device.type != com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.INTERNAL_STORAGE &&
-                device.type != com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDeviceType.EXTERNAL_STORAGE) continue
-            val root = (device.contentHolder as? LocalFileHolder)?.file ?: continue
-            walkDirectory(root, extensions, 0, found)
-            if (found.size >= MAX_FILES) break
-        }
-        return found
-    }
-
-    private fun walkDirectory(
-        dir: File,
-        extensions: Set<String>,
-        depth: Int,
-        out: ArrayList<LocalFileHolder>
-    ) {
-        if (depth > MAX_DEPTH || out.size >= MAX_FILES) return
-        if (!dir.exists() || dir.name in skipDirNames) return
-
-        val children: Array<File>? = dir.listFiles()
-        if (children != null) {
-            for (child in children) {
-                if (out.size >= MAX_FILES) return
-                if (child.isDirectory) {
-                    if (!child.name.startsWith(".") && child.name !in skipDirNames) {
-                        walkDirectory(child, extensions, depth + 1, out)
-                    }
-                } else if (child.extension.lowercase() in extensions) {
-                    out.add(LocalFileHolder(child))
-                }
-            }
-            return
-        }
-
-        if (ShizukuManager.isPrivileged) {
-            try {
-                val entries = ShizukuManager.listFiles(dir.absolutePath)
-                for (entry in entries) {
-                    if (out.size >= MAX_FILES) return
-                    if (entry.isDirectory) {
-                        if (!entry.name.startsWith(".") && entry.name !in skipDirNames) {
-                            walkDirectory(File(entry.path), extensions, depth + 1, out)
-                        }
-                    } else if (entry.name.substringAfterLast('.', "").lowercase() in extensions) {
-                        out.add(LocalFileHolder(File(entry.path)))
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun canonicalKey(file: File): String {
-        return try {
-            file.canonicalPath
-        } catch (_: Exception) {
-            file.absolutePath
-        }
     }
 }

@@ -86,6 +86,8 @@
     <string name="format">"Biçim"</string>
     <string name="word_wrap">"Sözcük kaydır"</string>
     <string name="read_only">"Salt okunur"</string>
+    <string name="lock_editor">Düzenleyiciyi kilitle</string>
+    <string name="unlock_editor">Düzenleyicinin kilidini aç</string>
     <string name="jump_to_line">"Satıra atla"</string>
     <string name="preferences">"Tercihler"</string>
     <string name="use_icu_selection">"ICU seçimini kullan"</string>
@@ -415,8 +417,13 @@
     <string name="gallery_mode">Galeri Modu</string>
     <string name="crop_in_thumbnails">Küçük Resimleri Kırp</string>
     <string name="pinned_files">Sabitlenmiş Dosyalar</string>
+    <string name="file_size_tint">Dosya boyutuna göre tonlama</string>
+    <string name="file_size_tint_desc">Her öğenin boyutuna göre hafif bir arka plan tonu göster</string>
     <string name="pinned_files_desc">Önemli dosyalara hızlı erişim</string>
     <string name="pin_to_home_tab">Ana ekrana sabitle</string>
+    <string name="rename_shortcut">Kısayolu yeniden adlandır</string>
+    <string name="remove_shortcut">Kısayolu kaldır</string>
+    <string name="shortcut_name">Kısayol adı</string>
     <string name="extensive_recent_files_scan">Kapsamlı son dosyalar taraması</string>
     <string name="scan_hidden_files_and_folders">Gizli dosyaları ve klasörleri tara</string>
     <string name="manage_excluded_paths">Hariç tutulan yolları yönet</string>
@@ -450,6 +457,7 @@
     <string name="unpin_from_home_tab">Ana ekrandan sabitlemeyi kaldır</string>
     <string name="hide_hidden_files">Gizli dosyaları gizle</string>
     <string name="press_back_again">Çıkmak için tekrar basın</string>
+    <string name="auto_brightness">Otomatik</string>
     <string name="remember_last_session_desc">etkinleştirilirse, başlangıç sekmeleri yoksayılır</string>
     <string name="close_tab_on_back_nav">Sekmeleri kapatmak için geri gitme</string>
     <string name="remember_last_session">Son oturumu hatırla</string>

@@ -85,6 +85,8 @@
     <string name="format">قالب</string>
     <string name="word_wrap">بستن کلمات</string>
     <string name="read_only">فقط خواندنی</string>
+    <string name="lock_editor">قفل کردن ویرایشگر</string>
+    <string name="unlock_editor">باز کردن قفل ویرایشگر</string>
     <string name="jump_to_line">رفتن به خط</string>
     <string name="preferences">تنظیمات</string>
     <string name="use_icu_selection">استفاده از انتخاب ICU</string>
@@ -414,8 +416,13 @@
     <string name="gallery_mode">حالت گالری</string>
     <string name="crop_in_thumbnails">برش در تصاویر کوچک</string>
     <string name="pinned_files">فایل‌های سنجاق‌شده</string>
+    <string name="file_size_tint">ته‌رنگ بر اساس اندازه فایل</string>
+    <string name="file_size_tint_desc">نمایش پس‌زمینه‌ای ملایم متناسب با اندازه هر مورد</string>
     <string name="pinned_files_desc">دسترسی سریع به فایل‌های مهم</string>
     <string name="pin_to_home_tab">سنجاق کردن به تب خانه</string>
+    <string name="rename_shortcut">تغییر نام میانبر</string>
+    <string name="remove_shortcut">حذف میانبر</string>
+    <string name="shortcut_name">نام میانبر</string>
     <string name="extensive_recent_files_scan">اسکن گسترده فایل‌های اخیر</string>
     <string name="scan_hidden_files_and_folders">اسکن فایل‌ها و پوشه‌های مخفی</string>
     <string name="manage_excluded_paths">مدیریت مسیرهای مستثنی شده</string>
@@ -449,6 +456,7 @@
     <string name="unpin_from_home_tab">برداشتن سنجاق از تب خانه</string>
     <string name="hide_hidden_files">پنهان کردن فایل‌های مخفی</string>
     <string name="press_back_again">برای خروج دوباره فشار دهید</string>
+    <string name="auto_brightness">خودکار</string>
     <string name="remember_last_session_desc">در صورت فعال بودن، تب‌های راه‌اندازی نادیده گرفته می‌شوند</string>
     <string name="close_tab_on_back_nav">ناوبری بازگشت برای بستن تب‌ها</string>
     <string name="remember_last_session">به خاطر سپردن آخرین جلسه</string>

@@ -24,6 +24,8 @@ class ShizukuFileHolder(
 ) : ContentHolder() {
 
     companion object {
+        private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
+
         /**
          * Creates a root ShizukuFileHolder for a given path.
          */
@@ -40,9 +42,18 @@ class ShizukuFileHolder(
         }
     }
 
+    private var resolvedIsDir: Boolean? = null
+    private var resolvedIsBroken: Boolean? = null
+
     override val uniquePath: String = entry.path
     override val displayName: String = entry.name
-    override val isFolder: Boolean = if (entry.isSymbolicLink && entry.isSymbolicLinkBroken) false else entry.isDirectory
+    override val isFolder: Boolean
+        get() {
+            if (entry.isSymbolicLink) {
+                resolvedIsDir?.let { return it }
+            }
+            return entry.isDirectory
+        }
     override val lastModified: Long = entry.lastModified
     override val size: Long = entry.size
     override val extension: String = if (isFolder) emptyString else entry.name.substringAfterLast(".", "")
@@ -51,7 +62,13 @@ class ShizukuFileHolder(
     override val canAddNewContent: Boolean = isFolder && ShizukuManager.isPrivileged
 
     override val isSymbolicLink: Boolean get() = entry.isSymbolicLink
-    override val isSymbolicLinkBroken: Boolean get() = entry.isSymbolicLinkBroken
+    override val isSymbolicLinkBroken: Boolean
+        get() {
+            if (entry.isSymbolicLink) {
+                resolvedIsBroken?.let { return it }
+            }
+            return entry.isSymbolicLinkBroken
+        }
     override val symbolicLinkTarget: String? get() = entry.symbolicLinkTarget
 
     private var details = emptyString
@@ -60,6 +77,12 @@ class ShizukuFileHolder(
 
     override suspend fun getDetails(): String {
         val separator = " | "
+
+        if (entry.isSymbolicLink && resolvedIsDir == null) {
+            val exists = ShizukuManager.exists(uniquePath)
+            resolvedIsBroken = !exists
+            resolvedIsDir = if (exists) ShizukuManager.isDirectory(uniquePath) else false
+        }
 
         if (details.isNotEmpty()) return details
 
@@ -83,14 +106,22 @@ class ShizukuFileHolder(
 
     private suspend fun getFormattedFileCount(): String {
         if (filesCount == 0 && foldersCount == 0) {
-            val content = listContent()
-            foldersCount = content.count { it.isFolder }
-            filesCount = content.count { !it.isFolder }
+            val count = getContentCount()
+            foldersCount = count.folders
+            filesCount = count.files
         }
         return getFormattedFileCount(filesCount, foldersCount)
     }
 
-    override suspend fun isValid(): Boolean = ShizukuManager.exists(uniquePath)
+    override suspend fun isValid(): Boolean {
+        if (entry.isSymbolicLink && resolvedIsDir == null) {
+            val exists = ShizukuManager.exists(uniquePath)
+            resolvedIsBroken = !exists
+            resolvedIsDir = if (exists) ShizukuManager.isDirectory(uniquePath) else false
+            return exists
+        }
+        return ShizukuManager.exists(uniquePath)
+    }
 
     override suspend fun getParent(): ContentHolder? {
         if (parentHolder != null) return parentHolder
@@ -101,16 +132,25 @@ class ShizukuFileHolder(
 
     override suspend fun listContent(): ArrayList<out ContentHolder> {
         val entries = ShizukuManager.listFiles(uniquePath)
-        return ArrayList(entries.map { fileEntry ->
-            ShizukuFileHolder(fileEntry, parentHolder = this)
-        })
+        var dirs = 0
+        var files = 0
+        val holders = ArrayList<ContentHolder>(entries.size)
+        for (fileEntry in entries) {
+            if (fileEntry.isDirectory) dirs++ else files++
+            holders.add(ShizukuFileHolder(fileEntry, parentHolder = this))
+        }
+        contentCountCache.put(uniquePath, ContentCount(folders = dirs, files = files))
+        return holders
     }
 
     override suspend fun getContentCount(): ContentCount {
+        contentCountCache.get(uniquePath)?.let { return it }
         val entries = ShizukuManager.listFiles(uniquePath)
         val dirs = entries.count { it.isDirectory }
         val files = entries.count { !it.isDirectory }
-        return ContentCount(folders = dirs, files = files)
+        val count = ContentCount(folders = dirs, files = files)
+        contentCountCache.put(uniquePath, count)
+        return count
     }
 
     override suspend fun findFile(name: String): ContentHolder? {

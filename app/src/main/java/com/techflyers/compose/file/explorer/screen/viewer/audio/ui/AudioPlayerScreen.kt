@@ -27,16 +27,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
@@ -61,6 +66,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -296,6 +302,7 @@ fun MusicPlayerScreen(
             ) {
                 EqualizerView(
                     onDismiss = { audioPlayerInstance.toggleEqualizer() },
+                    onOpenSystemEqualizer = { audioPlayerInstance.openSystemEqualizer(context) },
                     colorScheme = customColorScheme
                 )
             }
@@ -831,6 +838,7 @@ fun VolumeView(
 @Composable
 fun EqualizerView(
     onDismiss: () -> Unit,
+    onOpenSystemEqualizer: () -> Unit,
     colorScheme: AudioPlayerColorScheme
 ) {
     val frequencies = listOf("60Hz", "230Hz", "910Hz", "4kHz", "14kHz")
@@ -862,12 +870,22 @@ fun EqualizerView(
                     style = MaterialTheme.typography.titleLarge
                 )
 
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = null,
-                        tint = colorScheme.tintColor
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onOpenSystemEqualizer) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = stringResource(R.string.open_device_equalizer),
+                            tint = colorScheme.tintColor
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = null,
+                            tint = colorScheme.tintColor
+                        )
+                    }
                 }
             }
 
@@ -921,6 +939,39 @@ fun EqualizerView(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedButton(
+                onClick = onOpenSystemEqualizer,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = colorScheme.tintColor
+                ),
+                border = BorderStroke(1.dp, colorScheme.tintColor.copy(alpha = 0.35f))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = colorScheme.tintColor
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.open_device_equalizer),
+                    color = colorScheme.tintColor,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = colorScheme.tintColor.copy(alpha = 0.7f)
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

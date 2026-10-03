@@ -21,7 +21,6 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.App.Companion.logger
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
-import com.techflyers.compose.file.explorer.common.getIndexIf
 import com.techflyers.compose.file.explorer.common.getMimeType
 import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.orIf
@@ -36,6 +35,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFile
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileListCategory
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.anyFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
+import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.CategoryFileScanner
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.techflyers.compose.file.explorer.screen.main.tab.files.state.BottomOptionsBarState
 import com.techflyers.compose.file.explorer.screen.main.tab.files.state.DialogsState
@@ -66,6 +66,45 @@ class FilesTab(
 ) : Tab() {
     companion object {
         fun isValidLocalPath(path: String) = File(path).exists()
+
+        fun updateHomeScreenShortcutLabel(
+            context: Context,
+            file: LocalFileHolder,
+            label: String
+        ) {
+            val shortcutManager = context.getSystemService(ShortcutManager::class.java) ?: return
+            if (shortcutManager.pinnedShortcuts.none { it.id == file.uniquePath }) return
+
+            val targetIntent = if (file.isFolder) {
+                Intent(context, MainActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    putExtra("filePath", file.uniquePath)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+            } else {
+                val fileUri = file.createUri()
+                Intent(context, OpenWithDispatchActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    setDataAndType(fileUri, file.mimeType)
+                    putExtra("extra_file_path", file.file.absolutePath)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                }
+            }
+            val updatedShortcut = ShortcutInfo.Builder(context, file.uniquePath)
+                .setIntent(targetIntent)
+                .setIcon(
+                    android.graphics.drawable.Icon.createWithResource(
+                        context,
+                        if (file.isFile()) R.mipmap.file_shortcut else R.mipmap.folder_shortcut
+                    )
+                )
+                .setShortLabel(label)
+                .build()
+            shortcutManager.updateShortcuts(listOf(updatedShortcut))
+        }
     }
 
     override val id = globalClass.generateUid()
@@ -77,6 +116,19 @@ class FilesTab(
 
     var activeFolder: ContentHolder = homeDir
     var activeFolderContent = mutableStateListOf<ContentHolder>()
+    var contentSnapshot by mutableStateOf<List<ContentHolder>>(emptyList())
+    var maxSiblingSize by mutableLongStateOf(1L)
+    private var listingJob: Job? = null
+    private var lastKnownDirMtime: Long = -1L
+    private var lastKnownChildCount: Int = -1
+    private var lastKnownCategoryCount: Int = -1
+    private var lastKnownCategoryMaxDate: Long = -1L
+
+    fun updateContentSnapshot() {
+        contentSnapshot = activeFolderContent.toList()
+        maxSiblingSize = activeFolderContent.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+    }
+
     val contentListStates = hashMapOf<String, LazyGridState>()
     var activeListState by mutableStateOf(LazyGridState())
 
@@ -85,6 +137,7 @@ class FilesTab(
     )
 
     val highlightedFiles = mutableStateListOf<String>()
+    var pendingLocateFilePath by mutableStateOf<String?>(null)
     val selectedFiles = linkedMapOf<String, ContentHolder>()
     var lastSelectedFileIndex = -1
 
@@ -126,6 +179,7 @@ class FilesTab(
     var filesCount by mutableIntStateOf(0)
         private set
     var selectedFilesCount by mutableIntStateOf(0)
+    var dragSelectionVersion by mutableIntStateOf(0)
     var selectedFilesTotalSize by mutableLongStateOf(0L)
     var isCalculatingSelectedSize by mutableStateOf(false)
     private var calculateSizeJob: Job? = null
@@ -151,18 +205,7 @@ class FilesTab(
                 // Check if we can access the parent folder and open it
                 source.getParent()?.let { parent ->
                     openFolderImpl(parent) {
-                        // Scroll to the file once the content has been loaded
-                        CoroutineScope(Dispatchers.Main).launch {
-                            val targetIndex = activeFolderContent.getIndexIf {
-                                uniquePath == source.uniquePath || (displayName == source.displayName && size == source.size)
-                            }
-                            if (targetIndex >= 0) {
-                                val listState = getFileListState()
-                                listState.scrollToItem(targetIndex, 0)
-                                kotlinx.coroutines.delay(100)
-                                listState.scrollToItem(targetIndex, 0)
-                            }
-                        }
+                        pendingLocateFilePath = source.uniquePath
                     }
                 } ?: also {
                     // If parent folder cannot be accessed, revert to home folder
@@ -216,7 +259,14 @@ class FilesTab(
                 return "○"
             }
         }
-        return "📁 $foldersCount   📄 $filesCount"
+        val isPagedCapped = activeFolder is VirtualFileHolder && (activeFolder as VirtualFileHolder).hasMoreContent
+        return if (isPagedCapped) {
+            "📄 $filesCount of many"
+        } else if (foldersCount > 0) {
+            "📁 $foldersCount   📄 $filesCount"
+        } else {
+            "📄 $filesCount"
+        }
     }
 
     private suspend fun createTitle() = when (activeFolder) {
@@ -323,6 +373,7 @@ class FilesTab(
     fun unselectAllFiles(quickReload: Boolean = true) {
         selectedFiles.clear()
         selectedFilesCount = 0
+        dragSelectionVersion++
         lastSelectedFileIndex = -1
         updateSelectedFilesSize()
         if (quickReload) quickReloadFiles()
@@ -435,39 +486,147 @@ class FilesTab(
             zipSourceTimestamp = (activeFolder as ZipFileHolder).zipTree.timeStamp
         }
 
-        // Get the content of the new folder
-        listFiles { newContent -> // Main thread
-            // Update the active folder content
-            activeFolderContent.clear()
-            activeFolderContent.addAll(newContent)
+        // Cancel any existing listing job
+        listingJob?.cancel()
 
-            // Once the content has been loaded, update the home toolbar title and subtitle
-            requestHomeToolbarUpdate()
+        // If a new folder is opened, the list must be at the starting position,
+        // but when navigating back to parent folder, the saved location must be maintained
+        if (!rememberListState) {
+            contentListStates[item.uniquePath] = LazyGridState(0, 0)
+        }
 
-            // If a new folder is opened, the list must be at the starting position,
-            // but when navigating back to parent folder, the saved location must be maintained
-            if (!rememberListState) {
-                contentListStates[item.uniquePath] = LazyGridState(0, 0)
+        // Update the active list state
+        activeListState = contentListStates[item.uniquePath] ?: LazyGridState()
+            .also { contentListStates[item.uniquePath] = it }
+
+        // Get display config for this folder
+        updateDisplayConfig()
+
+        listingJob = scope.launch(Dispatchers.IO) {
+            isLoading = true
+            try {
+                if (activeFolder is LocalFileHolder) {
+                    val localFolder = activeFolder as LocalFileHolder
+                    lastKnownDirMtime = localFolder.file.lastModified()
+                    lastKnownChildCount = localFolder.file.list()?.size ?: -1
+
+                    val sorted = localFolder.listSortedContent()
+                    if (!isActive) return@launch
+
+                    val count = localFolder.getContentCount()
+                    withContext(Dispatchers.Main) {
+                        foldersCount = count.folders
+                        filesCount = count.files
+                        showCategories = false
+                    }
+
+                    val displayItems = if (sorted.size > 10_000) sorted.subList(0, 10_000) else sorted
+                    val firstChunk = displayItems.take(256)
+
+                    withContext(Dispatchers.Main) {
+                        activeFolderContent.clear()
+                        activeFolderContent.addAll(firstChunk)
+                        updateContentSnapshot()
+                        requestHomeToolbarUpdate()
+                        postEvent()
+                    }
+
+                    var offset = 256
+                    val appendChunkSize = 512
+                    while (isActive && offset < displayItems.size) {
+                        val end = minOf(offset + appendChunkSize, displayItems.size)
+                        val nextChunk = displayItems.subList(offset, end)
+                        offset = end
+                        withContext(Dispatchers.Main) {
+                            activeFolderContent.addAll(nextChunk)
+                            updateContentSnapshot()
+                        }
+                        kotlinx.coroutines.yield()
+                    }
+                } else if (activeFolder is VirtualFileHolder) {
+                    val vFolder = activeFolder as VirtualFileHolder
+                    val check = StorageProvider.getCategoryQuickCheck(vFolder.type)
+                    lastKnownCategoryCount = check.first
+                    lastKnownCategoryMaxDate = check.second
+
+                    val firstPage = vFolder.listSortedContent()
+                    if (!isActive) return@launch
+
+                    withContext(Dispatchers.Main) {
+                        activeFolderContent.clear()
+                        activeFolderContent.addAll(firstPage)
+                        updateContentSnapshot()
+                        foldersCount = 0
+                        filesCount = activeFolderContent.size
+                        categories.clear()
+                        categories.addAll(vFolder.getCategories())
+                        showCategories = categories.isNotEmpty()
+                        requestHomeToolbarUpdate()
+                        postEvent()
+                    }
+
+                    // Background append for remaining pages up to 5,000
+                    while (isActive && vFolder.hasMoreContent && activeFolderContent.size < 5000) {
+                        val nextPage = vFolder.loadNextPage()
+                        if (!isActive || nextPage.isEmpty()) break
+                        withContext(Dispatchers.Main) {
+                            activeFolderContent.addAll(nextPage)
+                            updateContentSnapshot()
+                            filesCount = activeFolderContent.size
+                            categories.clear()
+                            categories.addAll(vFolder.getCategories())
+                            showCategories = categories.isNotEmpty()
+                            requestHomeToolbarUpdate()
+                        }
+                        kotlinx.coroutines.yield()
+                    }
+
+                    // Optional background filesystem walk if enabled in preferences
+                    if (isActive && globalClass.preferencesManager.deepScanCategories) {
+                        val ext = when (vFolder.type) {
+                            VirtualFileHolder.IMAGE -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
+                            VirtualFileHolder.VIDEO -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
+                            VirtualFileHolder.AUDIO -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.audioFileType
+                            VirtualFileHolder.DOCUMENT -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.documentFileType
+                            VirtualFileHolder.ARCHIVE -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.archiveFileType
+                            VirtualFileHolder.APK -> setOf("apk", "apks", "xapk", "apkm")
+                            else -> emptySet()
+                        }
+                        if (ext.isNotEmpty()) {
+                            val existingPaths = activeFolderContent.map { it.uniquePath }.toSet()
+                            CategoryFileScanner.walkStorageRootsBackground(ext, existingPaths) { batch ->
+                                if (isActive && batch.isNotEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        activeFolderContent.addAll(batch)
+                                        updateContentSnapshot()
+                                        filesCount = activeFolderContent.size
+                                        requestHomeToolbarUpdate()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val sorted = activeFolder.listSortedContent()
+                    if (!isActive) return@launch
+                    val count = activeFolder.getContentCount()
+                    withContext(Dispatchers.Main) {
+                        activeFolderContent.clear()
+                        activeFolderContent.addAll(sorted)
+                        updateContentSnapshot()
+                        foldersCount = count.folders
+                        filesCount = count.files
+                        showCategories = false
+                        requestHomeToolbarUpdate()
+                        postEvent()
+                    }
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                    requestHomeToolbarUpdate()
+                }
             }
-
-            // Update the active list state
-            activeListState = contentListStates[item.uniquePath] ?: LazyGridState()
-                .also { contentListStates[item.uniquePath] = it }
-
-            // Get display config for this folder
-            updateDisplayConfig()
-
-            // Update the categories
-            if (activeFolder is VirtualFileHolder) {
-                categories.clear()
-                categories.addAll((activeFolder as VirtualFileHolder).getCategories())
-                showCategories = categories.isNotEmpty()
-            } else {
-                showCategories = false
-            }
-
-            // Call any posted events
-            postEvent()
         }
     }
 
@@ -511,43 +670,37 @@ class FilesTab(
 
         // check if any file has been changed
         if (activeFolder is VirtualFileHolder) {
-            validateBookmarks()
-            validateSearchResult()
-            val newContent = (activeFolder as VirtualFileHolder).listContent()
-            // Check if the content size has changed
-            if (newContent.size != activeFolderContent.size) {
+            val vFolder = activeFolder as VirtualFileHolder
+            if (vFolder.type == VirtualFileHolder.BOOKMARKS) {
+                validateBookmarks()
+                return false
+            }
+            if (vFolder.type == VirtualFileHolder.SEARCH) {
+                validateSearchResult()
+                return false
+            }
+            if (vFolder.type == VirtualFileHolder.DUPLICATES) {
+                return false
+            }
+            val check = StorageProvider.getCategoryQuickCheck(vFolder.type)
+            if (lastKnownCategoryCount != -1 && (check.first != lastKnownCategoryCount || check.second != lastKnownCategoryMaxDate)) {
                 reloadFiles()
                 return true
             }
-            // Check each file to see if the source has changed
-            if (activeFolderContent.any { (it as? LocalFileHolder)?.hasSourceChanged() == true }) {
-                reloadFiles()
-                return true
-            }
+            return false
         } else if (activeFolder is LocalFileHolder) {
-            val list = (activeFolder as LocalFileHolder).file.listFiles()
-            if (list != null) {
-                val filtered = list.filter {
-                    val isHidden = it.name.startsWith(".")
-                    it.name != "metadata.json" && (globalClass.preferencesManager.showHiddenFiles || !isHidden)
-                }
-                if (filtered.size != activeFolderContent.size ||
-                    activeFolderContent.any { (it as? LocalFileHolder)?.hasSourceChanged() == true }) {
-                    reloadFiles()
-                    return true
-                }
-            } else if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
-                val shizukuList = com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.listFiles(activeFolder.uniquePath)
-                    .filter {
-                        val isHidden = it.name.startsWith(".")
-                        it.name != "metadata.json" && (globalClass.preferencesManager.showHiddenFiles || !isHidden)
-                    }
-                if (shizukuList.size != activeFolderContent.size ||
-                    activeFolderContent.map { it.displayName }.toSet() != shizukuList.map { it.name }.toSet()) {
-                    reloadFiles()
-                    return true
-                }
+            val dir = (activeFolder as LocalFileHolder).file
+            val currentMtime = dir.lastModified()
+            if (lastKnownDirMtime != -1L && currentMtime != lastKnownDirMtime) {
+                reloadFiles()
+                return true
             }
+            val childCount = dir.list()?.size ?: -1
+            if (lastKnownChildCount != -1 && childCount != -1 && childCount != lastKnownChildCount) {
+                reloadFiles()
+                return true
+            }
+            return false
         } else if (activeFolder is com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder) {
             val shizukuList = com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.listFiles(activeFolder.uniquePath)
                 .filter {
@@ -671,6 +824,7 @@ class FilesTab(
                 // Reload the list
                 activeFolderContent.clear()
                 activeFolderContent.addAll(temp)
+                updateContentSnapshot()
 
                 // Update title and subtitle
                 requestHomeToolbarUpdate()
@@ -789,22 +943,6 @@ class FilesTab(
         }
     }
 
-    private suspend fun listFiles(onReady: (ArrayList<out ContentHolder>) -> Unit) {
-        isLoading = true
-
-        val result = activeFolder.listSortedContent()
-
-        activeFolder.getContentCount().let { contentCount ->
-            foldersCount = contentCount.folders
-            filesCount = contentCount.files
-        }
-
-        withContext(Dispatchers.Main) {
-            onReady(result)
-            isLoading = false
-        }
-    }
-
     // Called when a new file/folder is created
     fun onNewFileCreated(newFile: ContentHolder, openContent: Boolean = false, context: Context? = null) {
         scope.launch {
@@ -818,11 +956,7 @@ class FilesTab(
 
                 reloadFiles {
                     CoroutineScope(Dispatchers.Main).launch {
-                        val newItemIndex =
-                            activeFolderContent.getIndexIf { displayName == newFile.displayName }
-                        if (newItemIndex > -1) {
-                            getFileListState().scrollToItem(newItemIndex, 0)
-                        }
+                        pendingLocateFilePath = newFile.uniquePath
                         if (openContent && !newFile.isFolder) {
                             val ctx = context ?: globalClass
                             openFile(ctx, newFile)
@@ -844,18 +978,7 @@ class FilesTab(
                 add(file.uniquePath)
             }
             openFolderImpl(parent) {
-                CoroutineScope(Dispatchers.Main).launch {
-                    val targetIndex =
-                        activeFolderContent.getIndexIf {
-                            uniquePath == file.uniquePath || (displayName == file.displayName && size == file.size)
-                        }
-                    if (targetIndex >= 0) {
-                        val listState = getFileListState()
-                        listState.scrollToItem(targetIndex, 0)
-                        kotlinx.coroutines.delay(100)
-                        listState.scrollToItem(targetIndex, 0)
-                    }
-                }
+                pendingLocateFilePath = file.uniquePath
             }
         }
     }
@@ -954,7 +1077,7 @@ class FilesTab(
         context.startActivity(chooserIntent)
     }
 
-    fun addToHomeScreen(context: Context, file: LocalFileHolder) {
+    fun addToHomeScreen(context: Context, file: LocalFileHolder, shortcutName: String = file.displayName) {
         val shortcutManager = context.getSystemService(ShortcutManager::class.java)
         val targetIntent = if (file.isFolder) {
             Intent(context, MainActivity::class.java).apply {
@@ -983,7 +1106,7 @@ class FilesTab(
                     if (file.isFile()) R.mipmap.file_shortcut else R.mipmap.folder_shortcut
                 )
             )
-            .setShortLabel(file.displayName)
+            .setShortLabel(shortcutName.take(25).ifBlank { file.displayName })
             .build()
         val pinnedShortcutCallbackIntent =
             shortcutManager.createShortcutResultIntent(pinShortcutInfo)

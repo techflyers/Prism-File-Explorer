@@ -31,9 +31,13 @@ import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,8 +60,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
-import com.cheonjaeung.compose.grid.SimpleGridCells
-import com.cheonjaeung.compose.grid.VerticalGrid
 import com.google.gson.Gson
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.App.Companion.logger
@@ -77,6 +79,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.Virtual
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FileContentIcon
 import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
+import com.techflyers.compose.file.explorer.screen.main.tab.home.holder.HomeCategory
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeLayout
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionConfig
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionType
@@ -302,6 +305,8 @@ fun PinnedFilesSection(
     mainActivityManager: MainActivityManager
 ) {
     val context = LocalContext.current
+    var renameTarget by remember { mutableStateOf<LocalFileHolder?>(null) }
+    var shortcutNameInput by remember { mutableStateOf("") }
     val pinnedFiles = remember {
         mutableStateListOf<LocalFileHolder>().apply {
             addAll(tab.pinnedFiles)
@@ -435,33 +440,92 @@ fun PinnedFilesSection(
                             }
                         }
                         Space(size = 8.dp)
-                        Text(text = it.displayName)
+                        Text(
+                            text = globalClass.preferencesManager.pinnedFileNames[it.uniquePath]
+                                ?: it.displayName,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     AnimatedVisibility(visible = showDeleteOption) {
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .fillMaxHeight()
-                                .width(60.dp)
-                                .background(color = MaterialTheme.colorScheme.errorContainer)
-                                .clickable {
+                                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    shortcutNameInput = globalClass.preferencesManager.pinnedFileNames[it.uniquePath]
+                                        ?: it.displayName
+                                    renameTarget = it
+                                    showDeleteOption = false
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Edit,
+                                    contentDescription = stringResource(R.string.rename_shortcut),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            IconButton(
+                                onClick = {
                                     pinnedFiles.remove(it)
                                     tab.removePinnedFile(it)
                                 },
-                        ) {
-                            Icon(
                                 modifier = Modifier
-                                    .fillMaxHeight()
-                                    .align(Alignment.Center),
-                                imageVector = Icons.Rounded.Delete,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer
-                            )
+                                    .size(48.dp)
+                                    .background(color = MaterialTheme.colorScheme.errorContainer)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = stringResource(R.string.remove_shortcut),
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
                         }
                     }
                 }
                 if (index != pinnedFiles.lastIndex) HorizontalDivider(thickness = 0.5.dp)
             }
         }
+    }
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text(stringResource(R.string.rename_shortcut)) },
+            text = {
+                OutlinedTextField(
+                    value = shortcutNameInput,
+                    onValueChange = { shortcutNameInput = it },
+                    label = { Text(stringResource(R.string.shortcut_name)) },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val displayName = shortcutNameInput.trim().ifEmpty { target.displayName }
+                        val names = globalClass.preferencesManager.pinnedFileNames.toMutableMap()
+                        if (displayName == target.displayName) {
+                            names.remove(target.uniquePath)
+                        } else {
+                            names[target.uniquePath] = displayName
+                        }
+                        globalClass.preferencesManager.pinnedFileNames = names
+                        FilesTab.updateHomeScreenShortcutLabel(context, target, displayName)
+                        renameTarget = null
+                    }
+                ) {
+                    Text(stringResource(R.string.apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 }
 
@@ -623,41 +687,74 @@ private fun CategoriesSection(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
 
-    VerticalGrid(
+    val categories = tab.getMainCategories()
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp),
-        columns = SimpleGridCells.Fixed(3)
+            .padding(horizontal = 12.dp)
     ) {
-        tab.getMainCategories().forEach {
-            Column(
-                Modifier
-                    .padding(4.dp)
-                    .background(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow
-                    )
-                    .border(
-                        width = 0.5.dp,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .clickable { it.onClick() }
-                    .padding(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    modifier = Modifier.padding(8.dp),
-                    imageVector = it.icon,
-                    contentDescription = null
-                )
-                Text(
-                    modifier = Modifier.basicMarquee(velocity = 90.dp),
-                    text = it.name,
-                    maxLines = 1
-                )
+        categories.dropLast(1).chunked(3).forEach { rowItems ->
+            Row(Modifier.fillMaxWidth()) {
+                rowItems.forEach { category ->
+                    HomeCategoryTile(category, Modifier.weight(1f))
+                }
+                repeat(3 - rowItems.size) {
+                    Spacer(Modifier.weight(1f))
+                }
             }
+        }
+        categories.lastOrNull()?.let { category ->
+            HomeCategoryTile(category, Modifier.fillMaxWidth(), fullWidth = true)
+        }
+    }
+}
+
+@Composable
+private fun HomeCategoryTile(
+    category: HomeCategory,
+    modifier: Modifier,
+    fullWidth: Boolean = false
+) {
+    val tileModifier = modifier
+        .padding(4.dp)
+        .background(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+        .border(
+            width = 0.5.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            shape = RoundedCornerShape(8.dp)
+        )
+        .clickable { category.onClick() }
+        .padding(8.dp)
+
+    if (fullWidth) {
+        Row(
+            modifier = tileModifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(imageVector = category.icon, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(text = category.name, maxLines = 1)
+        }
+    } else {
+        Column(
+            modifier = tileModifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                modifier = Modifier.padding(8.dp),
+                imageVector = category.icon,
+                contentDescription = null
+            )
+            Text(
+                modifier = Modifier.basicMarquee(velocity = 90.dp),
+                text = category.name,
+                maxLines = 1
+            )
         }
     }
 }

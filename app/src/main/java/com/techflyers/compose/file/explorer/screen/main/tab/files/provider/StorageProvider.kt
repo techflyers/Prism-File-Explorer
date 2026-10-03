@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.database.Cursor
 import android.net.Uri
+import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.os.storage.StorageManager
@@ -16,6 +17,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFi
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RootFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE
@@ -228,7 +230,9 @@ object StorageProvider {
      */
     private fun getFilesByMimeTypes(
         mimeTypes: Array<String>,
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
         if (mimeTypes.isEmpty()) {
             return ArrayList()
@@ -247,7 +251,6 @@ object StorageProvider {
         )
 
         // Build the selection clause to match any of the provided MIME types.
-        // Creates a clause like: "MIME_TYPE = ? OR MIME_TYPE = ? OR ..."
         val selection =
             mimeTypes.joinToString(" OR ") { "${MediaStore.Files.FileColumns.MIME_TYPE} = ?" }
         val selectionArgs = mimeTypes
@@ -260,21 +263,56 @@ object StorageProvider {
             else -> "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
         }
 
-        val cursor: Cursor? = contentResolver.query(
-            uri,
-            projection,
-            selection,
-            selectionArgs,
-            sortOrder
-        )
+        val queryArgs = Bundle().apply {
+            putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+            val sortCol = when (sortingPrefs?.sortMethod) {
+                SORT_BY_NAME -> MediaStore.Files.FileColumns.DISPLAY_NAME
+                SORT_BY_SIZE -> MediaStore.Files.FileColumns.SIZE
+                else -> MediaStore.Files.FileColumns.DATE_MODIFIED
+            }
+            putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, arrayOf(sortCol))
+            putInt(
+                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                if (sortingPrefs?.reverseSorting == true) ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+                else ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+            )
+        }
+
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(uri, projection, queryArgs, null)
+        } catch (_: Exception) {
+            val fallbackUri = uri.buildUpon().appendQueryParameter("limit", "$offset,$limit").build()
+            try {
+                cursor = contentResolver.query(fallbackUri, projection, selection, selectionArgs, sortOrder)
+            } catch (_: Exception) {}
+        }
 
         cursor?.use {
             val pathColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+            val nameColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val dateColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+            val sizeColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
 
             while (it.moveToNext()) {
                 val path = it.getString(pathColumn)
                 if (!path.isNullOrEmpty()) {
-                    files.add(LocalFileHolder(File(path)))
+                    val name = it.getString(nameColumn) ?: File(path).name
+                    val dateModified = it.getLong(dateColumn) * 1000L
+                    val size = it.getLong(sizeColumn)
+                    files.add(
+                        LocalFileHolder(
+                            file = File(path),
+                            cachedName = name,
+                            cachedIsDir = false,
+                            cachedSize = size,
+                            cachedLastModified = dateModified
+                        )
+                    )
                 }
             }
         }
@@ -286,7 +324,9 @@ object StorageProvider {
      * Gets all document files.
      */
     fun getDocumentFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
         val documentMimeTypes = arrayOf(
             "application/pdf",
@@ -297,19 +337,16 @@ object StorageProvider {
             "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation" // PPTX
         )
-        val media = getFilesByMimeTypes(documentMimeTypes, sortingPrefs)
-        return CategoryFileScanner.mergeMediaAndWalk(
-            "documents",
-            media,
-            FileMimeType.documentFileType
-        )
+        return getFilesByMimeTypes(documentMimeTypes, sortingPrefs, limit, offset)
     }
 
     /**
      * Gets all archive files.
      */
     fun getArchiveFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
         val archiveMimeTypes = arrayOf(
             "application/zip",
@@ -318,29 +355,91 @@ object StorageProvider {
             "application/gzip",
             "application/x-7z-compressed"
         )
-        val media = getFilesByMimeTypes(archiveMimeTypes, sortingPrefs)
-        return CategoryFileScanner.mergeMediaAndWalk(
-            "archives",
-            media,
-            FileMimeType.archiveFileType
-        )
+        return getFilesByMimeTypes(archiveMimeTypes, sortingPrefs, limit, offset)
     }
 
     fun getApkFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
-        val mime = getFilesByMimeTypes(
-            arrayOf("application/vnd.android.package-archive"),
-            sortingPrefs
+        val files = ArrayList<LocalFileHolder>()
+        val contentResolver: ContentResolver = globalClass.contentResolver
+        val uri: Uri = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns.DATA,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_MODIFIED,
+            MediaStore.Files.FileColumns.SIZE
         )
-        val byName = CategoryFileScanner.queryMediaByNameSuffixes(
-            listOf(".apk", ".apks", ".xapk", ".apkm")
-        )
-        return CategoryFileScanner.mergeMediaAndWalk(
-            "apk",
-            mime + byName,
-            setOf("apk", "apks", "xapk", "apkm")
-        )
+        val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.apk' OR " +
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.apks' OR " +
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.xapk' OR " +
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.apkm'"
+        val selectionArgs = arrayOf("application/vnd.android.package-archive")
+
+        val sortOrder = when (sortingPrefs?.sortMethod) {
+            SORT_BY_NAME -> "${MediaStore.Files.FileColumns.DISPLAY_NAME} ${if (sortingPrefs.reverseSorting) "DESC" else "ASC"}"
+            SORT_BY_DATE -> "${MediaStore.Files.FileColumns.DATE_MODIFIED} ${if (sortingPrefs.reverseSorting) "ASC" else "DESC"}"
+            SORT_BY_SIZE -> "${MediaStore.Files.FileColumns.SIZE} ${if (sortingPrefs.reverseSorting) "ASC" else "DESC"}"
+            else -> "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+        }
+
+        val queryArgs = Bundle().apply {
+            putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+            val sortCol = when (sortingPrefs?.sortMethod) {
+                SORT_BY_NAME -> MediaStore.Files.FileColumns.DISPLAY_NAME
+                SORT_BY_SIZE -> MediaStore.Files.FileColumns.SIZE
+                else -> MediaStore.Files.FileColumns.DATE_MODIFIED
+            }
+            putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, arrayOf(sortCol))
+            putInt(
+                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                if (sortingPrefs?.reverseSorting == true) ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+                else ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+            )
+        }
+
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(uri, projection, queryArgs, null)
+        } catch (_: Exception) {
+            val fallbackUri = uri.buildUpon().appendQueryParameter("limit", "$offset,$limit").build()
+            try {
+                cursor = contentResolver.query(fallbackUri, projection, selection, selectionArgs, sortOrder)
+            } catch (_: Exception) {}
+        }
+
+        cursor?.use {
+            val pathCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+            val nameCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val dateCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+            val sizeCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+
+            while (it.moveToNext()) {
+                val path = it.getString(pathCol)
+                if (!path.isNullOrEmpty()) {
+                    val name = it.getString(nameCol) ?: File(path).name
+                    val dateModified = it.getLong(dateCol) * 1000L
+                    val size = it.getLong(sizeCol)
+                    files.add(
+                        LocalFileHolder(
+                            file = File(path),
+                            cachedName = name,
+                            cachedIsDir = false,
+                            cachedSize = size,
+                            cachedLastModified = dateModified
+                        )
+                    )
+                }
+            }
+        }
+        return files
     }
 
     /**
@@ -348,7 +447,9 @@ object StorageProvider {
      */
     private fun getMediaFiles(
         mediaType: Int,
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
         val files = ArrayList<LocalFileHolder>()
         val contentResolver: ContentResolver = globalClass.contentResolver
@@ -372,8 +473,6 @@ object StorageProvider {
             SORT_BY_SIZE -> "${MediaStore.Files.FileColumns.SIZE} ${if (sortingPrefs.reverseSorting) "ASC" else "DESC"}"
             SORT_BY_TYPE -> {
                 val direction = if (sortingPrefs.reverseSorting) "DESC" else "ASC"
-                // This SQL expression extracts the file extension and uses it for sorting.
-                // It sorts files without an extension first, then sorts by extension alphabetically.
                 """
             CASE
                 WHEN INSTR(${MediaStore.Files.FileColumns.DISPLAY_NAME}, '.') = 0 THEN 1
@@ -386,21 +485,56 @@ object StorageProvider {
             else -> "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
         }
 
-        val cursor: Cursor? = contentResolver.query(
-            uri,
-            projection,
-            selection,
-            selectionArgs,
-            sortOrder
-        )
+        val queryArgs = Bundle().apply {
+            putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+            val sortCol = when (sortingPrefs?.sortMethod) {
+                SORT_BY_NAME -> MediaStore.Files.FileColumns.DISPLAY_NAME
+                SORT_BY_SIZE -> MediaStore.Files.FileColumns.SIZE
+                else -> MediaStore.Files.FileColumns.DATE_MODIFIED
+            }
+            putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, arrayOf(sortCol))
+            putInt(
+                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                if (sortingPrefs?.reverseSorting == true) ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+                else ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+            )
+        }
+
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(uri, projection, queryArgs, null)
+        } catch (_: Exception) {
+            val fallbackUri = uri.buildUpon().appendQueryParameter("limit", "$offset,$limit").build()
+            try {
+                cursor = contentResolver.query(fallbackUri, projection, selection, selectionArgs, sortOrder)
+            } catch (_: Exception) {}
+        }
 
         cursor?.use {
             val pathColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+            val nameColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val dateColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+            val sizeColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
 
             while (it.moveToNext()) {
                 val path = it.getString(pathColumn)
                 if (!path.isNullOrEmpty()) {
-                    files.add(LocalFileHolder(File(path)))
+                    val name = it.getString(nameColumn) ?: File(path).name
+                    val dateModified = it.getLong(dateColumn) * 1000L
+                    val size = it.getLong(sizeColumn)
+                    files.add(
+                        LocalFileHolder(
+                            file = File(path),
+                            cachedName = name,
+                            cachedIsDir = false,
+                            cachedSize = size,
+                            cachedLastModified = dateModified
+                        )
+                    )
                 }
             }
         }
@@ -412,49 +546,65 @@ object StorageProvider {
      * Gets all image files.
      */
     fun getImageFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
-        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE, sortingPrefs)
-        return CategoryFileScanner.mergeMediaAndWalk("images", media, FileMimeType.imageFileType)
+        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE, sortingPrefs, limit, offset)
     }
 
     /**
      * Gets all video files.
      */
     fun getVideoFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
-        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO, sortingPrefs)
-        return CategoryFileScanner.mergeMediaAndWalk("videos", media, FileMimeType.videoFileType)
+        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO, sortingPrefs, limit, offset)
     }
 
     /**
      * Gets all audio files.
      */
     fun getAudioFiles(
-        sortingPrefs: FileSortingPrefs?
+        sortingPrefs: FileSortingPrefs?,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
-        val media = getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO, sortingPrefs)
-        return CategoryFileScanner.mergeMediaAndWalk("audio", media, FileMimeType.audioFileType)
+        return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO, sortingPrefs, limit, offset)
     }
 
     fun getBookmarks() = globalClass.preferencesManager.bookmarks
         .map { LocalFileHolder(File(it)) } as ArrayList<LocalFileHolder>
 
+    private var cachedRecentFiles: ArrayList<RecentFile>? = null
+    private var cachedRecentKey: String = ""
+    private var cachedRecentTimestamp: Long = 0L
+    private const val RECENT_CACHE_TTL_MS = 10_000L
+
     fun getRawRecentFiles(
         recentHours: Int = 24 * 5,
         limit: Int = 100
     ): ArrayList<RecentFile> {
+        val now = System.currentTimeMillis()
+        val prefs = globalClass.preferencesManager
+        val cacheKey = "$recentHours:$limit:${prefs.showHiddenFiles}:${prefs.removeHiddenPathsFromRecentFiles}:${prefs.hideTempAndDbFilesFromRecentFiles}:${prefs.excludedPathsFromRecentFiles.joinToString()}"
+        if (cachedRecentFiles != null && cachedRecentKey == cacheKey && (now - cachedRecentTimestamp < RECENT_CACHE_TTL_MS)) {
+            return ArrayList(cachedRecentFiles!!)
+        }
+
         val recentFiles = ArrayList<RecentFile>(limit)
         val contentResolver: ContentResolver = globalClass.contentResolver
-        val showHiddenFiles = globalClass.preferencesManager.showHiddenFiles
+        val showHiddenFiles = prefs.showHiddenFiles
 
         val uri: Uri = MediaStore.Files.getContentUri("external")
 
         val projection = arrayOf(
             MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.DATE_MODIFIED,
-            MediaStore.Files.FileColumns.DISPLAY_NAME
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.SIZE
         )
 
         // Build the selection clause and arguments dynamically.
@@ -467,8 +617,8 @@ object StorageProvider {
         selectionArgsList.add(time.toString())
 
         // Exclude directories directly in the query.
-        // This avoids the expensive file.isFile check inside the loop.
         selectionClauses.add("${MediaStore.MediaColumns.MIME_TYPE} IS NOT NULL")
+        selectionClauses.add("${MediaStore.Files.FileColumns.MEDIA_TYPE} != ${MediaStore.Files.FileColumns.MEDIA_TYPE_NONE}")
 
         // Handle hidden files
         if (!showHiddenFiles) {
@@ -476,20 +626,20 @@ object StorageProvider {
         }
 
         // Exclude specified paths at the database level.
-        val excludedPaths = globalClass.preferencesManager.excludedPathsFromRecentFiles
+        val excludedPaths = prefs.excludedPathsFromRecentFiles
         excludedPaths.forEach { excludedPath ->
             selectionClauses.add("${MediaStore.Files.FileColumns.DATA} NOT LIKE ?")
             selectionArgsList.add("$excludedPath%")
         }
 
-        // Exclude files within hidden directories (e.g., /storage/emulated/0/SomeApp/.cache/file.txt)
-        val excludeHiddenPaths = globalClass.preferencesManager.removeHiddenPathsFromRecentFiles
+        // Exclude files within hidden directories
+        val excludeHiddenPaths = prefs.removeHiddenPathsFromRecentFiles
         if (excludeHiddenPaths) {
             selectionClauses.add("${MediaStore.Files.FileColumns.DATA} NOT LIKE '%/.%'")
         }
 
         // Exclude temporary and database cache/lock files.
-        if (globalClass.preferencesManager.hideTempAndDbFilesFromRecentFiles) {
+        if (prefs.hideTempAndDbFilesFromRecentFiles) {
             listOf(
                 "%.tmp", "%.temp", "%.bak", "%.log",
                 "%.crdownload", "%.part",
@@ -505,58 +655,140 @@ object StorageProvider {
         // Combine all selection clauses.
         val selection = selectionClauses.joinToString(" AND ")
         val selectionArgs = selectionArgsList.toTypedArray()
-
-        // Apply the limit directly to the query URI for Android Q (API 29) and above.
-        // This is the most efficient way to limit results.
-        val queryUri = uri.buildUpon().apply {
-            appendQueryParameter("limit", limit.toString())
-        }.build()
-
         val sortOrder = "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
 
-        val cursor: Cursor? = contentResolver.query(
-            queryUri,
-            projection,
-            selection,
-            selectionArgs,
-            sortOrder
-        )
+        val queryArgs = Bundle().apply {
+            putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+            putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, arrayOf(MediaStore.Files.FileColumns.DATE_MODIFIED))
+            putInt(ContentResolver.QUERY_ARG_SORT_DIRECTION, ContentResolver.QUERY_SORT_DIRECTION_DESCENDING)
+        }
+
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(uri, projection, queryArgs, null)
+        } catch (_: Exception) {
+            val queryUri = uri.buildUpon().apply {
+                appendQueryParameter("limit", limit.toString())
+            }.build()
+            try {
+                cursor = contentResolver.query(queryUri, projection, selection, selectionArgs, sortOrder)
+            } catch (_: Exception) {}
+        }
 
         cursor?.use {
             val columnIndexPath = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
-            val columnLastModified =
-                it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+            val columnLastModified = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
             val columnName = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val columnSize = it.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
 
             while (it.moveToNext() && recentFiles.size < limit) {
                 val filePath = it.getString(columnIndexPath)
                 val name = it.getString(columnName)
                 val lastModified = it.getLong(columnLastModified)
+                val size = if (columnSize >= 0) it.getLong(columnSize) else 0L
 
-                if (filePath != null && name != null && File(filePath).isFile) {
+                if (!filePath.isNullOrEmpty() && !name.isNullOrEmpty()) {
+                    val mtimeMs = lastModified * 1000L
+                    val holder = LocalFileHolder(
+                        file = File(filePath),
+                        cachedName = name,
+                        cachedIsDir = false,
+                        cachedSize = size,
+                        cachedLastModified = mtimeMs
+                    )
                     recentFiles.add(
                         RecentFile(
-                            name,
-                            filePath,
-                            lastModified
+                            name = name,
+                            path = filePath,
+                            lastModified = lastModified,
+                            file = holder
                         )
                     )
                 }
             }
         }
 
+        cachedRecentFiles = ArrayList(recentFiles)
+        cachedRecentKey = cacheKey
+        cachedRecentTimestamp = now
         return recentFiles
     }
 
     fun getRecentFiles(
-        recentHours: Int = 24 * 5,
-        limit: Int = 100
+        recentHours: Int = 48,
+        limit: Int = 200,
+        offset: Int = 0
     ): ArrayList<LocalFileHolder> {
         return arrayListOf<LocalFileHolder>().apply {
             addAll(
-                getRawRecentFiles(recentHours, limit).map { LocalFileHolder(it.file.file) }
+                getRawRecentFiles(recentHours, limit + offset).drop(offset).take(limit).map { it.file }
             )
         }
+    }
+
+    fun getCategoryQuickCheck(type: Int): Pair<Int, Long> {
+        val uri: Uri = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns.DATE_MODIFIED
+        )
+        val selection = when (type) {
+            VirtualFileHolder.IMAGE -> "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE}"
+            VirtualFileHolder.VIDEO -> "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO}"
+            VirtualFileHolder.AUDIO -> "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO}"
+            VirtualFileHolder.DOCUMENT -> {
+                val documentMimeTypes = arrayOf(
+                    "application/pdf", "application/msword",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-powerpoint",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+                documentMimeTypes.joinToString(" OR ") { "${MediaStore.Files.FileColumns.MIME_TYPE} = '$it'" }
+            }
+            VirtualFileHolder.ARCHIVE -> {
+                val archiveMimeTypes = arrayOf(
+                    "application/zip", "application/x-rar-compressed",
+                    "application/x-tar", "application/gzip", "application/x-7z-compressed"
+                )
+                archiveMimeTypes.joinToString(" OR ") { "${MediaStore.Files.FileColumns.MIME_TYPE} = '$it'" }
+            }
+            VirtualFileHolder.APK -> "${MediaStore.Files.FileColumns.MIME_TYPE} = 'application/vnd.android.package-archive' OR ${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.apk'"
+            VirtualFileHolder.RECENT -> "${MediaStore.MediaColumns.MIME_TYPE} IS NOT NULL"
+            else -> return Pair(0, 0L)
+        }
+
+        val sortOrder = "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+        var count = 0
+        var maxMtime = 0L
+
+        try {
+            val queryArgs = Bundle().apply {
+                putInt(ContentResolver.QUERY_ARG_LIMIT, 1)
+                putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+            }
+            globalClass.contentResolver.query(uri, projection, queryArgs, null)?.use { cursor ->
+                count = cursor.count
+                if (cursor.moveToFirst()) {
+                    maxMtime = cursor.getLong(0)
+                }
+            }
+        } catch (_: Exception) {
+            try {
+                val queryUri = uri.buildUpon().appendQueryParameter("limit", "1").build()
+                globalClass.contentResolver.query(queryUri, projection, selection, null, sortOrder)?.use { cursor ->
+                    count = cursor.count
+                    if (cursor.moveToFirst()) {
+                        maxMtime = cursor.getLong(0)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return Pair(count, maxMtime)
     }
 
     fun getSearchResult(): ArrayList<ContentHolder> {
