@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,7 +44,31 @@ import com.techflyers.compose.file.explorer.common.emptyString
 fun BehaviorContainer() {
     val prefs = globalClass.preferencesManager
 
+    val defaultOpeningMethodsList = prefs.getDefaultOpeningMethodsList()
+    var showDefaultAppsDialog by remember { mutableStateOf(false) }
+
+    DefaultAppsDialog(
+        show = showDefaultAppsDialog,
+        onDismissRequest = { showDefaultAppsDialog = false }
+    )
+
     Container(title = stringResource(R.string.behavior)) {
+        PreferenceItem(
+            label = stringResource(R.string.default_opening_methods),
+            supportingText = if (defaultOpeningMethodsList.isNotEmpty()) {
+                stringResource(R.string.default_opening_methods_count, defaultOpeningMethodsList.size)
+            } else {
+                stringResource(R.string.no_default_opening_methods)
+            },
+            icon = Icons.Rounded.OpenInBrowser,
+            onClick = { showDefaultAppsDialog = true }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
         PreferenceItem(
             label = stringResource(R.string.show_files_options_menu_on_long_click),
             supportingText = emptyString,

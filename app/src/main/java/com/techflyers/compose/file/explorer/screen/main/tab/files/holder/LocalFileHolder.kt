@@ -502,14 +502,10 @@ class LocalFileHolder(
         skipSupportedExtensions: Boolean,
         customMimeType: String?
     ) {
-        val defaultOpeningMethods =
-            fromJson<DefaultOpeningMethods>(globalClass.preferencesManager.defaultOpeningMethods)
-                ?: DefaultOpeningMethods()
-        defaultOpeningMethods.openingMethods.forEach {
-            if (it.extension == extension) {
-                openFileWithPackage(context, it.packageName, it.className)
-                return
-            }
+        val defOpeningMethod = globalClass.preferencesManager.getDefaultOpeningMethod(extension)
+        if (defOpeningMethod != null) {
+            openFileWithPackage(context, defOpeningMethod.packageName, defOpeningMethod.className)
+            return
         }
 
         // Only run the built-in handler routing when no explicit customMimeType is given.

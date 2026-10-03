@@ -16,6 +16,7 @@ import com.techflyers.compose.file.explorer.common.toJson
 import com.techflyers.compose.file.explorer.screen.main.startup.StartupTabs
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DefaultOpeningMethods
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.OpeningMethod
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithApps
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithEntry
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
@@ -451,6 +452,47 @@ class PreferencesManager {
         defaultValue = DefaultOpeningMethods().toJson(),
         getPreferencesKey = { stringPreferencesKey(it) }
     )
+
+    fun getDefaultOpeningMethodsList(): List<OpeningMethod> {
+        val methods: DefaultOpeningMethods? = fromJson(defaultOpeningMethods)
+        return methods?.openingMethods ?: emptyList()
+    }
+
+    fun getDefaultOpeningMethod(extension: String): OpeningMethod? {
+        val ext = extension.lowercase().removePrefix(".")
+        return getDefaultOpeningMethodsList().firstOrNull {
+            it.extension.lowercase().removePrefix(".") == ext
+        }
+    }
+
+    fun hasDefaultOpeningMethod(extension: String): Boolean {
+        return getDefaultOpeningMethod(extension) != null
+    }
+
+    fun setDefaultOpeningMethod(extension: String, packageName: String, className: String) {
+        val ext = extension.lowercase().removePrefix(".")
+        val current = getDefaultOpeningMethodsList().filter {
+            it.extension.lowercase().removePrefix(".") != ext
+        }
+        val updated = current + OpeningMethod(
+            extension = ext,
+            packageName = packageName,
+            className = className
+        )
+        defaultOpeningMethods = DefaultOpeningMethods(updated).toJson()
+    }
+
+    fun clearDefaultOpeningMethod(extension: String) {
+        val ext = extension.lowercase().removePrefix(".")
+        val current = getDefaultOpeningMethodsList().filter {
+            it.extension.lowercase().removePrefix(".") != ext
+        }
+        defaultOpeningMethods = DefaultOpeningMethods(current).toJson()
+    }
+
+    fun clearAllDefaultOpeningMethods() {
+        defaultOpeningMethods = DefaultOpeningMethods(emptyList()).toJson()
+    }
 
     var recentOpenWithApps by prefMutableState(
         keyName = "recentOpenWithApps",

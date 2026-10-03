@@ -814,17 +814,19 @@ fun FileOptionsMenuDialog(
                 }
             }
 
-            if (isSingleFile && targetContentHolder is LocalFileHolder) {
+            if (isSingleFile && targetContentHolder is LocalFileHolder &&
+                targetContentHolder.file.extension.isNotEmpty() &&
+                globalClass.preferencesManager.hasDefaultOpeningMethod(targetContentHolder.file.extension)
+            ) {
                 FileOption(
                     Icons.Rounded.OpenInNewOff,
                     stringResource(R.string.remove_default_opening_method)
                 ) {
-                    fromJson<DefaultOpeningMethods>(globalClass.preferencesManager.defaultOpeningMethods)?.let {
-                        globalClass.preferencesManager.defaultOpeningMethods =
-                            DefaultOpeningMethods(
-                                it.openingMethods.filter { it.extension != targetContentHolder.file.extension }
-                            ).toJson()
-                    }
+                    val ext = targetContentHolder.file.extension
+                    globalClass.preferencesManager.clearDefaultOpeningMethod(ext)
+                    globalClass.showMsg(
+                        context.getString(R.string.default_cleared_for, ext)
+                    )
                     onDismissRequest()
                 }
             }

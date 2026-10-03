@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Checkbox
@@ -29,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
@@ -322,13 +325,87 @@ fun OpenWithAppListDialog(
                     )
                 }
 
+                val currentDefault = remember(extension, globalClass.preferencesManager.defaultOpeningMethods) {
+                    globalClass.preferencesManager.getDefaultOpeningMethod(extension)
+                }
+
+                val defaultApp = remember(currentDefault, appsList.toList()) {
+                    currentDefault?.let { def ->
+                        appsList.firstOrNull { it.packageName == def.packageName && it.name == def.className }
+                    }
+                }
+                val defaultLabel = defaultApp?.label ?: currentDefault?.packageName
+
+                AnimatedVisibility(visible = currentDefault != null && defaultLabel != null) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Space(8.dp)
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.current_default_app, defaultLabel ?: ""),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.default_for_extension, extension),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    globalClass.preferencesManager.clearDefaultOpeningMethod(extension)
+                                    rememberChoice.value = false
+                                    globalClass.showMsg(context.getString(R.string.default_cleared_for, extension))
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Space(4.dp)
+                                Text(
+                                    text = stringResource(R.string.clear_default),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(
                             onClick = { rememberChoice.value = !rememberChoice.value }
                         )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(
@@ -336,13 +413,19 @@ fun OpenWithAppListDialog(
                         onCheckedChange = { rememberChoice.value = it }
                     )
                     Space(8.dp)
-                    Text(text = stringResource(id = R.string.remember_this_choice))
+                    Text(
+                        text = stringResource(id = R.string.remember_this_choice),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
 
                 LazyColumn {
                     itemsIndexed(filteredAndSortedApps, key = { _, item -> item.id }) { index, item ->
                         val itemKey = item.packageName + "/" + item.name
                         val isRecent = itemKey in recentKeys
+                        val isDefault = currentDefault?.let {
+                            it.packageName == item.packageName && it.className == item.name
+                        } == true
                         val showHeaders = sortOption == OpenWithSort.RECENT && searchQuery.isBlank()
 
                         if (showHeaders && index == 0 && isRecent) {
@@ -388,17 +471,11 @@ fun OpenWithAppListDialog(
                                 .combinedClickable(
                                     onClick = {
                                         if (rememberChoice.value) {
-                                            val defOpeningMethods: DefaultOpeningMethods =
-                                                fromJson(globalClass.preferencesManager.defaultOpeningMethods)
-                                                    ?: DefaultOpeningMethods()
-                                            globalClass.preferencesManager.defaultOpeningMethods =
-                                                DefaultOpeningMethods(
-                                                    (defOpeningMethods.openingMethods.filter { it.extension != contentHolder.extension } + OpeningMethod(
-                                                        extension = contentHolder.extension,
-                                                        packageName = item.packageName,
-                                                        className = item.name
-                                                    ))
-                                                ).toJson()
+                                            globalClass.preferencesManager.setDefaultOpeningMethod(
+                                                extension = extension,
+                                                packageName = item.packageName,
+                                                className = item.name
+                                            )
                                         }
                                         globalClass.preferencesManager.recordOpenWith(
                                             extension = extension,
@@ -420,7 +497,7 @@ fun OpenWithAppListDialog(
                             Space(size = 4.dp)
                             ItemRow(
                                 title = item.label,
-                                subtitle = item.name,
+                                subtitle = if (isDefault) "${item.name} • ${stringResource(R.string.default_tag)}" else item.name,
                                 ignoreSizePreferences = true,
                                 icon = {
                                     ItemRowIcon(
@@ -442,34 +519,39 @@ fun OpenWithAppListDialog(
                                 expanded = showOptionsMenu,
                                 onDismissRequest = { showOptionsMenu = false }
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text(text = stringResource(R.string.set_as_default_for_this_type)) },
-                                    onClick = {
-                                        val defOpeningMethods: DefaultOpeningMethods =
-                                            fromJson(globalClass.preferencesManager.defaultOpeningMethods)
-                                                ?: DefaultOpeningMethods()
-                                        globalClass.preferencesManager.defaultOpeningMethods =
-                                            DefaultOpeningMethods(
-                                                (defOpeningMethods.openingMethods.filter { it.extension != contentHolder.extension } + OpeningMethod(
-                                                    extension = contentHolder.extension,
-                                                    packageName = item.packageName,
-                                                    className = item.name
-                                                ))
-                                            ).toJson()
-                                        globalClass.preferencesManager.recordOpenWith(
-                                            extension = extension,
-                                            packageName = item.packageName,
-                                            className = item.name
-                                        )
-                                        contentHolder.openFileWithPackage(
-                                            context,
-                                            item.packageName,
-                                            item.name
-                                        )
-                                        showOptionsMenu = false
-                                        onDismissRequest()
-                                    }
-                                )
+                                if (isDefault) {
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(R.string.remove_default_opening_method)) },
+                                        onClick = {
+                                            globalClass.preferencesManager.clearDefaultOpeningMethod(extension)
+                                            globalClass.showMsg(context.getString(R.string.default_cleared_for, extension))
+                                            showOptionsMenu = false
+                                        }
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(R.string.set_as_default_for_this_type)) },
+                                        onClick = {
+                                            globalClass.preferencesManager.setDefaultOpeningMethod(
+                                                extension = extension,
+                                                packageName = item.packageName,
+                                                className = item.name
+                                            )
+                                            globalClass.preferencesManager.recordOpenWith(
+                                                extension = extension,
+                                                packageName = item.packageName,
+                                                className = item.name
+                                            )
+                                            contentHolder.openFileWithPackage(
+                                                context,
+                                                item.packageName,
+                                                item.name
+                                            )
+                                            showOptionsMenu = false
+                                            onDismissRequest()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

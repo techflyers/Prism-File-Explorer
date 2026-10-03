@@ -460,6 +460,17 @@
     <string name="title_activity_video_player">Video Player</string>
     <string name="set_as_default_for_this_type">Set as default for this type</string>
     <string name="remove_default_opening_method">Remove default opening method</string>
+    <string name="clear_default">Clear default</string>
+    <string name="default_tag">Default</string>
+    <string name="current_default_app">Default: %1$s</string>
+    <string name="default_for_extension">Always opens .%1$s files</string>
+    <string name="default_opening_methods">Default apps</string>
+    <string name="default_opening_methods_desc">Manage default applications for file types</string>
+    <string name="default_opening_methods_count">%1$d file type(s) configured</string>
+    <string name="no_default_opening_methods">No default apps set</string>
+    <string name="clear_all_defaults">Clear all</string>
+    <string name="default_cleared_for">Default cleared for .%1$s</string>
+    <string name="all_defaults_cleared">All default apps cleared</string>
     <string name="toggle_hidden_files">Toggle hidden files</string>
     <string name="custom">Custom</string>
     <string name="file_list_display_mode">Files display mode</string>
