@@ -802,4 +802,13 @@
     <string name="video_playback">Video Playback</string>
     <string name="deep_scan_categories">Deep scan for categories</string>
     <string name="deep_scan_categories_desc">Scan local storage tree in the background for media files not indexed by Android MediaStore</string>
+    <string name="drag_and_drop_action">Drag &amp; drop action</string>
+    <string name="drag_and_drop_action_desc">Default action when dropping items onto breadcrumb folders</string>
+    <string name="drag_drop_ask">Always ask</string>
+    <string name="drag_drop_copy">Always copy</string>
+    <string name="drag_drop_move">Always move</string>
+    <string name="cannot_move_into_self">Cannot move folder into itself or its subdirectory</string>
+    <string name="move_or_copy_title">Move or Copy?</string>
+    <string name="move_or_copy_message">Do you want to move or copy %1$d items to %2$s?</string>
+    <string name="move_or_copy_message_single">Do you want to move or copy \"%1$s\" to %2$s?</string>
 </resources>

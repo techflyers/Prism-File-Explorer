@@ -1,11 +1,16 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
 import android.content.res.Configuration
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
@@ -15,6 +20,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ApkP
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.BookmarksDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.CreateNewFileDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.DeleteConfirmationDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.DragDropActionDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FileCompressionDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FileOptionsMenuDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FilePropertiesDialog
@@ -37,14 +43,26 @@ fun ColumnScope.FilesTabContentView(tab: FilesTab) {
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Dialogs(tab)
-    // In landscape, breadcrumb is shown inline in the toolbar instead
-    if (!isLandscape && globalClass.preferencesManager.showPathBar) {
-        BreadcrumbBar(tab)
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+            .onGloballyPositioned { coordinates ->
+                tab.contentViewCoordinates = coordinates
+            }
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // In landscape, breadcrumb is shown inline in the toolbar instead
+            if (!isLandscape && globalClass.preferencesManager.showPathBar) {
+                BreadcrumbBar(tab)
+            }
+            InfoRow()
+            HorizontalDivider(modifier = Modifier, thickness = 1.dp)
+            FilesList(tab)
+            BottomOptionsBar(tab, forceLandscapeOverride = isLandscape)
+        }
+        DragDropFloatingPill(tab)
     }
-    InfoRow()
-    HorizontalDivider(modifier = Modifier, thickness = 1.dp)
-    FilesList(tab)
-    BottomOptionsBar(tab, forceLandscapeOverride = isLandscape)
 }
 
 
@@ -187,4 +205,6 @@ fun Dialogs(tab: FilesTab) {
     TaskRunningDialog()
 
     TaskConflictDialog()
+
+    DragDropActionDialog(tab = tab)
 }

@@ -24,6 +24,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewConfi
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.getDefaultHomeLayout
+import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDropAction
 import com.techflyers.compose.file.explorer.screen.preferences.constant.FileItemSize
 import com.techflyers.compose.file.explorer.screen.preferences.constant.TerminalAppPreference
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
@@ -229,8 +230,14 @@ class PreferencesManager {
     //---------- Behavior -------------//
     var showFileOptionMenuOnLongClick by prefMutableState(
         keyName = "showFileOptionMenuOnLongClick",
-        defaultValue = false,
+        defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var dragDropAction by prefMutableState(
+        keyName = "dragDropAction",
+        defaultValue = DragDropAction.ASK.ordinal,
+        getPreferencesKey = { intPreferencesKey(it) }
     )
 
     var showVideoDuration by prefMutableState(

@@ -15,6 +15,8 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material.icons.rounded.Folder
+import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDropAction
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -48,6 +50,34 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.TouchApp,
             switchState = prefs.showFileOptionMenuOnLongClick,
             onSwitchChange = { prefs.showFileOptionMenuOnLongClick = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = stringResource(R.string.drag_and_drop_action),
+            supportingText = when (prefs.dragDropAction) {
+                DragDropAction.ALWAYS_MOVE.ordinal -> stringResource(R.string.drag_drop_move)
+                DragDropAction.ALWAYS_COPY.ordinal -> stringResource(R.string.drag_drop_copy)
+                else -> stringResource(R.string.drag_drop_ask)
+            },
+            icon = Icons.Rounded.Folder,
+            onClick = {
+                prefs.singleChoiceDialog.show(
+                    title = globalClass.getString(R.string.drag_and_drop_action),
+                    description = globalClass.getString(R.string.drag_and_drop_action_desc),
+                    choices = listOf(
+                        globalClass.getString(R.string.drag_drop_ask),
+                        globalClass.getString(R.string.drag_drop_copy),
+                        globalClass.getString(R.string.drag_drop_move)
+                    ),
+                    selectedChoice = prefs.dragDropAction,
+                    onSelect = { prefs.dragDropAction = it }
+                )
+            }
         )
 
         HorizontalDivider(

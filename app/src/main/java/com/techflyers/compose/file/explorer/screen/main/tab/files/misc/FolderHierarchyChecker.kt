@@ -56,6 +56,21 @@ object FolderHierarchyChecker {
         return isEmptyWithin
     }
 
+    /**
+     * Checks if targetPath is the same as sourcePath or is a descendant subdirectory of sourcePath.
+     * Prevents moving/copying a directory into itself or into one of its subdirectories.
+     */
+    fun isChildOrSame(targetPath: String, sourcePath: String): Boolean {
+        if (targetPath == sourcePath) return true
+        return try {
+            val normTarget = File(targetPath).canonicalPath
+            val normSource = File(sourcePath).canonicalPath
+            normTarget == normSource || normTarget.startsWith(normSource + File.separator)
+        } catch (_: Exception) {
+            targetPath == sourcePath || targetPath.startsWith(sourcePath + File.separator)
+        }
+    }
+
     fun clearCache() {
         emptyWithinCache.evictAll()
     }

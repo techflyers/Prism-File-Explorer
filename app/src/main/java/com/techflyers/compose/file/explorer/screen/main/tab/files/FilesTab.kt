@@ -59,6 +59,11 @@ import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
 import org.json.JSONObject
 import java.io.File
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker
+import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDropAction
 
 class FilesTab(
     val source: ContentHolder,
@@ -183,6 +188,93 @@ class FilesTab(
     var selectedFilesTotalSize by mutableLongStateOf(0L)
     var isCalculatingSelectedSize by mutableStateOf(false)
     private var calculateSizeJob: Job? = null
+
+    // Unified Gesture Engine state
+    var dragDropSession by mutableStateOf<DragDropSession?>(null)
+    var transientPressHighlightPath by mutableStateOf<String?>(null)
+    var contentViewCoordinates by mutableStateOf<LayoutCoordinates?>(null)
+    var pendingDropTransfer by mutableStateOf<PendingDropTransfer?>(null)
+
+    private val dropTargets = mutableMapOf<String, LayoutCoordinates>()
+    private val dropTargetFolders = mutableMapOf<String, ContentHolder>()
+
+    fun registerDropTarget(folder: ContentHolder, coordinates: LayoutCoordinates) {
+        dropTargets[folder.uniquePath] = coordinates
+        dropTargetFolders[folder.uniquePath] = folder
+    }
+
+    fun unregisterDropTarget(uniquePath: String) {
+        dropTargets.remove(uniquePath)
+        dropTargetFolders.remove(uniquePath)
+    }
+
+    fun findDropTargetAt(windowPosition: Offset): ContentHolder? {
+        for ((path, coords) in dropTargets) {
+            if (coords.isAttached) {
+                val bounds = coords.boundsInWindow()
+                if (bounds.contains(windowPosition)) {
+                    return dropTargetFolders[path]
+                }
+            }
+        }
+        return null
+    }
+
+    fun startDragDrop(items: List<ContentHolder>, startOffset: Offset, initialWindowOffset: Offset) {
+        dragDropSession = DragDropSession(items, startOffset, initialWindowOffset)
+    }
+
+    fun updateDragDrop(localOffset: Offset, windowOffset: Offset) {
+        val target = findDropTargetAt(windowOffset)
+        dragDropSession?.updatePosition(localOffset, windowOffset, target)
+    }
+
+    fun completeDragDrop() {
+        val session = dragDropSession
+        dragDropSession = null
+        if (session == null) return
+
+        val target = session.hoveredTargetHolder ?: return
+        executeDropTransfer(session.items, target)
+    }
+
+    fun executeDropTransfer(items: List<ContentHolder>, targetFolder: ContentHolder) {
+        if (targetFolder.uniquePath == activeFolder.uniquePath) {
+            return
+        }
+
+        for (item in items) {
+            if (item.isFolder && FolderHierarchyChecker.isChildOrSame(targetFolder.uniquePath, item.uniquePath)) {
+                globalClass.showMsg(globalClass.getString(R.string.cannot_move_into_self))
+                return
+            }
+        }
+
+        if (!targetFolder.canAddNewContent) {
+            globalClass.showMsg(globalClass.getString(R.string.permission_denied))
+            return
+        }
+
+        when (globalClass.preferencesManager.dragDropAction) {
+            DragDropAction.ALWAYS_MOVE.ordinal -> {
+                globalClass.taskManager.addTaskAndRun(
+                    CopyTask(items, deleteSourceFiles = true),
+                    CopyTaskParameters(targetFolder)
+                )
+                unselectAllFiles()
+            }
+            DragDropAction.ALWAYS_COPY.ordinal -> {
+                globalClass.taskManager.addTaskAndRun(
+                    CopyTask(items, deleteSourceFiles = false),
+                    CopyTaskParameters(targetFolder)
+                )
+                unselectAllFiles()
+            }
+            else -> {
+                pendingDropTransfer = PendingDropTransfer(items, targetFolder)
+            }
+        }
+    }
 
     init {
         // If the tab point to a file, open it immediately without waiting for its parent content to be loaded
@@ -441,6 +533,10 @@ class FilesTab(
 
         // Switch to the new folder
         activeFolder = item
+        dropTargets.clear()
+        dropTargetFolders.clear()
+        dragDropSession = null
+        transientPressHighlightPath = null
 
         // Update header label
         withContext(Dispatchers.Main) {
@@ -1261,5 +1357,39 @@ class FilesTab(
                 }
             }
         }
+    }
+}
+
+data class PendingDropTransfer(
+    val items: List<ContentHolder>,
+    val targetFolder: ContentHolder
+)
+
+class DragDropSession(
+    val items: List<ContentHolder>,
+    val startOffset: Offset,
+    initialWindowOffset: Offset
+) {
+    var currentOffset by mutableStateOf(startOffset)
+    var currentWindowOffset by mutableStateOf(initialWindowOffset)
+    var hoveredTargetDirectory by mutableStateOf<String?>(null)
+    var hoveredTargetHolder by mutableStateOf<ContentHolder?>(null)
+
+    fun updatePosition(localOffset: Offset, windowOffset: Offset, target: ContentHolder?) {
+        currentOffset = localOffset
+        currentWindowOffset = windowOffset
+        hoveredTargetHolder = target
+        hoveredTargetDirectory = target?.uniquePath
+    }
+
+    fun isValidDropTarget(target: ContentHolder, activeFolder: ContentHolder): Boolean {
+        if (target.uniquePath == activeFolder.uniquePath) return false
+        if (!target.canAddNewContent) return false
+        for (item in items) {
+            if (item.isFolder && FolderHierarchyChecker.isChildOrSame(target.uniquePath, item.uniquePath)) {
+                return false
+            }
+        }
+        return true
     }
 }

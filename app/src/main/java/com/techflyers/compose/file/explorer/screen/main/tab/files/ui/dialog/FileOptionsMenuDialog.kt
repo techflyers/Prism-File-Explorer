@@ -85,11 +85,27 @@ fun FileOptionsMenuDialog(
     if (show) {
         val context = LocalContext.current
 
-        val targetFiles by remember {
-            mutableStateOf(tab.selectedFiles.map { it.value }.toList())
+        val targetFiles = remember(tab.dragSelectionVersion, tab.targetFile) {
+            if (tab.selectedFiles.isNotEmpty() && tab.targetFile?.let { tab.selectedFiles.containsKey(it.uniquePath) } == true) {
+                tab.selectedFiles.values.toList()
+            } else if (tab.targetFile != null) {
+                listOf(tab.targetFile!!)
+            } else {
+                tab.selectedFiles.values.toList()
+            }
         }
 
-        val targetContentHolder = tab.targetFile!!
+        LaunchedEffect(tab.targetFile) {
+            val target = tab.targetFile
+            if (target != null && !tab.selectedFiles.containsKey(target.uniquePath)) {
+                tab.selectedFiles[target.uniquePath] = target
+                tab.selectedFilesCount = tab.selectedFiles.size
+                tab.dragSelectionVersion++
+                tab.onSelectionChange()
+            }
+        }
+
+        val targetContentHolder = tab.targetFile ?: targetFiles.firstOrNull() ?: return
 
         val selectedFilesCount = targetFiles.size
         val isMultipleSelection = selectedFilesCount > 1
@@ -100,13 +116,7 @@ fun FileOptionsMenuDialog(
                 ((tab.activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                         tab.activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
 
-        var hasFolders = false
-        tab.selectedFiles.forEach {
-            if (it.component2().isFolder) {
-                hasFolders = true
-                return@forEach
-            }
-        }
+        val hasFolders = targetFiles.any { it.isFolder }
 
         BottomSheetDialog(onDismissRequest = { tab.toggleFileOptionsMenu(null) }) {
             var details by remember {

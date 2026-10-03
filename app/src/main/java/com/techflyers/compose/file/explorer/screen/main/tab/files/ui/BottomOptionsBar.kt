@@ -1,10 +1,5 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandIn
-import androidx.compose.animation.shrinkOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -106,13 +101,7 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
         return
     }
 
-    AnimatedVisibility(
-        visible = isSelectionActive && tab.selectedFiles.isNotEmpty(),
-        enter = expandIn(expandFrom = Alignment.TopCenter) + slideInVertically(
-            initialOffsetY = { it }),
-        exit = shrinkOut(shrinkTowards = Alignment.BottomCenter) + slideOutVertically(
-            targetOffsetY = { it })
-    ) {
+    if (isSelectionActive && tab.selectedFiles.isNotEmpty()) {
         val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
         val selectionConfigs = remember(globalClass.preferencesManager.selectionRibbonActions) {
             BottomBarConfigUtils.parseSelectionActions(globalClass.preferencesManager.selectionRibbonActions)

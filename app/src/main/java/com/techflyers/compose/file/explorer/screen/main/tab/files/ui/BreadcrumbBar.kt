@@ -18,8 +18,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -79,12 +84,37 @@ fun BreadcrumbBar(tab: FilesTab) {
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = {
-                    tab.openFolder(tab.homeDir, false)
-                }
+            val isHomeCurrentFolder = tab.homeDir.uniquePath == tab.activeFolder.uniquePath
+            val isHomeHovered = tab.dragDropSession?.hoveredTargetDirectory == tab.homeDir.uniquePath
+            val isHomeValid = tab.dragDropSession?.isValidDropTarget(tab.homeDir, tab.activeFolder) == true
+
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 2.dp)
+                    .onGloballyPositioned { coordinates ->
+                        if (!isHomeCurrentFolder) {
+                            tab.registerDropTarget(tab.homeDir, coordinates)
+                        }
+                    }
+                    .then(
+                        if (isHomeHovered && isHomeValid) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                        } else if (isHomeHovered && !isHomeValid) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                        } else Modifier
+                    )
             ) {
-                Icon(imageVector = Icons.Rounded.Home, contentDescription = null)
+                IconButton(
+                    onClick = {
+                        tab.openFolder(tab.homeDir, false)
+                    }
+                ) {
+                    Icon(imageVector = Icons.Rounded.Home, contentDescription = null)
+                }
             }
 
             val animationScope = rememberCoroutineScope()
@@ -124,6 +154,17 @@ fun BreadcrumbBar(tab: FilesTab) {
             ) {
                 itemsIndexed(tab.currentPathSegments, key = { _, it -> it.uid }) { index, item ->
                     val isHighlighted = item.uniquePath == tab.highlightedPathSegment.uniquePath
+                    val isCurrentFolder = item.uniquePath == tab.activeFolder.uniquePath
+                    val isDropTarget = !isCurrentFolder
+                    val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
+                    val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+                    DisposableEffect(item.uniquePath) {
+                        onDispose {
+                            tab.unregisterDropTarget(item.uniquePath)
+                        }
+                    }
+
                     Row(
                         modifier = Modifier,
                         verticalAlignment = Alignment.CenterVertically
@@ -134,34 +175,69 @@ fun BreadcrumbBar(tab: FilesTab) {
                             pathSegments = tab.currentPathSegments,
                             tab = tab
                         )
-                        Text(
+                        Box(
                             modifier = Modifier
-                                .clip(CircleShape)
-                                .combinedClickable(
-                                    onClick = {
-                                        tab.openFolder(
-                                            item = item,
-                                            rememberSelectedFiles = true,
-                                        )
-                                    },
-                                    onLongClick = {
-                                        item.uniquePath.copyToClipboard()
-                                        showMsg(R.string.path_copied_to_clipboard)
+                                .onGloballyPositioned { coordinates ->
+                                    if (isDropTarget) {
+                                        tab.registerDropTarget(item, coordinates)
                                     }
-                                )
-                                .padding(8.dp)
-                                .alpha(0.8f),
-                            text = item.displayName
-                                .orIf(stringResource(id = R.string.internal_storage)) {
-                                    item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
                                 }
-                                .orIf(stringResource(id = R.string.root)) {
-                                    item.uniquePath == File.separator
-                                },
-                            fontSize = 14.sp,
-                            fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
-                            color = if (isHighlighted) highlightedPathListItemColor else Color.Unspecified
-                        )
+                                .then(
+                                    if (isHovered && isValidTarget) {
+                                        Modifier
+                                            .background(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .border(
+                                                1.5.dp,
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                    } else if (isHovered && !isValidTarget) {
+                                        Modifier
+                                            .background(
+                                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .border(
+                                                1.5.dp,
+                                                MaterialTheme.colorScheme.error,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                    } else Modifier
+                                )
+                                .padding(horizontal = 2.dp)
+                        ) {
+                            Text(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .combinedClickable(
+                                        onClick = {
+                                            tab.openFolder(
+                                                item = item,
+                                                rememberSelectedFiles = true,
+                                            )
+                                        },
+                                        onLongClick = {
+                                            item.uniquePath.copyToClipboard()
+                                            showMsg(R.string.path_copied_to_clipboard)
+                                        }
+                                    )
+                                    .padding(8.dp)
+                                    .alpha(0.8f),
+                                text = item.displayName
+                                    .orIf(stringResource(id = R.string.internal_storage)) {
+                                        item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
+                                    }
+                                    .orIf(stringResource(id = R.string.root)) {
+                                        item.uniquePath == File.separator
+                                    },
+                                fontSize = 14.sp,
+                                fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
+                                color = if (isHighlighted) highlightedPathListItemColor else Color.Unspecified
+                            )
+                        }
                     }
                 }
             }

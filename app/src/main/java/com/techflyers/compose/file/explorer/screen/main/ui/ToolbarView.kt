@@ -77,8 +77,11 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberTooltipState
+import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -1144,15 +1147,39 @@ fun InlineToolbarBreadcrumb(
         modifier = modifier.padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
-            onClick = { tab.openFolder(tab.homeDir, false) },
-            modifier = Modifier.size(28.dp)
+        val isHomeCurrentFolder = tab.homeDir.uniquePath == tab.activeFolder.uniquePath
+        val isHomeHovered = tab.dragDropSession?.hoveredTargetDirectory == tab.homeDir.uniquePath
+        val isHomeValid = tab.dragDropSession?.isValidDropTarget(tab.homeDir, tab.activeFolder) == true
+
+        Box(
+            modifier = Modifier
+                .onGloballyPositioned { coordinates ->
+                    if (!isHomeCurrentFolder) {
+                        tab.registerDropTarget(tab.homeDir, coordinates)
+                    }
+                }
+                .then(
+                    if (isHomeHovered && isHomeValid) {
+                        Modifier
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                            .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                    } else if (isHomeHovered && !isHomeValid) {
+                        Modifier
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                    } else Modifier
+                )
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Home,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
+            IconButton(
+                onClick = { tab.openFolder(tab.homeDir, false) },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Home,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
 
         LazyRow(
@@ -1164,6 +1191,17 @@ fun InlineToolbarBreadcrumb(
         ) {
             itemsIndexed(tab.currentPathSegments, key = { _, it -> it.uid }) { _, item ->
                 val isHighlighted = item.uniquePath == tab.highlightedPathSegment.uniquePath
+                val isCurrentFolder = item.uniquePath == tab.activeFolder.uniquePath
+                val isDropTarget = !isCurrentFolder
+                val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
+                val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+                DisposableEffect(item.uniquePath) {
+                    onDispose {
+                        tab.unregisterDropTarget(item.uniquePath)
+                    }
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         modifier = Modifier.size(12.dp),
@@ -1171,34 +1209,54 @@ fun InlineToolbarBreadcrumb(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
-                    Text(
+                    Box(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .combinedClickable(
-                                onClick = {
-                                    tab.openFolder(
-                                        item = item,
-                                        rememberSelectedFiles = true,
-                                    )
-                                },
-                                onLongClick = {
-                                    item.uniquePath.copyToClipboard()
-                                    showMsg(R.string.path_copied_to_clipboard)
+                            .onGloballyPositioned { coordinates ->
+                                if (isDropTarget) {
+                                    tab.registerDropTarget(item, coordinates)
                                 }
-                            )
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                        text = item.displayName
-                            .orIf(stringResource(id = R.string.internal_storage)) {
-                                item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
                             }
-                            .orIf(stringResource(id = R.string.root)) {
-                                item.uniquePath == File.separator
-                            },
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
-                        color = if (isHighlighted) highlightedColor else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                            .then(
+                                if (isHovered && isValidTarget) {
+                                    Modifier
+                                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                                        .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                } else if (isHovered && !isValidTarget) {
+                                    Modifier
+                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                                } else Modifier
+                            )
+                    ) {
+                        Text(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .combinedClickable(
+                                    onClick = {
+                                        tab.openFolder(
+                                            item = item,
+                                            rememberSelectedFiles = true,
+                                        )
+                                    },
+                                    onLongClick = {
+                                        item.uniquePath.copyToClipboard()
+                                        showMsg(R.string.path_copied_to_clipboard)
+                                    }
+                                )
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            text = item.displayName
+                                .orIf(stringResource(id = R.string.internal_storage)) {
+                                    item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
+                                }
+                                .orIf(stringResource(id = R.string.root)) {
+                                    item.uniquePath == File.separator
+                                },
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
+                            color = if (isHighlighted) highlightedColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
