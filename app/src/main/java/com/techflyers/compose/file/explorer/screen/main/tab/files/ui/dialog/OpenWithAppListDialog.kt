@@ -3,6 +3,7 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -94,6 +96,9 @@ fun OpenWithAppListDialog(
 
         var searchQuery by remember { mutableStateOf("") }
         var sortOption by remember { mutableStateOf(OpenWithSort.RECENT) }
+        val rememberChoice = remember {
+            mutableStateOf(false)
+        }
 
         val scope = rememberCoroutineScope()
 
@@ -317,6 +322,23 @@ fun OpenWithAppListDialog(
                     )
                 }
 
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            onClick = { rememberChoice.value = !rememberChoice.value }
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = rememberChoice.value,
+                        onCheckedChange = { rememberChoice.value = it }
+                    )
+                    Space(8.dp)
+                    Text(text = stringResource(id = R.string.remember_this_choice))
+                }
+
                 LazyColumn {
                     itemsIndexed(filteredAndSortedApps, key = { _, item -> item.id }) { index, item ->
                         val itemKey = item.packageName + "/" + item.name
@@ -365,6 +387,19 @@ fun OpenWithAppListDialog(
                                 .animateItem()
                                 .combinedClickable(
                                     onClick = {
+                                        if (rememberChoice.value) {
+                                            val defOpeningMethods: DefaultOpeningMethods =
+                                                fromJson(globalClass.preferencesManager.defaultOpeningMethods)
+                                                    ?: DefaultOpeningMethods()
+                                            globalClass.preferencesManager.defaultOpeningMethods =
+                                                DefaultOpeningMethods(
+                                                    (defOpeningMethods.openingMethods.filter { it.extension != contentHolder.extension } + OpeningMethod(
+                                                        extension = contentHolder.extension,
+                                                        packageName = item.packageName,
+                                                        className = item.name
+                                                    ))
+                                                ).toJson()
+                                        }
                                         globalClass.preferencesManager.recordOpenWith(
                                             extension = extension,
                                             packageName = item.packageName,
