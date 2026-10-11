@@ -65,6 +65,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.BorderOuter
 import androidx.compose.material.icons.filled.Close
@@ -152,6 +153,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
     var showInfo by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showConvertFormatDialog by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
     var imageInfo by remember { mutableStateOf<ImageInfo?>(null) }
     var rotationAngle by remember { mutableFloatStateOf(0f) }
@@ -499,6 +501,13 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
+                    IconButton(onClick = { showConvertFormatDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Transform,
+                            contentDescription = "Convert Format",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     IconButton(onClick = { showInfo = true }) {
                         Icon(
                             Icons.Default.Info,
@@ -569,6 +578,25 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                         )
                     }
                 }
+            }
+        }
+
+        if (showConvertFormatDialog) {
+            val resolvedPath = currentResolvedPath ?: (context as? ImageViewerActivity)?.let {
+                currentUri?.let { uri -> ImageViewerActivity.resolveFilePath(it, uri) }
+            }
+            val resolvedFile = resolvedPath?.let { File(it) }?.takeIf { it.exists() }
+
+            if (resolvedFile != null) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ConvertImageFormatDialog(
+                    show = showConvertFormatDialog,
+                    targetFiles = listOf(LocalFileHolder(resolvedFile)),
+                    tab = null,
+                    onDismissRequest = { showConvertFormatDialog = false }
+                )
+            } else {
+                android.widget.Toast.makeText(context, "Cannot resolve image file for format conversion", android.widget.Toast.LENGTH_SHORT).show()
+                showConvertFormatDialog = false
             }
         }
 

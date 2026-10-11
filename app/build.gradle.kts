@@ -48,6 +48,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
+        }
         release {
             isMinifyEnabled = true
             val releaseSigning = signingConfigs.getByName("release")
@@ -171,6 +177,10 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.xz)
     implementation(libs.rtfparserkit)
+
+    // Apache POI for legacy .doc / .xls / .ppt fallback conversion
+    implementation("org.apache.poi:poi:3.17")
+    implementation("org.apache.poi:poi-scratchpad:3.17")
 
     // Markdown Rendering
     implementation(libs.markwon.core)

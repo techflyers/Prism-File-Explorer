@@ -34,6 +34,7 @@ import com.techflyers.compose.file.explorer.screen.viewer.image.ImageViewerActiv
 import com.techflyers.compose.file.explorer.screen.viewer.latex.LatexViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.markdown.MarkdownViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.pdf.PdfViewerActivity
+import com.techflyers.compose.file.explorer.screen.viewer.spreadsheet.SpreadsheetViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.text.TextViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
 import com.techflyers.compose.file.explorer.theme.FileExplorerTheme
@@ -248,7 +249,24 @@ class OpenWithDispatchActivity : BaseActivity() {
             return
         }
 
-        // 10. Office Documents
+        // 10. Spreadsheets (.xlsx, .xls, .xlsm, .csv, .tsv, etc.)
+        if (FileMimeType.excelFileType.contains(lowerExt) ||
+            lowerExt in setOf("csv", "tsv", "xlsm", "xlt", "xltx") ||
+            mimeType in setOf(
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+                "text/csv",
+                "text/comma-separated-values",
+                "text/tab-separated-values",
+                "application/vnd.oasis.opendocument.spreadsheet"
+            )
+        ) {
+            startViewer(SpreadsheetViewerActivity::class.java, uri, mimeType, localFile)
+            return
+        }
+
+        // 11. Office Documents
         if (FileMimeType.officeFileType.contains(lowerExt) ||
             lowerExt in setOf("ods", "odp") ||
             mimeType in setOf(
@@ -382,7 +400,20 @@ class OpenWithDispatchActivity : BaseActivity() {
                         startViewer(AudioPlayerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }
-                    label in setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp") -> {
+                    label in setOf("xls", "xlsx", "xlsm", "xlt", "xltx", "csv", "tsv", "ods") ||
+                        detectedMime in setOf(
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel.sheet.macroEnabled.12",
+                            "text/csv",
+                            "text/comma-separated-values",
+                            "text/tab-separated-values",
+                            "application/vnd.oasis.opendocument.spreadsheet"
+                        ) -> {
+                        startViewer(SpreadsheetViewerActivity::class.java, uri, detectedMime, ensuredFile)
+                        return
+                    }
+                    label in setOf("doc", "docx", "ppt", "pptx", "odt", "odp") -> {
                         startViewer(DocumentViewerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }

@@ -2,6 +2,7 @@ package com.techflyers.compose.file.explorer.screen.viewer.latex
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,6 +60,7 @@ import com.techflyers.compose.file.explorer.common.ConvertioProgressDialog
 import com.techflyers.compose.file.explorer.common.ConvertioService
 import com.techflyers.compose.file.explorer.common.NativeBinaryExecutor
 import com.techflyers.compose.file.explorer.common.TectonicCacheManager
+import com.techflyers.compose.file.explorer.common.name
 import com.techflyers.compose.file.explorer.common.ui.SafeSurface
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerActivity
@@ -88,11 +90,19 @@ class LatexViewerActivity : ViewerActivity() {
                 SafeSurface(false) {
                     LatexViewerScreen(
                         instance = instance,
-                        onBackPress = { onBackPressedDispatcher.onBackPressed() }
+                        onBackPress = { finish() }
                     )
                 }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+            onBackPressedDispatcher.onBackPressed()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 }
 
@@ -113,6 +123,7 @@ private fun LatexViewerScreen(
 ) {
     val scope = rememberCoroutineScope()
     var viewState by remember { mutableStateOf(LatexViewState.COMPILING) }
+
     var pdfPath by remember { mutableStateOf<String?>(null) }
     var errorLog by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf("Preparing LaTeX engine…") }
@@ -123,6 +134,15 @@ private fun LatexViewerScreen(
     var activeMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     val sourceScrollState = rememberScrollState()
+
+    BackHandler {
+        if (searchVisible && viewState == LatexViewState.SOURCE) {
+            searchVisible = false
+            searchQuery = ""
+        } else {
+            onBackPress()
+        }
+    }
 
     val totalSourceMatches = remember(sourceContent, searchQuery) {
         if (searchQuery.length < 2) 0
@@ -193,7 +213,25 @@ private fun LatexViewerScreen(
         com.techflyers.compose.file.explorer.common.resolveUriToPath(context, instance.uri)
     }
 
-    val fileName = remember { filePath.substringAfterLast('/') }
+    val fileName = remember(instance.uri) {
+        val resolvedName = instance.uri.name
+            ?: runCatching {
+                context.contentResolver.query(instance.uri, null, null, null, null)?.use { cursor ->
+                    val col = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (col != -1 && cursor.moveToFirst()) cursor.getString(col) else null
+                }
+            }.getOrNull()
+        if (!resolvedName.isNullOrBlank() && !resolvedName.startsWith("prism_temp_")) {
+            resolvedName
+        } else {
+            val fallback = filePath.substringAfterLast('/')
+            if (fallback.isNotBlank() && !fallback.startsWith("prism_temp_")) {
+                fallback
+            } else {
+                "document.tex"
+            }
+        }
+    }
     val baseName = remember(fileName) {
         val name = fileName.ifEmpty { "document" }
         if (name.contains('.')) name.substringBeforeLast('.') else name

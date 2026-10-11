@@ -71,6 +71,7 @@
         android:name=".App"
         android:allowBackup="true"
         android:hardwareAccelerated="true"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -321,6 +322,53 @@
             </intent-filter>
         </activity>
 
+        <!-- Spreadsheet Viewer (Excel, CSV, TSV) -->
+        <activity
+            android:name=".screen.viewer.spreadsheet.SpreadsheetViewerActivity"
+            android:exported="true"
+            android:label="@string/title_activity_spreadsheet_viewer"
+            android:theme="@style/Theme.FileExplorer"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/vnd.ms-excel" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="application/vnd.ms-excel.sheet.macroEnabled.12" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="text/tab-separated-values" />
+                <data android:mimeType="application/vnd.oasis.opendocument.spreadsheet" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.xlsx" />
+                <data android:pathPattern=".*\\.xls" />
+                <data android:pathPattern=".*\\.xlsm" />
+                <data android:pathPattern=".*\\.xlt" />
+                <data android:pathPattern=".*\\.xltx" />
+                <data android:pathPattern=".*\\.csv" />
+                <data android:pathPattern=".*\\.tsv" />
+                <data android:pathPattern=".*\\.ods" />
+            </intent-filter>
+        </activity>
+
+
+        <!-- Sandboxed LibreOffice Engine Service -->
+        <service
+            android:name=".office.OfficeEngineService"
+            android:exported="false"
+            android:process=":office_service" />
+
         <!-- Comic Viewer -->
         <activity
             android:name=".screen.viewer.comic.ComicViewerActivity"
@@ -570,6 +618,12 @@
         <service
             android:name=".screen.main.tab.files.service.WebSharingForegroundService"
             android:foregroundServiceType="dataSync" />
+
+        <!-- WorkManager foreground service declaration for Android 14+ (API 34+) -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- Terminal Emulator -->
         <activity

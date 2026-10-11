@@ -18,14 +18,36 @@ class ZipManager {
      * @return A set of unique paths of the invalid archive trees.
      */
     suspend fun validateArchiveTrees(): Set<String> {
-        val invalidTrees =
-            archiveList.values.filter { !it.source.isValid() }.map { it.source.uniquePath }
-
-        archiveList.removeIf { localFileHolder, zipTree ->
-            runBlocking { !localFileHolder.isValid() }
+        val toRemove = mutableListOf<LocalFileHolder>()
+        val invalidTrees = mutableSetOf<String>()
+        for ((holder, tree) in archiveList) {
+            if (!holder.isValid() || !tree.source.isValid()) {
+                toRemove.add(holder)
+                invalidTrees.add(holder.uniquePath)
+            }
         }
+        for (holder in toRemove) {
+            val tree = archiveList.remove(holder)
+            try {
+                tree?.cleanOnExitDir?.file?.deleteRecursively()
+            } catch (_: Exception) {
+            }
+        }
+        return invalidTrees
+    }
 
-        return invalidTrees.toSet()
+    /**
+     * Immediately evicts an archive by its unique path and purges temporary extraction data.
+     */
+    fun evictArchive(path: String) {
+        val keysToRemove = archiveList.keys.filter { it.uniquePath == path }
+        for (key in keysToRemove) {
+            val tree = archiveList.remove(key)
+            try {
+                tree?.cleanOnExitDir?.file?.deleteRecursively()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     suspend fun checkForSourceChanges(): Boolean {

@@ -216,6 +216,7 @@ class DeleteTask(
                         deleted = ShizukuManager.delete(localFile.uniquePath)
                     }
                     if (deleted) {
+                        globalClass.zipManager.evictArchive(localFile.uniquePath)
                         itemToDelete.status = TaskContentStatus.SUCCESS
                     } else {
                         itemToDelete.status = TaskContentStatus.FAILED
@@ -264,6 +265,7 @@ class DeleteTask(
                 try {
                     val shizukuFile = itemToDelete.source as ShizukuFileHolder
                     if (ShizukuManager.delete(shizukuFile.uniquePath)) {
+                        globalClass.zipManager.evictArchive(shizukuFile.uniquePath)
                         itemToDelete.status = TaskContentStatus.SUCCESS
                     } else {
                         itemToDelete.status = TaskContentStatus.FAILED

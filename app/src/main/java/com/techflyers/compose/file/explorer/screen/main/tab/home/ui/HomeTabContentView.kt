@@ -222,7 +222,7 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         }
     }
 
-    val homeScroll = rememberScrollState()
+    val homeScroll = tab.scrollState
     val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
 
     val homeSectionsContent = @Composable {
@@ -401,7 +401,7 @@ fun PinnedFilesSection(
                                             customMimeType = null
                                         )
                                     } else {
-                                        mainActivityManager.replaceCurrentTabWith(FilesTab(it))
+                                        mainActivityManager.replaceCurrentTabWith(FilesTab(it), keepCurrentTabAsParent = true)
                                     }
                                 },
                                 onLongClick = {
@@ -555,7 +555,8 @@ private fun RecentFilesSection(
                 .padding(horizontal = 12.dp, vertical = 12.dp)
                 .clickable {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(RECENT))
+                        FilesTab(VirtualFileHolder(RECENT)),
+                        keepCurrentTabAsParent = true
                     )
                 },
             text = stringResource(R.string.no_recent_files),
@@ -597,7 +598,8 @@ private fun RecentFilesSection(
                             },
                             onLongClick = {
                                 mainActivityManager.replaceCurrentTabWith(
-                                    FilesTab(it.file)
+                                    FilesTab(it.file),
+                                    keepCurrentTabAsParent = true
                                 )
                             }
                         )
@@ -659,7 +661,8 @@ private fun RecentFilesSection(
                 TextButton(
                     onClick = {
                         mainActivityManager.replaceCurrentTabWith(
-                            FilesTab(VirtualFileHolder(RECENT))
+                            FilesTab(VirtualFileHolder(RECENT)),
+                            keepCurrentTabAsParent = true
                         )
                     }
                 ) {
@@ -795,7 +798,7 @@ private fun StorageSection(
         ) {
             storageList.forEachIndexed { index, device ->
                 StorageDeviceView(storageDevice = device) {
-                    mainActivityManager.replaceCurrentTabWith(FilesTab(device.contentHolder))
+                    mainActivityManager.replaceCurrentTabWith(FilesTab(device.contentHolder), keepCurrentTabAsParent = true)
                 }
                 if (index != storageList.lastIndex) HorizontalDivider(thickness = 0.5.dp)
             }
@@ -828,7 +831,8 @@ private fun BookmarksSection(
                 imageVector = Icons.Rounded.Bookmark
             ) {
                 mainActivityManager.replaceCurrentTabWith(
-                    FilesTab(VirtualFileHolder(BOOKMARKS))
+                    FilesTab(VirtualFileHolder(BOOKMARKS)),
+                    keepCurrentTabAsParent = true
                 )
             }
         }
@@ -858,7 +862,7 @@ private fun RecycleBinSection(
             title = stringResource(R.string.recycle_bin),
             imageVector = Icons.Rounded.DeleteSweep
         ) {
-            mainActivityManager.replaceCurrentTabWith(FilesTab(globalClass.recycleBinDir))
+            mainActivityManager.replaceCurrentTabWith(FilesTab(globalClass.recycleBinDir), keepCurrentTabAsParent = true)
         }
     }
 }

@@ -21,6 +21,8 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Merge
+import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material.icons.rounded.OpenInNewOff
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -720,8 +722,9 @@ fun FileOptionsMenuDialog(
                 }
             }
 
+            val imageExtensions = listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "svg")
             val isAllImages = selectedFilesCount >= 2 && targetFiles.all {
-                it.isFile() && it.extension.lowercase() in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+                it.isFile() && it.extension.lowercase() in imageExtensions
             }
 
             if (isAllImages) {
@@ -737,6 +740,47 @@ fun FileOptionsMenuDialog(
                         tab = tab,
                         onDismissRequest = {
                             showMergeImagesDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+            }
+
+            val hasImageFiles = selectedFilesCount >= 1 && targetFiles.all {
+                it.isFile() && it.extension.lowercase() in imageExtensions
+            }
+
+            if (hasImageFiles) {
+                var showImagesToPdfDialog by remember { mutableStateOf(false) }
+                FileOption(Icons.Rounded.PictureAsPdf, if (selectedFilesCount > 1) "Convert Images to PDF" else "Convert to PDF") {
+                    showImagesToPdfDialog = true
+                }
+
+                if (showImagesToPdfDialog) {
+                    ImagesToPdfDialog(
+                        show = showImagesToPdfDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showImagesToPdfDialog = false
+                            onDismissRequest()
+                        }
+                    )
+                }
+
+                var showConvertImageFormatDialog by remember { mutableStateOf(false) }
+                val label = if (selectedFilesCount > 1) "Batch Convert Images" else "Convert Image Format"
+                FileOption(Icons.Rounded.Transform, label) {
+                    showConvertImageFormatDialog = true
+                }
+
+                if (showConvertImageFormatDialog) {
+                    ConvertImageFormatDialog(
+                        show = showConvertImageFormatDialog,
+                        targetFiles = targetFiles,
+                        tab = tab,
+                        onDismissRequest = {
+                            showConvertImageFormatDialog = false
                             onDismissRequest()
                         }
                     )

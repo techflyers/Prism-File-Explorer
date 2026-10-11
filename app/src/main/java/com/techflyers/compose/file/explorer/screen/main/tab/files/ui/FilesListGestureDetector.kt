@@ -1,5 +1,6 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
@@ -50,8 +51,8 @@ fun Modifier.unifiedFileGestureDetector(
                 val initialItem = tab.activeFolderContent.getOrNull(initialIndex) ?: return@awaitEachGesture
                 val wasAlreadySelected = tab.selectedFiles.containsKey(initialItem.uniquePath)
 
-                // Snappy selection latency: 140ms when already selecting, 220ms when 0 selected
-                val dwellTimeout = if (tab.selectedFiles.isNotEmpty()) 140L else 220L
+                // Standard long-press timeout (300ms) to ensure quick taps pass through to Modifier.clickable
+                val dwellTimeout = 300L
                 var currentDown = down
                 var isLongPressTriggered = false
 
@@ -92,6 +93,9 @@ fun Modifier.unifiedFileGestureDetector(
                     tab.selectedFilesCount = tab.selectedFiles.size
                     tab.dragSelectionVersion++
                     tab.onSelectionChange()
+
+                    // Ensure selected item is not obscured by the appearing bottom ribbon
+                    tab.scrollItemAboveRibbon(initialIndex)
                 }
 
                 var hasMoved = false
@@ -118,11 +122,10 @@ fun Modifier.unifiedFileGestureDetector(
                         val currentIndex = findItemIndexAt(change.position, size)
 
                         if (!hasMoved) {
-                            val shouldStartDrag = if (wasAlreadySelected) {
-                                distance > dragSlopThreshold
-                            } else {
-                                (currentIndex != null && currentIndex != initialIndex) || distance > dragSlopThreshold
-                            }
+                            // Drag selection strictly requires physical finger displacement.
+                            // The list moving beneath a stationary finger (e.g. from ribbon avoidance scroll)
+                            // must never initiate drag selection.
+                            val shouldStartDrag = distance > dragSlopThreshold
 
                             if (shouldStartDrag) {
                                 hasMoved = true
@@ -157,10 +160,10 @@ fun Modifier.unifiedFileGestureDetector(
                                 val viewportHeight = size.height.toFloat()
                                 val edgeThreshold = 80.dp.toPx()
 
-                                if (currentPosition.y in 0f..edgeThreshold) {
+                                if (currentPosition.y in 0f..edgeThreshold && currentPosition.y < down.position.y) {
                                     if (autoScrollJob == null || !autoScrollJob!!.isActive) {
                                         autoScrollJob = coroutineScope.launch {
-                                            while (isActive && currentPosition.y in 0f..edgeThreshold) {
+                                            while (isActive && currentPosition.y in 0f..edgeThreshold && currentPosition.y < down.position.y) {
                                                 val factor = ((edgeThreshold - currentPosition.y) / edgeThreshold).coerceIn(0.1f, 1f)
                                                 scrollBy(-35f * factor, currentPosition, size)
                                                 findItemIndexAt(currentPosition, size)?.let {
@@ -170,10 +173,10 @@ fun Modifier.unifiedFileGestureDetector(
                                             }
                                         }
                                     }
-                                } else if (currentPosition.y in (viewportHeight - edgeThreshold)..viewportHeight) {
+                                } else if (currentPosition.y in (viewportHeight - edgeThreshold)..viewportHeight && currentPosition.y > down.position.y) {
                                     if (autoScrollJob == null || !autoScrollJob!!.isActive) {
                                         autoScrollJob = coroutineScope.launch {
-                                            while (isActive && currentPosition.y in (viewportHeight - edgeThreshold)..viewportHeight) {
+                                            while (isActive && currentPosition.y in (viewportHeight - edgeThreshold)..viewportHeight && currentPosition.y > down.position.y) {
                                                 val factor = ((currentPosition.y - (viewportHeight - edgeThreshold)) / edgeThreshold).coerceIn(0.1f, 1f)
                                                 scrollBy(35f * factor, currentPosition, size)
                                                 findItemIndexAt(currentPosition, size)?.let {
@@ -197,15 +200,20 @@ fun Modifier.unifiedFileGestureDetector(
                         autoScrollJob = null
 
                         if (!hasMoved) {
-                            if (globalClass.preferencesManager.showFileOptionMenuOnLongClick) {
-                                onOpenMenu(initialItem)
-                            } else if (wasAlreadySelected) {
-                                tab.selectedFiles.remove(initialItem.uniquePath)
-                                tab.lastSelectedFileIndex = -1
-                                tab.selectedFilesCount = tab.selectedFiles.size
-                                tab.dragSelectionVersion++
-                                tab.onSelectionChange()
+                            if (wasAlreadySelected) {
+                                // Second long press on an already-selected file: open long-press options menu
+                                if (globalClass.preferencesManager.showFileOptionMenuOnLongClick) {
+                                    onOpenMenu(initialItem)
+                                } else {
+                                    tab.selectedFiles.remove(initialItem.uniquePath)
+                                    tab.lastSelectedFileIndex = -1
+                                    tab.selectedFilesCount = tab.selectedFiles.size
+                                    tab.dragSelectionVersion++
+                                    tab.onSelectionChange()
+                                }
                             }
+                            // First long press (!wasAlreadySelected):
+                            // File was already selected at dwell confirmation and remains selected.
                         } else {
                             if (wasAlreadySelected) {
                                 tab.completeDragDrop()

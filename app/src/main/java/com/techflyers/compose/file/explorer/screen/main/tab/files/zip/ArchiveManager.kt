@@ -706,8 +706,6 @@ object ArchiveManager {
             val args = mutableListOf("d", accessiblePath, "-y")
             if (!password.isNullOrEmpty()) {
                 args.add("-p$password")
-            } else {
-                args.add("-p-")
             }
             args.addAll(internalPaths)
             android.util.Log.d("PrismArchive", "ArchiveManager: deleteMembers command=7z ${args.joinToString(" ")}")
@@ -791,13 +789,11 @@ object ArchiveManager {
         val accessiblePath = resolveAccessibleArchivePath(archivePath)
         val ext = archivePath.substringAfterLast('.', "").lowercase()
 
-        // 7z format has native 'rn' command: 7z rn a.7z old1 new1 old2 new2 ...
-        if (ext == "7z") {
+        // 7z and zip formats support native 'rn' command: 7z rn a.zip old1 new1 old2 new2 ...
+        if (ext == "7z" || ext == "zip") {
             val args = mutableListOf("rn", accessiblePath, "-y")
             if (!password.isNullOrEmpty()) {
                 args.add("-p$password")
-            } else {
-                args.add("-p-")
             }
             renameMap.forEach { (oldPath, newPath) ->
                 args.add(oldPath)
@@ -837,8 +833,6 @@ object ArchiveManager {
             val addArgs = mutableListOf("a", accessiblePath, "-y", "-r")
             if (!password.isNullOrEmpty()) {
                 addArgs.add("-p$password")
-            } else {
-                addArgs.add("-p-")
             }
             addArgs.addAll(newPaths)
             val addResult = NativeBinaryExecutor.run(
@@ -1036,8 +1030,6 @@ object ArchiveManager {
             val args = mutableListOf("a", accessiblePath, "-y", "-r")
             if (!password.isNullOrEmpty()) {
                 args.add("-p$password")
-            } else {
-                args.add("-p-")
             }
             args.add(internalPath)
             val result = NativeBinaryExecutor.run(

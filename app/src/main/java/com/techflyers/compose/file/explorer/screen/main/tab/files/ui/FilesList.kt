@@ -11,6 +11,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -19,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.Job
@@ -708,10 +713,87 @@ fun FilesListColumns(
         else item.size
 
     val maxSiblingSize = if (folderScanEnabled) (snapshot.maxOfOrNull { effectiveSizeOf(it) }?.coerceAtLeast(1L) ?: tab.maxSiblingSize) else tab.maxSiblingSize
-    val listStates = List(cols) { rememberLazyListState() }
+    // IMPORTANT: We must derive listStates from `tab.activeColumnListState` as a Compose state
+    // value (not just inside remember), otherwise when we navigate back to a folder, Compose
+    // re-uses the old `remember` result (keyed on the OLD uniquePath) even though
+    // tab.activeColumnListState has been updated to the restored state.  By reading the property
+    // in a `remember` that also tracks the state *object identity* we force Compose to pick up
+    // the correct, restored LazyListState every time the folder changes.
+    val primaryColumnState = tab.activeColumnListState  // read as Compose state
+    val listStates = remember(tab.activeFolder.uniquePath, cols, primaryColumnState) {
+        List(cols) { colIndex ->
+            if (colIndex == 0) primaryColumnState else LazyListState()
+        }
+    }
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val viewConfiguration = LocalViewConfiguration.current
+
+    val density = LocalDensity.current
+
+    DisposableEffect(tab.activeFolder.uniquePath, listStates) {
+        tab.onRequestScrollAboveRibbon = { itemIndex ->
+            if (itemIndex in 0 until totalItems) {
+                val colIndex = (itemIndex / chunkSize).coerceIn(0, listStates.lastIndex)
+                val sliceIndex = itemIndex % chunkSize
+                val listState = listStates[colIndex]
+                coroutineScope.launch {
+                    val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
+                    val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar
+                    val ribbonHeightPx = with(density) { (if (isTwoRows) 112.dp else 56.dp).toPx() }
+                    val toolbarHeightPx = with(density) { (if (enableBottomToolbar) 56.dp else 0.dp).toPx() }
+                    val bottomBarExpansionPx = (ribbonHeightPx - toolbarHeightPx).coerceAtLeast(0f)
+                    val marginPx = with(density) { 36.dp.toPx() }
+
+                    val initialVisible = listState.layoutInfo.visibleItemsInfo.find { it.index == sliceIndex }
+                    val initialViewport = listState.layoutInfo.viewportSize.height.toFloat()
+                    val precomputedOverlap = if (initialVisible != null && initialViewport > 0f) {
+                        val itemBottom = (initialVisible.offset + initialVisible.size).toFloat()
+                        val safeBottom = initialViewport - bottomBarExpansionPx - marginPx
+                        (itemBottom - safeBottom).coerceAtLeast(0f)
+                    } else 0f
+
+                    delay(60)
+
+                    val visibleItem = listState.layoutInfo.visibleItemsInfo.find { it.index == sliceIndex }
+                    val currentViewport = listState.layoutInfo.viewportSize.height.toFloat()
+                    val effectiveSafeBottom = if (currentViewport > 0f) {
+                        if (currentViewport < initialViewport) {
+                            currentViewport - marginPx
+                        } else {
+                            currentViewport - bottomBarExpansionPx - marginPx
+                        }
+                    } else 0f
+
+                    val actualOverlap = if (visibleItem != null && effectiveSafeBottom > 0f) {
+                        val itemBottom = (visibleItem.offset + visibleItem.size).toFloat()
+                        (itemBottom - effectiveSafeBottom).coerceAtLeast(0f)
+                    } else 0f
+
+                    val finalOverlap = maxOf(precomputedOverlap, actualOverlap)
+
+                    if (finalOverlap > 0f) {
+                        try {
+                            listState.animateScrollBy(finalOverlap)
+                        } catch (_: Exception) {}
+                    } else if (visibleItem == null && initialVisible == null) {
+                        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                        if (lastVisible != null && sliceIndex > lastVisible.index) {
+                            val itemsAway = sliceIndex - lastVisible.index
+                            val itemHeight = lastVisible.size.toFloat().coerceAtLeast(100f)
+                            val scrollDelta = itemsAway * itemHeight + bottomBarExpansionPx + marginPx
+                            try {
+                                listState.animateScrollBy(scrollDelta)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        }
+        onDispose {
+            tab.onRequestScrollAboveRibbon = null
+        }
+    }
 
     fun findColumnItemIndex(offset: Offset, viewportWidth: Float): Int? {
         if (tab.activeFolderContent.isEmpty()) return null
@@ -726,9 +808,9 @@ fun FilesListColumns(
         val exact = listState.layoutInfo.visibleItemsInfo.find { info ->
             y >= info.offset && y <= info.offset + info.size
         }
-        val itemInfo = exact ?: listState.layoutInfo.visibleItemsInfo.minByOrNull { info ->
-            val centerY = info.offset + info.size / 2
-            kotlin.math.abs(y - centerY)
+        val tolerance = 24
+        val itemInfo = exact ?: listState.layoutInfo.visibleItemsInfo.find { info ->
+            y >= info.offset - tolerance && y <= info.offset + info.size + tolerance
         } ?: return null
 
         val sliceIndex = itemInfo.index
@@ -760,6 +842,26 @@ fun FilesListColumns(
         }
     }
 
+    LaunchedEffect(
+        tab.pendingScrollRestore,
+        tab.activeFolder.uniquePath,
+        snapshot.size,
+        parentFolderResolved
+    ) {
+        val restore = tab.pendingScrollRestore
+        if (restore != null && snapshot.isNotEmpty() && parentFolderResolved) {
+            val targetColumn = (restore.first / chunkSize).coerceIn(0, listStates.lastIndex)
+            val sliceIndex = restore.first % chunkSize
+            val targetState = listStates[targetColumn]
+            if (targetState.firstVisibleItemIndex != sliceIndex ||
+                kotlin.math.abs(targetState.firstVisibleItemScrollOffset - restore.second) > 10
+            ) {
+                targetState.scrollToItem(sliceIndex, restore.second)
+            }
+            tab.pendingScrollRestore = null
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         if (parentFolder != null) {
             ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
@@ -786,7 +888,8 @@ fun FilesListColumns(
                         .weight(1f)
                         .fillMaxHeight()
                         .fastScrollbar(listState),
-                    state = listState
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = 128.dp)
                 ) {
                     itemsIndexed(
                         slice,
@@ -842,24 +945,109 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
         if (tab.activeFolderContent.isEmpty()) return null
         val x = offset.x.toInt()
         val y = offset.y.toInt()
-        val itemInfo = tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
+        val exact = tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
             x >= info.offset.x && x <= info.offset.x + info.size.width &&
             y >= info.offset.y && y <= info.offset.y + info.size.height
-        } ?: tab.activeListState.layoutInfo.visibleItemsInfo.minByOrNull { info ->
-            val centerX = info.offset.x + info.size.width / 2
-            val centerY = info.offset.y + info.size.height / 2
-            val dx = x - centerX
-            val dy = y - centerY
-            dx * dx + dy * dy
+        }
+        val tolerance = 24
+        val itemInfo = exact ?: tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
+            x >= info.offset.x - tolerance && x <= info.offset.x + info.size.width + tolerance &&
+            y >= info.offset.y - tolerance && y <= info.offset.y + info.size.height + tolerance
         } ?: return null
 
         val contentIndex = if (parentFolder != null) itemInfo.index - 1 else itemInfo.index
         return if (contentIndex in 0 until tab.activeFolderContent.size) contentIndex else null
     }
 
+    val density = LocalDensity.current
+
+    LaunchedEffect(
+        tab.pendingScrollRestore,
+        tab.activeFolder.uniquePath,
+        tab.contentSnapshot.size,
+        parentFolderResolved
+    ) {
+        val restore = tab.pendingScrollRestore
+        if (restore != null && tab.contentSnapshot.isNotEmpty() && parentFolderResolved) {
+            val gridIndex = restore.first + if (parentFolder != null) 1 else 0
+            val maxValid = tab.contentSnapshot.size + (if (parentFolder != null) 0 else -1)
+            val validIndex = gridIndex.coerceIn(0, maxOf(0, maxValid))
+            if (tab.activeListState.firstVisibleItemIndex != validIndex ||
+                kotlin.math.abs(tab.activeListState.firstVisibleItemScrollOffset - restore.second) > 10
+            ) {
+                tab.activeListState.scrollToItem(validIndex, restore.second)
+            }
+            tab.pendingScrollRestore = null
+        }
+    }
+
+    DisposableEffect(tab.activeFolder.uniquePath, tab.activeListState) {
+        tab.onRequestScrollAboveRibbon = { itemIndex ->
+            if (itemIndex in 0 until tab.activeFolderContent.size) {
+                val gridIndex = itemIndex + if (parentFolder != null) 1 else 0
+                coroutineScope.launch {
+                    val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
+                    val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar
+                    val ribbonHeightPx = with(density) { (if (isTwoRows) 112.dp else 56.dp).toPx() }
+                    val toolbarHeightPx = with(density) { (if (enableBottomToolbar) 56.dp else 0.dp).toPx() }
+                    val bottomBarExpansionPx = (ribbonHeightPx - toolbarHeightPx).coerceAtLeast(0f)
+                    val marginPx = with(density) { 36.dp.toPx() }
+
+                    val initialVisible = tab.activeListState.layoutInfo.visibleItemsInfo.find { it.index == gridIndex }
+                    val initialViewport = tab.activeListState.layoutInfo.viewportSize.height.toFloat()
+                    val precomputedOverlap = if (initialVisible != null && initialViewport > 0f) {
+                        val itemBottom = (initialVisible.offset.y + initialVisible.size.height).toFloat()
+                        val safeBottom = initialViewport - bottomBarExpansionPx - marginPx
+                        (itemBottom - safeBottom).coerceAtLeast(0f)
+                    } else 0f
+
+                    delay(60)
+
+                    val visibleItem = tab.activeListState.layoutInfo.visibleItemsInfo.find { it.index == gridIndex }
+                    val currentViewport = tab.activeListState.layoutInfo.viewportSize.height.toFloat()
+                    val effectiveSafeBottom = if (currentViewport > 0f) {
+                        if (currentViewport < initialViewport) {
+                            currentViewport - marginPx
+                        } else {
+                            currentViewport - bottomBarExpansionPx - marginPx
+                        }
+                    } else 0f
+
+                    val actualOverlap = if (visibleItem != null && effectiveSafeBottom > 0f) {
+                        val itemBottom = (visibleItem.offset.y + visibleItem.size.height).toFloat()
+                        (itemBottom - effectiveSafeBottom).coerceAtLeast(0f)
+                    } else 0f
+
+                    val finalOverlap = maxOf(precomputedOverlap, actualOverlap)
+
+                    if (finalOverlap > 0f) {
+                        try {
+                            tab.activeListState.animateScrollBy(finalOverlap)
+                        } catch (_: Exception) {}
+                    } else if (visibleItem == null && initialVisible == null) {
+                        val lastVisible = tab.activeListState.layoutInfo.visibleItemsInfo.lastOrNull()
+                        if (lastVisible != null && gridIndex > lastVisible.index) {
+                            val cols = maxOf(1, tab.viewConfig.columnCount)
+                            val rowsAway = (gridIndex - lastVisible.index + cols - 1) / cols
+                            val rowHeight = lastVisible.size.height.toFloat().coerceAtLeast(100f)
+                            val scrollDelta = rowsAway * rowHeight + bottomBarExpansionPx + marginPx
+                            try {
+                                tab.activeListState.animateScrollBy(scrollDelta)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        }
+        onDispose {
+            tab.onRequestScrollAboveRibbon = null
+        }
+    }
+
     LazyVerticalGrid(
         state = tab.activeListState,
         columns = GridCells.Fixed(tab.viewConfig.columnCount),
+        contentPadding = PaddingValues(bottom = 128.dp),
         modifier = Modifier
             .fillMaxSize()
             .fastScrollbar(tab.activeListState)
@@ -877,7 +1065,10 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
 
         // `..` parent directory entry (spans full width)
         if (parentFolder != null) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(
+                key = "parent_directory_item",
+                span = { GridItemSpan(maxLineSpan) }
+            ) {
                 ParentDirectoryItem(tab = tab, parentFolder = parentFolder)
             }
         }
@@ -924,6 +1115,7 @@ private fun ColumnFileItem(
         } else {
             tab.selectedFiles[currentItemPath] = item
             tab.lastSelectedFileIndex = index
+            tab.scrollItemAboveRibbon(index)
         }
         tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
@@ -1056,6 +1248,7 @@ private fun GridFileItem(
         } else {
             tab.selectedFiles[itemPath] = item
             tab.lastSelectedFileIndex = index
+            tab.scrollItemAboveRibbon(index)
         }
         tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
@@ -1482,7 +1675,14 @@ fun ParentDirectoryItem(tab: FilesTab, parentFolder: ContentHolder) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { tab.openFolder(parentFolder, false) }
+            .clickable {
+                val current = tab.activeFolder
+                tab.highlightedFiles.apply {
+                    clear()
+                    add(current.uniquePath)
+                }
+                tab.openFolder(parentFolder, rememberListState = true)
+            }
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .alpha(0.55f),
         verticalAlignment = Alignment.CenterVertically

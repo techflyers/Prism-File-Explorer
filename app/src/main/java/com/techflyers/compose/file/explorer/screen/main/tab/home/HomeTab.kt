@@ -33,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.ScrollState
 import java.io.File
 
 class HomeTab : Tab() {
@@ -42,6 +43,7 @@ class HomeTab : Tab() {
     override val header = globalClass.getString(R.string.home_tab_header)
     val recentFiles = mutableStateListOf<RecentFile>()
     val pinnedFiles = arrayListOf<LocalFileHolder>()
+    val scrollState = ScrollState(0)
 
     var showCustomizeHomeTabDialog by mutableStateOf(false)
 
@@ -101,7 +103,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.Image,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(IMAGE))
+                        FilesTab(VirtualFileHolder(IMAGE)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -110,7 +113,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.VideoFile,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(VIDEO))
+                        FilesTab(VirtualFileHolder(VIDEO)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -119,7 +123,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.AudioFile,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(AUDIO))
+                        FilesTab(VirtualFileHolder(AUDIO)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -128,7 +133,8 @@ class HomeTab : Tab() {
                 icon = Icons.AutoMirrored.Rounded.InsertDriveFile,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(DOCUMENT))
+                        FilesTab(VirtualFileHolder(DOCUMENT)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -137,7 +143,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.Archive,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(ARCHIVE))
+                        FilesTab(VirtualFileHolder(ARCHIVE)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -146,7 +153,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.InstallMobile,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        FilesTab(VirtualFileHolder(VirtualFileHolder.APK))
+                        FilesTab(VirtualFileHolder(VirtualFileHolder.APK)),
+                        keepCurrentTabAsParent = true
                     )
                 }
             ),
@@ -155,7 +163,8 @@ class HomeTab : Tab() {
                 icon = Icons.Rounded.Android,
                 onClick = {
                     mainActivityManager.replaceCurrentTabWith(
-                        AppsTab()
+                        AppsTab(),
+                        keepCurrentTabAsParent = true
                     )
                 }
             )

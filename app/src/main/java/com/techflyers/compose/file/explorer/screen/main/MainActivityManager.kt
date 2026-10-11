@@ -68,6 +68,7 @@ class MainActivityManager {
     }
 
     private val closedTabsHistory = mutableListOf<ClosedTabEntry>()
+    var lastHomeTab: HomeTab? = null
 
     private fun createClosedTabEntry(tab: Tab): ClosedTabEntry {
         return when (tab) {
@@ -320,6 +321,8 @@ class MainActivityManager {
 
     fun replaceCurrentTabWith(tab: Tab, keepCurrentTabAsParent: Boolean = false) {
         val currentActiveTab = getActiveTab()
+        if (currentActiveTab is HomeTab) lastHomeTab = currentActiveTab
+        if (tab is HomeTab) lastHomeTab = tab
 
         // Stop and remove the active tab BEFORE state update
         currentActiveTab?.apply {
@@ -474,7 +477,7 @@ class MainActivityManager {
         // Replace the active tab with the home tab (if turned on in settings)
         if (getActiveTab() !is HomeTab && !globalClass.preferencesManager.skipHomeWhenTabClosed) {
             isExitingViaBackPress = true
-            replaceCurrentTabWith(HomeTab())
+            replaceCurrentTabWith(lastHomeTab ?: HomeTab())
             return false
         }
 

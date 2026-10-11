@@ -265,14 +265,20 @@ private fun BreadcrumbSeparator(
                 scope.launch {
                     isLoadingSubfolders = true
                     val list = withContext(Dispatchers.IO) {
-                        val parentFolder = if (index > 0) pathSegments[index - 1] else runBlocking { currentItem.getParent() }
-                        if (parentFolder is LocalFileHolder) {
+                        val parentFolder = if (index > 0) {
+                            pathSegments.getOrNull(index - 1)
+                        } else {
+                            runCatching { currentItem.getParent() }.getOrNull()
+                        }
+                        if (parentFolder == null || runCatching { !parentFolder.isValid() }.getOrDefault(true)) {
+                            emptyList()
+                        } else if (parentFolder is LocalFileHolder) {
                             val files = parentFolder.file.listFiles() ?: emptyArray()
                             files.filter { it.isDirectory && (globalClass.preferencesManager.showHiddenFiles || !it.name.startsWith(".")) }
                                 .sortedBy { it.name.lowercase() }
                                 .map { LocalFileHolder(it) }
                         } else {
-                            runCatching { parentFolder?.listContent()?.filter { it.isFolder } }.getOrNull() ?: emptyList()
+                            runCatching { parentFolder.listContent().filter { it.isFolder } }.getOrNull() ?: emptyList()
                         }
                     }
                     subfolders = list

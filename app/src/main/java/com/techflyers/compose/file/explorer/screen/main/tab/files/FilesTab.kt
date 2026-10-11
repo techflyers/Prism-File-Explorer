@@ -33,6 +33,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFi
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileListCategory
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.anyFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.CategoryFileScanner
@@ -136,6 +137,52 @@ class FilesTab(
 
     val contentListStates = hashMapOf<String, LazyGridState>()
     var activeListState by mutableStateOf(LazyGridState())
+    val contentColumnListStates = hashMapOf<String, LazyListState>()
+    var activeColumnListState by mutableStateOf(LazyListState())
+    val savedFolderScrollPositions = hashMapOf<String, Pair<Int, Int>>()
+    var pendingScrollRestore by mutableStateOf<Pair<Int, Int>?>(null)
+    var onRequestScrollAboveRibbon: ((index: Int) -> Unit)? = null
+
+    fun scrollItemAboveRibbon(index: Int) {
+        onRequestScrollAboveRibbon?.invoke(index)
+    }
+
+    fun getCurrentScrollPosition(): Pair<Int, Int> {
+        return if (viewConfig.viewType == ViewType.GRID) {
+            Pair(activeListState.firstVisibleItemIndex, activeListState.firstVisibleItemScrollOffset)
+        } else {
+            Pair(activeColumnListState.firstVisibleItemIndex, activeColumnListState.firstVisibleItemScrollOffset)
+        }
+    }
+
+    fun recordCurrentScrollPosition() {
+        val path = activeFolder.uniquePath
+        if (path.isNotEmpty()) {
+            savedFolderScrollPositions[path] = getCurrentScrollPosition()
+        }
+    }
+
+    fun applyFolderScrollRestore(path: String, rememberListState: Boolean, itemCount: Int) {
+        val savedPos = if (rememberListState) savedFolderScrollPositions[path] else null
+        if (savedPos != null && (savedPos.first > 0 || savedPos.second > 0) && itemCount > 0) {
+            val validIndex = savedPos.first.coerceIn(0, maxOf(0, itemCount - 1))
+            val newGridState = LazyGridState(validIndex, savedPos.second)
+            val newColumnState = LazyListState(validIndex, savedPos.second)
+            contentListStates[path] = newGridState
+            contentColumnListStates[path] = newColumnState
+            activeListState = newGridState
+            activeColumnListState = newColumnState
+            pendingScrollRestore = Pair(validIndex, savedPos.second)
+        } else {
+            val newGridState = LazyGridState(0, 0)
+            val newColumnState = LazyListState(0, 0)
+            contentListStates[path] = newGridState
+            contentColumnListStates[path] = newColumnState
+            activeListState = newGridState
+            activeColumnListState = newColumnState
+            pendingScrollRestore = null
+        }
+    }
 
     var viewConfig by mutableStateOf(
         globalClass.preferencesManager.getViewConfigPrefsFor(activeFolder)
@@ -323,6 +370,10 @@ class FilesTab(
         }
     }
 
+    override fun onTabStopped() {
+        recordCurrentScrollPosition()
+    }
+
     override val header: String
         get() = tabViewLabel
 
@@ -370,6 +421,21 @@ class FilesTab(
     val historyForwardStack = mutableStateListOf<ContentHolder>()
     private var isNavigatingHistory = false
 
+    suspend fun pruneInvalidHistory() {
+        val validBack = historyBackStack.filter { it.isValid() }
+        val validForward = historyForwardStack.filter { it.isValid() }
+        withContext(Dispatchers.Main) {
+            if (historyBackStack.size != validBack.size) {
+                historyBackStack.clear()
+                historyBackStack.addAll(validBack)
+            }
+            if (historyForwardStack.size != validForward.size) {
+                historyForwardStack.clear()
+                historyForwardStack.addAll(validForward)
+            }
+        }
+    }
+
     fun canGoBack(): Boolean = historyBackStack.isNotEmpty() || (handleBackGesture && (activeFolder as? LocalFileHolder)?.file?.parentFile != null)
 
     fun canGoForward(): Boolean = historyForwardStack.isNotEmpty()
@@ -379,20 +445,33 @@ class FilesTab(
             return true
         }
         if (historyBackStack.isNotEmpty()) {
-            val target = historyBackStack.removeAt(historyBackStack.lastIndex)
             val current = activeFolder
-            historyForwardStack.add(current)
-            if (historyForwardStack.size > 50) {
-                historyForwardStack.removeAt(0)
-            }
             scope.launch {
                 isNavigatingHistory = true
                 try {
-                    highlightedFiles.apply {
-                        clear()
-                        add(current.uniquePath)
+                    while (historyBackStack.isNotEmpty()) {
+                        val target = withContext(Dispatchers.Main) {
+                            historyBackStack.removeAt(historyBackStack.lastIndex)
+                        }
+                        if (target.isValid()) {
+                            withContext(Dispatchers.Main) {
+                                if (current.isValid()) {
+                                    historyForwardStack.add(current)
+                                    if (historyForwardStack.size > 50) {
+                                        historyForwardStack.removeAt(0)
+                                    }
+                                }
+                                highlightedFiles.apply {
+                                    clear()
+                                    add(current.uniquePath)
+                                }
+                            }
+                            openFolderImpl(target, rememberSelectedFiles = false)
+                            return@launch
+                        }
                     }
-                    openFolderImpl(target, rememberSelectedFiles = false)
+                    // If all targets were invalid, validate active folder
+                    validateActiveFolder()
                 } finally {
                     isNavigatingHistory = false
                 }
@@ -401,15 +480,19 @@ class FilesTab(
         } else if (handleBackGesture) {
             scope.launch {
                 val parent = activeFolder.getParent()
-                if (parent != null) {
+                if (parent != null && parent.isValid()) {
                     val current = activeFolder
-                    historyForwardStack.add(current)
-                    if (historyForwardStack.size > 50) {
-                        historyForwardStack.removeAt(0)
-                    }
-                    highlightedFiles.apply {
-                        clear()
-                        add(current.uniquePath)
+                    if (current.isValid()) {
+                        withContext(Dispatchers.Main) {
+                            historyForwardStack.add(current)
+                            if (historyForwardStack.size > 50) {
+                                historyForwardStack.removeAt(0)
+                            }
+                            highlightedFiles.apply {
+                                clear()
+                                add(current.uniquePath)
+                            }
+                        }
                     }
                     isNavigatingHistory = true
                     try {
@@ -426,16 +509,27 @@ class FilesTab(
 
     fun goForward(): Boolean {
         if (historyForwardStack.isNotEmpty()) {
-            val target = historyForwardStack.removeAt(historyForwardStack.lastIndex)
             val current = activeFolder
-            historyBackStack.add(current)
-            if (historyBackStack.size > 50) {
-                historyBackStack.removeAt(0)
-            }
             scope.launch {
                 isNavigatingHistory = true
                 try {
-                    openFolderImpl(target, rememberSelectedFiles = false)
+                    while (historyForwardStack.isNotEmpty()) {
+                        val target = withContext(Dispatchers.Main) {
+                            historyForwardStack.removeAt(historyForwardStack.lastIndex)
+                        }
+                        if (target.isValid()) {
+                            withContext(Dispatchers.Main) {
+                                if (current.isValid()) {
+                                    historyBackStack.add(current)
+                                    if (historyBackStack.size > 50) {
+                                        historyBackStack.removeAt(0)
+                                    }
+                                }
+                            }
+                            openFolderImpl(target, rememberSelectedFiles = false)
+                            return@launch
+                        }
+                    }
                 } finally {
                     isNavigatingHistory = false
                 }
@@ -523,7 +617,8 @@ class FilesTab(
         }
 
         val previousFolder = activeFolder
-        if (!isNavigatingHistory && item.uniquePath != previousFolder.uniquePath) {
+        recordCurrentScrollPosition()
+        if (!isNavigatingHistory && item.uniquePath != previousFolder.uniquePath && previousFolder.isValid()) {
             historyBackStack.add(previousFolder)
             if (historyBackStack.size > 50) {
                 historyBackStack.removeAt(0)
@@ -585,15 +680,28 @@ class FilesTab(
         // Cancel any existing listing job
         listingJob?.cancel()
 
-        // If a new folder is opened, the list must be at the starting position,
-        // but when navigating back to parent folder, the saved location must be maintained
+        // CRITICAL: activeFolderContent.clear() is called later in the listing job.
+        // When items go from N → 0, Compose's lazy layout clamps LazyListState.firstVisibleItemIndex
+        // to 0 regardless of what it was before. This silently destroys any scroll position
+        // stored in a reused state object.
+        //
+        // Solution: ALWAYS create a fresh LazyListState/LazyGridState before the content reload.
+        // For back navigation (rememberListState=true): inject the saved position directly into
+        // the constructor so the list initialises at the correct row on its very first layout pass.
+        // For forward navigation (rememberListState=false): start at top (0, 0).
+        //
+        // The constructor-based approach has NO race condition — the initial position is set before
+        // the first composition, independent of whether items have been measured yet.
+
         if (!rememberListState) {
-            contentListStates[item.uniquePath] = LazyGridState(0, 0)
+            savedFolderScrollPositions.remove(item.uniquePath)
+            contentListStates.remove(item.uniquePath)
+            contentColumnListStates.remove(item.uniquePath)
+            activeListState = LazyGridState(0, 0)
+            activeColumnListState = LazyListState(0, 0)
         }
 
-        // Update the active list state
-        activeListState = contentListStates[item.uniquePath] ?: LazyGridState()
-            .also { contentListStates[item.uniquePath] = it }
+        val targetSavedPos = if (rememberListState) savedFolderScrollPositions[item.uniquePath] else null
 
         // Get display config for this folder
         updateDisplayConfig()
@@ -617,17 +725,23 @@ class FilesTab(
                     }
 
                     val displayItems = if (sorted.size > 10_000) sorted.subList(0, 10_000) else sorted
-                    val firstChunk = displayItems.take(256)
+                    val initialTake = if (targetSavedPos != null && targetSavedPos.first > 0) {
+                        maxOf(256, minOf(targetSavedPos.first + 64, displayItems.size))
+                    } else {
+                        minOf(256, displayItems.size)
+                    }
+                    val firstChunk = displayItems.take(initialTake)
 
                     withContext(Dispatchers.Main) {
                         activeFolderContent.clear()
                         activeFolderContent.addAll(firstChunk)
                         updateContentSnapshot()
+                        applyFolderScrollRestore(item.uniquePath, rememberListState, firstChunk.size)
                         requestHomeToolbarUpdate()
                         postEvent()
                     }
 
-                    var offset = 256
+                    var offset = initialTake
                     val appendChunkSize = 512
                     while (isActive && offset < displayItems.size) {
                         val end = minOf(offset + appendChunkSize, displayItems.size)
@@ -657,6 +771,7 @@ class FilesTab(
                         categories.clear()
                         categories.addAll(vFolder.getCategories())
                         showCategories = categories.isNotEmpty()
+                        applyFolderScrollRestore(item.uniquePath, rememberListState, firstPage.size)
                         requestHomeToolbarUpdate()
                         postEvent()
                     }
@@ -713,6 +828,7 @@ class FilesTab(
                         foldersCount = count.folders
                         filesCount = count.files
                         showCategories = false
+                        applyFolderScrollRestore(item.uniquePath, rememberListState, sorted.size)
                         requestHomeToolbarUpdate()
                         postEvent()
                     }
@@ -735,6 +851,7 @@ class FilesTab(
     }
 
     suspend fun validateActiveFolder() {
+        pruneInvalidHistory()
         if (!activeFolder.isValid()) {
             // Try to find a valid parent folder
             var validParent: ContentHolder? = null
@@ -748,14 +865,14 @@ class FilesTab(
                 }
             }
             validParent?.let {
-                openFolder(it)
+                openFolderImpl(it, rememberListState = false)
                 return
             }
 
             if (homeDir.isValid()) {
-                openFolder(homeDir)
+                openFolderImpl(homeDir, rememberListState = false)
             } else {
-                openFolder(StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder)
+                openFolderImpl(StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder, rememberListState = false)
             }
         }
     }
@@ -917,10 +1034,21 @@ class FilesTab(
                 selectedFilesCount = selectedFiles.size
                 updateSelectedFilesSize()
 
-                // Reload the list
-                activeFolderContent.clear()
-                activeFolderContent.addAll(temp)
-                updateContentSnapshot()
+                val contentChanged = activeFolderContent.size != temp.size ||
+                        activeFolderContent.map { it.uniquePath } != temp.map { it.uniquePath }
+                if (contentChanged) {
+                    val savedIndex = activeListState.firstVisibleItemIndex
+                    val savedOffset = activeListState.firstVisibleItemScrollOffset
+                    // Reload the list
+                    activeFolderContent.clear()
+                    activeFolderContent.addAll(temp)
+                    updateContentSnapshot()
+                    if (savedIndex > 0 || savedOffset > 0) {
+                        try {
+                            activeListState.scrollToItem(savedIndex.coerceAtMost((temp.size - 1).coerceAtLeast(0)), savedOffset)
+                        } catch (_: Exception) {}
+                    }
+                }
 
                 // Update title and subtitle
                 requestHomeToolbarUpdate()
@@ -1095,37 +1223,21 @@ class FilesTab(
         val cleanOnExitPath = globalClass.cleanOnExitDir.uniquePath
 
         // Walk through parent files
-        val paths = generateSequence(activeFolder) {
-            runBlocking { it.getParent() }
+        val paths = mutableListOf<ContentHolder>()
+        var curr: ContentHolder? = activeFolder
+        while (curr != null) {
+            if (curr.canRead && curr.isValid() && !(curr is LocalFileHolder && curr.uniquePath.startsWith(cleanOnExitPath))) {
+                paths.add(curr)
+            }
+            curr = curr.getParent()
         }
 
-        // Filter those that are accessible and valid, then reverse the list.
-        // Also strip any segments that resolve to the temp extraction cache dir
-        // (cleanOnExitDir) — these appear when browsing nested archives and
-        // would otherwise expose cache paths in the breadcrumb.
-        val newPathSegments = paths
-            .filter { holder ->
-                holder.canRead
-                    && runBlocking { holder.isValid() }
-                    && !(holder is LocalFileHolder
-                        && holder.uniquePath.startsWith(cleanOnExitPath))
-            }
-            .toList()
-            .reversed()
+        val newPathSegments = paths.reversed()
 
-        if (!currentPathSegments.joinToString(emptyString) { it.displayName }.startsWith(
-                newPathSegments.joinToString(emptyString) { it.displayName })
-        ) {
-            // Update the state to reflect the new path
-            withContext(Dispatchers.Main) {
-                currentPathSegments = newPathSegments
-            }
-        } else {
-            // validate path segments if not changed
-            currentPathSegments = currentPathSegments.filter { it.isValid() }
+        withContext(Dispatchers.Main) {
+            currentPathSegments = newPathSegments
+            highlightedPathSegment = activeFolder
         }
-
-        highlightedPathSegment = activeFolder
     }
 
     fun updateDisplayConfig() {

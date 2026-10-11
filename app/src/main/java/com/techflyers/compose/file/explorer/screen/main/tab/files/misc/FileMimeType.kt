@@ -27,7 +27,7 @@ object FileMimeType {
     val docFileType = setOf("doc", "docx")
 
     @JvmField
-    val excelFileType = setOf("xls", "xlsx")
+    val excelFileType = setOf("xls", "xlsx", "xlsm", "xlt", "xltx", "csv", "tsv", "ods")
 
     @JvmField
     val pptFileType = setOf("ppt", "pptx")

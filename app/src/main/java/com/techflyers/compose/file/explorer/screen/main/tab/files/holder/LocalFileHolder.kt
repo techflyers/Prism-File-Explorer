@@ -44,6 +44,7 @@ import com.techflyers.compose.file.explorer.screen.viewer.image.ImageViewerActiv
 import com.techflyers.compose.file.explorer.screen.viewer.latex.LatexViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.markdown.MarkdownViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.pdf.PdfViewerActivity
+import com.techflyers.compose.file.explorer.screen.viewer.spreadsheet.SpreadsheetViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -845,6 +846,16 @@ class LocalFileHolder(
             return true
         }
 
+        // Spreadsheet documents → dedicated spreadsheet viewer
+        if (FileMimeType.excelFileType.contains(extension)) {
+            openFileWithPackage(
+                context,
+                context.packageName,
+                SpreadsheetViewerActivity::class.java.name
+            )
+            return true
+        }
+
         // Office documents → dedicated document viewer
         if (FileMimeType.officeFileType.contains(extension)) {
             openFileWithPackage(
@@ -960,7 +971,19 @@ class LocalFileHolder(
                 openFileWithPackage(context, context.packageName, AudioPlayerActivity::class.java.name)
                 return true
             }
-            label in setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp") -> {
+            label in setOf("xls", "xlsx", "xlsm", "xlt", "xltx", "csv", "tsv", "ods") ||
+                mime in setOf(
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel.sheet.macroEnabled.12",
+                    "text/csv",
+                    "text/tab-separated-values",
+                    "application/vnd.oasis.opendocument.spreadsheet"
+                ) -> {
+                openFileWithPackage(context, context.packageName, SpreadsheetViewerActivity::class.java.name)
+                return true
+            }
+            label in setOf("doc", "docx", "ppt", "pptx", "odt", "odp") -> {
                 openFileWithPackage(context, context.packageName, DocumentViewerActivity::class.java.name)
                 return true
             }

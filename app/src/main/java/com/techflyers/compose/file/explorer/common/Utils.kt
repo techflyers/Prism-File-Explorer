@@ -788,7 +788,10 @@ fun resolveUriToPath(context: Context, uri: Uri, extraFilePath: String? = null):
     if (!file.exists() || !file.canRead()) {
         try {
             val extension = uri.name?.substringAfterLast('.', "tmp") ?: "tmp"
-            val tempFile = File.createTempFile("prism_temp_", ".$extension", context.cacheDir)
+            val rawName = uri.name?.substringBeforeLast('.') ?: "temp"
+            val safeName = rawName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(30)
+            val prefix = if (safeName.isNotBlank() && safeName != "temp") "${safeName}_" else "prism_temp_"
+            val tempFile = File.createTempFile(prefix, ".$extension", context.cacheDir)
             tempFile.deleteOnExit()
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tempFile.outputStream().use { output ->

@@ -21,10 +21,24 @@
 #-renamesourcefileattribute SourceFile
 
 -keep class ai.onnxruntime.** { *; }
--keep class com.ahmadullahpk.alldocumentreader.** { *; }
+-keep class org.libreoffice.kit.** { *; }
 -keep class org.apache.harmony.** { *; }
 -dontwarn org.apache.commons.compress.**
 -dontwarn com.github.luben.zstd.**
+
+# Apache POI & AWT
+-dontwarn java.awt.**
+-dontwarn org.apache.poi.**
+
+# DocxWebRenderer print callbacks and JS interface
+-keep class android.print.OpenLayoutResultCallback { *; }
+-keep class android.print.OpenWriteResultCallback { *; }
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# WorkManager Room DB
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
 -keep class com.techflyers.compose.file.explorer.** { *; }
 -keep class org.eclipse.tm4e.** { *; }
 -keep class org.joni.** { *; }
