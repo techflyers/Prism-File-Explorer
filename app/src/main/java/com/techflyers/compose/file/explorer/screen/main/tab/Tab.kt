@@ -1,5 +1,8 @@
 package com.techflyers.compose.file.explorer.screen.main.tab
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -8,6 +11,7 @@ import kotlinx.coroutines.launch
 abstract class Tab {
     var isCreated = false
     var parentTab: Tab? = null
+    var isPinned by mutableStateOf(false)
 
     abstract val id: Int
     abstract val header: String

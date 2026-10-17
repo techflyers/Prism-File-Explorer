@@ -1,11 +1,16 @@
 package com.techflyers.compose.file.explorer.common.icons
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Update
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod
 
 val PrismIcons.SortNameAscending: ImageVector by lazy {
     ImageVector.Builder(
@@ -285,4 +290,15 @@ val PrismIcons.SortTypeDescending: ImageVector by lazy {
             close()
         }
     }.build()
+}
+
+fun getSortIcon(method: Int, reverse: Boolean): ImageVector {
+    return when (method) {
+        SortingMethod.SORT_BY_NAME -> if (reverse) PrismIcons.SortNameDescending else PrismIcons.SortNameAscending
+        SortingMethod.SORT_BY_SIZE -> if (reverse) PrismIcons.SortSizeLarger else PrismIcons.SortSizeSmaller
+        SortingMethod.SORT_BY_DATE -> if (reverse) Icons.Rounded.History else Icons.Rounded.Update
+        SortingMethod.SORT_BY_TYPE -> if (reverse) PrismIcons.SortTypeDescending else PrismIcons.SortTypeAscending
+        SortingMethod.SORT_BY_SHUFFLED -> Icons.Default.Shuffle
+        else -> PrismIcons.SortNameAscending
+    }
 }

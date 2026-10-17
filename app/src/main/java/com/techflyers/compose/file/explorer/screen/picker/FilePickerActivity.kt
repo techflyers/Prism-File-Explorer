@@ -689,10 +689,28 @@ class FilePickerActivity : BaseActivity() {
                                 when (val loc = location) {
                                     is PickerLocation.Local -> {
                                         val newFolder = File(loc.dir, newFolderName.trim())
-                                        if (newFolder.mkdir()) {
+                                        var caughtError: Throwable? = null
+                                        val created = try {
+                                            java.nio.file.Files.createDirectory(newFolder.toPath())
+                                            true
+                                        } catch (e: Throwable) {
+                                            caughtError = e
+                                            newFolder.mkdir()
+                                        }
+                                        if (created) {
                                             location = PickerLocation.Local(newFolder)
                                         } else {
-                                            showMsg(getString(R.string.failed_to_create_folder))
+                                            val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                                                targetFile = newFolder,
+                                                isFolder = true,
+                                                throwable = caughtError
+                                            )
+                                            showMsg(
+                                                com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                    getString(R.string.failed_to_create_folder),
+                                                    reason
+                                                )
+                                            )
                                         }
                                     }
                                     is PickerLocation.Remote -> {
@@ -706,7 +724,12 @@ class FilePickerActivity : BaseActivity() {
                                                 }
                                             } catch (e: Exception) {
                                                 withContext(Dispatchers.Main) {
-                                                    showMsg(getString(R.string.failed_to_create_folder))
+                                                    showMsg(
+                                                        com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                            getString(R.string.failed_to_create_folder),
+                                                            e.message
+                                                        )
+                                                    )
                                                 }
                                             }
                                         }

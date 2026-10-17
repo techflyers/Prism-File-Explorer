@@ -20,6 +20,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.OpeningMe
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithApps
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.RecentOpenWithEntry
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewConfigs
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ViewType
@@ -40,6 +41,12 @@ class PreferencesManager {
     //---------- Onboarding -------------//
     var hasShownOnboarding by prefMutableState(
         keyName = "hasShownOnboarding",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var hasCompletedBatteryOptimizationPrompt by prefMutableState(
+        keyName = "hasCompletedBatteryOptimizationPrompt",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -93,6 +100,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var hideHomeSearchBar by prefMutableState(
+        keyName = "hideHomeSearchBar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var disableTabBar by prefMutableState(
         keyName = "disableTabBar",
         defaultValue = false,
@@ -107,6 +120,12 @@ class PreferencesManager {
 
     var autoHideToolbars by prefMutableState(
         keyName = "autoHideToolbars",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var autoHideToolbarsLandscape by prefMutableState(
+        keyName = "autoHideToolbarsLandscape",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -151,6 +170,12 @@ class PreferencesManager {
 
     var showFolderContentCount by prefMutableState(
         keyName = "showFolderContentCount",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showDirectoryTypeFilterRibbon by prefMutableState(
+        keyName = "showDirectoryTypeFilterRibbon",
         defaultValue = true,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -326,6 +351,35 @@ class PreferencesManager {
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
 
+    private var drawerSectionsOrderJson by prefMutableState(
+        keyName = "drawerSectionsOrderJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var drawerSectionsOrder: List<String>
+        get() {
+            val defaultOrder = listOf("tabs", "bookmarks", "navigation", "storage", "tools", "remote")
+            if (drawerSectionsOrderJson.isEmpty()) return defaultOrder
+            val parsed = fromJson<List<String>>(drawerSectionsOrderJson) ?: return defaultOrder
+            return (parsed.filter { it in defaultOrder } + defaultOrder.filter { it !in parsed })
+        }
+        set(value) {
+            drawerSectionsOrderJson = value.toJson()
+        }
+
+    var drawerHiddenItems by prefMutableState(
+        keyName = "drawerHiddenItems",
+        defaultValue = emptySet<String>(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
+    var middleSwipeZoneWidthPercent by prefMutableState(
+        keyName = "middleSwipeZoneWidthPercent",
+        defaultValue = 33,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
     private var pinnedFilesJson by prefMutableState(
         keyName = "pinnedFilesJson",
         defaultValue = "",
@@ -392,10 +446,51 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var showRecentInSidebar by prefMutableState(
+        keyName = "showRecentInSidebar",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showRecentInCategories by prefMutableState(
+        keyName = "showRecentInCategories",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var disableRecentOnHomeTab by prefMutableState(
+        keyName = "disableRecentOnHomeTab",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var disabledHomeCategories by prefMutableState(
+        keyName = "disabledHomeCategories",
+        defaultValue = emptySet<String>(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
+    private var homeCategoriesOrderJson by prefMutableState(
+        keyName = "homeCategoriesOrderJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var homeCategoriesOrder: List<String>
+        get() {
+            val defaultOrder = listOf("recent", "all_files", "images", "videos", "audios", "documents", "archives", "apk", "apps")
+            if (homeCategoriesOrderJson.isEmpty()) return defaultOrder
+            val parsed = fromJson<List<String>>(homeCategoriesOrderJson) ?: return defaultOrder
+            return (parsed.filter { it in defaultOrder } + defaultOrder.filter { it !in parsed })
+        }
+        set(value) {
+            homeCategoriesOrderJson = value.toJson()
+        }
+
     //---------- File Operation -------------//
     var autoRenameOnConflict by prefMutableState(
-        keyName = "autoRenameOnConflict",
-        defaultValue = true,
+        keyName = "autoRenameOnConflictV2",
+        defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -690,11 +785,32 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var onlyRefreshSortIconOnNavigation by prefMutableState(
+        keyName = "onlyRefreshSortIconOnNavigation",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    private val folderSortingPrefsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     fun getSortingPrefsFor(content: ContentHolder): FileSortingPrefs {
-        return runBlocking {
-            fromJson(
-                globalClass.prefDataStore.data.first()[stringPreferencesKey("fileSortingPrefs_${content.uniquePath}")]
-            ) ?: getDefaultSortingPrefs()
+        val key = "fileSortingPrefs_${content.uniquePath}"
+        val cachedJson = folderSortingPrefsCache[key] ?: runBlocking {
+            val raw = globalClass.prefDataStore.data.first()[stringPreferencesKey(key)]
+            folderSortingPrefsCache[key] = raw ?: ""
+            raw ?: ""
+        }
+        if (cachedJson.isNotEmpty()) {
+            fromJson<FileSortingPrefs>(cachedJson)?.let { return it }
+        }
+        return if (content is VirtualFileHolder && (content.type == VirtualFileHolder.RECENT || content.type == VirtualFileHolder.ALL_FILES)) {
+            FileSortingPrefs(
+                sortMethod = SORT_BY_DATE,
+                showFoldersFirst = false,
+                reverseSorting = false
+            )
+        } else {
+            getDefaultSortingPrefs()
         }
     }
 
@@ -789,18 +905,22 @@ class PreferencesManager {
     }
 
     fun setSortingPrefsFor(content: ContentHolder, prefs: FileSortingPrefs) {
+        val key = "fileSortingPrefs_${content.uniquePath}"
+        val json = prefs.toJson()
+        folderSortingPrefsCache[key] = json
         runBlocking {
             globalClass.prefDataStore.edit {
-                it[stringPreferencesKey("fileSortingPrefs_${content.uniquePath}")] =
-                    prefs.toJson()
+                it[stringPreferencesKey(key)] = json
             }
         }
     }
 
     fun deleteSortingPrefsFor(content: ContentHolder) {
+        val key = "fileSortingPrefs_${content.uniquePath}"
+        folderSortingPrefsCache[key] = ""
         runBlocking {
             globalClass.prefDataStore.edit {
-                it.remove(stringPreferencesKey("fileSortingPrefs_${content.uniquePath}"))
+                it.remove(stringPreferencesKey(key))
             }
         }
     }

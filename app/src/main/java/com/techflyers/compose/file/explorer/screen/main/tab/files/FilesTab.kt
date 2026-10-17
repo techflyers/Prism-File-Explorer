@@ -7,6 +7,8 @@ import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.net.Uri
 import android.os.Environment
+import android.os.Looper
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.getValue
@@ -60,11 +62,18 @@ import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker
 import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDropAction
+
+private data class FolderScrollPosition(
+    val index: Int,
+    val offset: Int,
+    val viewType: ViewType
+)
 
 class FilesTab(
     val source: ContentHolder,
@@ -120,26 +129,141 @@ class FilesTab(
         if (source is VirtualFileHolder || source.isFolder) source else runBlocking { source.getParent() }
             ?: StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder
 
-    var activeFolder: ContentHolder = homeDir
+    var activeFolder: ContentHolder by mutableStateOf(homeDir)
+    var sortingPrefs by mutableStateOf(
+        globalClass.preferencesManager.getSortingPrefsFor(activeFolder)
+    )
+
+    fun updateSortingConfig() {
+        val newPrefs = globalClass.preferencesManager.getSortingPrefsFor(activeFolder)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (sortingPrefs != newPrefs) {
+                sortingPrefs = newPrefs
+            }
+        } else {
+            scope.launch(Dispatchers.Main) {
+                if (sortingPrefs != newPrefs) {
+                    sortingPrefs = newPrefs
+                }
+            }
+        }
+    }
+
+    private data class CachedFolderListing(
+        val mtime: Long,
+        val childCount: Int,
+        val foldersCount: Int,
+        val filesCount: Int,
+        val showHidden: Boolean,
+        val sortingPrefs: FileSortingPrefs,
+        val items: List<ContentHolder>
+    )
+
+    private val folderListingCache = android.util.LruCache<String, CachedFolderListing>(24)
+
+    fun invalidateFolderListingCache(path: String? = null) {
+        if (path != null) {
+            folderListingCache.remove(path)
+        } else {
+            folderListingCache.evictAll()
+        }
+    }
+
+    fun applySortingChange(previousPrefs: FileSortingPrefs = sortingPrefs) {
+        val newPrefs = globalClass.preferencesManager.getSortingPrefsFor(activeFolder)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            sortingPrefs = newPrefs
+        } else {
+            scope.launch(Dispatchers.Main) {
+                sortingPrefs = newPrefs
+            }
+        }
+
+        val sortOrderChanged = previousPrefs.sortMethod != newPrefs.sortMethod ||
+                previousPrefs.reverseSorting != newPrefs.reverseSorting ||
+                previousPrefs.showFoldersFirst != newPrefs.showFoldersFirst ||
+                newPrefs.sortMethod == com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SHUFFLED
+
+        if (!sortOrderChanged) {
+            // Only the "Apply to this folder only" flag changed or dialog closed without changes;
+            // only refresh the sort icon without refreshing the folder.
+            return
+        }
+
+        if (globalClass.preferencesManager.onlyRefreshSortIconOnNavigation &&
+            activeFolder !is VirtualFileHolder &&
+            activeFolderContent.isNotEmpty() &&
+            !isLoading
+        ) {
+            val currentFolder = activeFolder
+            val currentItems = activeFolderContent.toList()
+            scope.launch(Dispatchers.IO) {
+                val sorted = ContentHolder.sortItemsWithPrefs(currentItems, newPrefs)
+                if (currentFolder is LocalFileHolder) {
+                    folderListingCache.get(currentFolder.uniquePath)?.let { existing ->
+                        folderListingCache.put(
+                            currentFolder.uniquePath,
+                            existing.copy(sortingPrefs = newPrefs, items = sorted)
+                        )
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    if (activeFolder.uniquePath == currentFolder.uniquePath) {
+                        activeFolderContent.clear()
+                        activeFolderContent.addAll(sorted)
+                        updateContentSnapshot()
+                    }
+                }
+            }
+        } else {
+            invalidateFolderListingCache(activeFolder.uniquePath)
+            openFolder(activeFolder, rememberListState = false)
+        }
+    }
+
     var activeFolderContent = mutableStateListOf<ContentHolder>()
     var contentSnapshot by mutableStateOf<List<ContentHolder>>(emptyList())
     var maxSiblingSize by mutableLongStateOf(1L)
     private var listingJob: Job? = null
+    private val listingGeneration = AtomicLong(0L)
     private var lastKnownDirMtime: Long = -1L
     private var lastKnownChildCount: Int = -1
     private var lastKnownCategoryCount: Int = -1
     private var lastKnownCategoryMaxDate: Long = -1L
 
     fun updateContentSnapshot() {
-        contentSnapshot = activeFolderContent.toList()
-        maxSiblingSize = activeFolderContent.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+        val activeFilters = selectedTypeFilters
+        val filtered = if (activeFilters.isNotEmpty()) {
+            activeFolderContent.filter { item ->
+                item.isFolder || activeFilters.any { filter ->
+                    matchesTypeFilterExtension(item.extension, filter)
+                }
+            }
+        } else {
+            activeFolderContent.toList()
+        }
+        contentSnapshot = filtered
+        maxSiblingSize = filtered.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+    }
+
+    private fun matchesTypeFilterExtension(ext: String, filter: String?): Boolean {
+        if (filter == null) return false
+        val e = ext.lowercase()
+        return when (filter) {
+            "image" -> e in com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
+            "video" -> e in com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
+            "audio" -> e in com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.audioFileType
+            "document" -> e in com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.documentFileType
+            "archive" -> e in com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.archiveFileType
+            else -> true
+        }
     }
 
     val contentListStates = hashMapOf<String, LazyGridState>()
     var activeListState by mutableStateOf(LazyGridState())
     val contentColumnListStates = hashMapOf<String, LazyListState>()
     var activeColumnListState by mutableStateOf(LazyListState())
-    val savedFolderScrollPositions = hashMapOf<String, Pair<Int, Int>>()
+    private val savedFolderScrollPositions = hashMapOf<String, FolderScrollPosition>()
     var pendingScrollRestore by mutableStateOf<Pair<Int, Int>?>(null)
     var onRequestScrollAboveRibbon: ((index: Int) -> Unit)? = null
 
@@ -147,41 +271,81 @@ class FilesTab(
         onRequestScrollAboveRibbon?.invoke(index)
     }
 
-    fun getCurrentScrollPosition(): Pair<Int, Int> {
-        return if (viewConfig.viewType == ViewType.GRID) {
-            Pair(activeListState.firstVisibleItemIndex, activeListState.firstVisibleItemScrollOffset)
-        } else {
-            Pair(activeColumnListState.firstVisibleItemIndex, activeColumnListState.firstVisibleItemScrollOffset)
-        }
+    private fun getCurrentScrollPosition(): FolderScrollPosition = if (viewConfig.viewType == ViewType.GRID) {
+        FolderScrollPosition(
+            index = activeListState.firstVisibleItemIndex,
+            offset = activeListState.firstVisibleItemScrollOffset,
+            viewType = ViewType.GRID
+        )
+    } else {
+        FolderScrollPosition(
+            index = activeColumnListState.firstVisibleItemIndex,
+            offset = activeColumnListState.firstVisibleItemScrollOffset,
+            viewType = ViewType.LIST
+        )
     }
 
-    fun recordCurrentScrollPosition() {
+    private fun recordCurrentScrollPosition() {
         val path = activeFolder.uniquePath
-        if (path.isNotEmpty()) {
-            savedFolderScrollPositions[path] = getCurrentScrollPosition()
+        if (path.isNotEmpty()) savedFolderScrollPositions[path] = getCurrentScrollPosition()
+    }
+
+    private fun maxRestorableIndex(itemCount: Int, type: ViewType): Int {
+        if (itemCount <= 0) return 0
+        return when (type) {
+            ViewType.GRID -> itemCount - 1
+            ViewType.LIST -> {
+                val columns = maxOf(1, viewConfig.columnCount)
+                ((itemCount + columns - 1) / columns) - 1
+            }
+        }.coerceAtLeast(0)
+    }
+
+    private fun applyFolderScrollRestore(path: String, rememberListState: Boolean, itemCount: Int) {
+        val saved = (if (rememberListState) savedFolderScrollPositions[path] else null)
+            ?.takeIf { it.viewType == viewConfig.viewType }
+        val visibleItemCount = minOf(itemCount, contentSnapshot.size)
+        val maxIndex = maxRestorableIndex(visibleItemCount, viewConfig.viewType)
+        val validIndex = saved?.index?.coerceIn(0, maxIndex) ?: 0
+        val validOffset = saved?.offset?.coerceAtLeast(0) ?: 0
+        val gridIndex = if (viewConfig.viewType == ViewType.GRID) validIndex else 0
+        val columnIndex = if (viewConfig.viewType == ViewType.LIST) validIndex else 0
+        val gridOffset = if (viewConfig.viewType == ViewType.GRID) validOffset else 0
+        val columnOffset = if (viewConfig.viewType == ViewType.LIST) validOffset else 0
+        val newGridState = LazyGridState(gridIndex, gridOffset)
+        val newColumnState = LazyListState(columnIndex, columnOffset)
+        contentListStates[path] = newGridState
+        contentColumnListStates[path] = newColumnState
+        activeListState = newGridState
+        activeColumnListState = newColumnState
+        pendingScrollRestore = if (saved != null && visibleItemCount > 0 && (saved.index > 0 || saved.offset > 0)) {
+            saved.index to saved.offset.coerceAtLeast(0)
+        } else {
+            null
         }
     }
 
-    fun applyFolderScrollRestore(path: String, rememberListState: Boolean, itemCount: Int) {
-        val savedPos = if (rememberListState) savedFolderScrollPositions[path] else null
-        if (savedPos != null && (savedPos.first > 0 || savedPos.second > 0) && itemCount > 0) {
-            val validIndex = savedPos.first.coerceIn(0, maxOf(0, itemCount - 1))
-            val newGridState = LazyGridState(validIndex, savedPos.second)
-            val newColumnState = LazyListState(validIndex, savedPos.second)
-            contentListStates[path] = newGridState
-            contentColumnListStates[path] = newColumnState
-            activeListState = newGridState
-            activeColumnListState = newColumnState
-            pendingScrollRestore = Pair(validIndex, savedPos.second)
+    private fun restoreCurrentScrollPositionIfNeeded() {
+        if (isLoading) return
+        val saved = savedFolderScrollPositions[activeFolder.uniquePath] ?: return
+        if (saved.viewType != viewConfig.viewType) return
+        val current = getCurrentScrollPosition()
+        if (current.index == saved.index && current.offset == saved.offset) return
+        val count = contentSnapshot.size
+        if (count == 0) return
+        val maxIndex = maxRestorableIndex(count, saved.viewType)
+        val index = saved.index.coerceIn(0, maxIndex)
+        val offset = saved.offset.coerceAtLeast(0)
+        if (saved.viewType == ViewType.GRID) {
+            val state = LazyGridState(index, offset)
+            contentListStates[activeFolder.uniquePath] = state
+            activeListState = state
         } else {
-            val newGridState = LazyGridState(0, 0)
-            val newColumnState = LazyListState(0, 0)
-            contentListStates[path] = newGridState
-            contentColumnListStates[path] = newColumnState
-            activeListState = newGridState
-            activeColumnListState = newColumnState
-            pendingScrollRestore = null
+            val state = LazyListState(index, offset)
+            contentColumnListStates[activeFolder.uniquePath] = state
+            activeColumnListState = state
         }
+        pendingScrollRestore = if (saved.index > 0 || offset > 0) saved.index to offset else null
     }
 
     var viewConfig by mutableStateOf(
@@ -201,6 +365,8 @@ class FilesTab(
     var categories = mutableStateListOf<FileListCategory>()
     var selectedCategory by mutableStateOf<FileListCategory?>(null)
     var selectedFormats by mutableStateOf<Set<String>>(emptySet())
+    /** Multi-select type filters for ordinary folders; an empty set means show all files. */
+    var selectedTypeFilters by mutableStateOf<Set<String>>(emptySet())
     var pendingLockPath by mutableStateOf<String?>(null)
     var pendingLockMode by mutableStateOf(com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.UNLOCK)
     var showCreateTaskDialog by mutableStateOf(false)
@@ -222,6 +388,7 @@ class FilesTab(
     val bottomOptionsBarState = _bottomOptionsBarState.asStateFlow()
 
     var handleBackGesture by mutableStateOf(true)
+    var copyHereTargetFolder by mutableStateOf<ContentHolder?>(null)
     var tabViewLabel by mutableStateOf(createTabLabel())
 
     var isLoading by mutableStateOf(false)
@@ -357,8 +524,15 @@ class FilesTab(
         }
     }
 
+    override fun onTabStopped() {
+        recordCurrentScrollPosition()
+    }
+
     override fun onTabResumed() {
         scope.launch {
+            withContext(Dispatchers.Main) {
+                restoreCurrentScrollPositionIfNeeded()
+            }
             validateActiveFolder()
             // Important to clear any information from previous tabs (when switching tabs)
             requestHomeToolbarUpdate()
@@ -366,12 +540,9 @@ class FilesTab(
             detectFileChanges()
             // Check for display mode change
             updateDisplayConfig()
+            updateSortingConfig()
             quickReloadFiles()
         }
-    }
-
-    override fun onTabStopped() {
-        recordCurrentScrollPosition()
     }
 
     override val header: String
@@ -477,7 +648,7 @@ class FilesTab(
                 }
             }
             return true
-        } else if (handleBackGesture) {
+        } else if (handleBackGesture && !shouldNavigateToParentTab()) {
             scope.launch {
                 val parent = activeFolder.getParent()
                 if (parent != null && parent.isValid()) {
@@ -595,11 +766,16 @@ class FilesTab(
         rememberSelectedFiles: Boolean = false,
         postEvent: () -> Unit = {}
     ) {
-        // Block UI
-        if (isLoading) return
+        // Latest-request-wins: cancel in-flight listing so Home/navigation is not dropped (#78)
+        val requestGeneration = listingGeneration.incrementAndGet()
+        listingJob?.cancel()
+        withContext(Dispatchers.Main) {
+            if (requestGeneration == listingGeneration.get()) isLoading = false
+        }
 
         // Prevent opening invalid files
         if (!item.isValid()) return
+        if (requestGeneration != listingGeneration.get()) return
 
         if (item is LocalFileHolder && com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.isLocked(item.uniquePath)) {
             pendingLockPath = item.uniquePath
@@ -607,31 +783,37 @@ class FilesTab(
             return
         }
 
-        // For virtual folders, update the category
-        if (item is VirtualFileHolder) {
-            item.selectedCategory = selectedCategory
-        }
+        val previousFolder = withContext(Dispatchers.Main) {
+            if (requestGeneration != listingGeneration.get()) return@withContext null
+            recordCurrentScrollPosition()
+            activeFolder
+        } ?: return
 
-        if (item != activeFolder) {
-            selectedFormats = emptySet()
-        }
+        val shouldAddHistory = !isNavigatingHistory &&
+                item.uniquePath != previousFolder.uniquePath && previousFolder.isValid()
+        if (requestGeneration != listingGeneration.get()) return
 
-        val previousFolder = activeFolder
-        recordCurrentScrollPosition()
-        if (!isNavigatingHistory && item.uniquePath != previousFolder.uniquePath && previousFolder.isValid()) {
-            historyBackStack.add(previousFolder)
-            if (historyBackStack.size > 50) {
-                historyBackStack.removeAt(0)
+        val activated = withContext(Dispatchers.Main) {
+            if (requestGeneration != listingGeneration.get()) return@withContext false
+            if (shouldAddHistory) {
+                historyBackStack.add(previousFolder)
+                if (historyBackStack.size > 50) historyBackStack.removeAt(0)
+                historyForwardStack.clear()
             }
-            historyForwardStack.clear()
+            if (item is VirtualFileHolder) item.selectedCategory = selectedCategory
+            if (item != activeFolder) {
+                selectedFormats = emptySet()
+                selectedTypeFilters = emptySet()
+            }
+            activeFolder = item
+            updateSortingConfig()
+            dropTargets.clear()
+            dropTargetFolders.clear()
+            dragDropSession = null
+            transientPressHighlightPath = null
+            true
         }
-
-        // Switch to the new folder
-        activeFolder = item
-        dropTargets.clear()
-        dropTargetFolders.clear()
-        dragDropSession = null
-        transientPressHighlightPath = null
+        if (!activated) return
 
         // Update header label
         withContext(Dispatchers.Main) {
@@ -677,62 +859,135 @@ class FilesTab(
             zipSourceTimestamp = (activeFolder as ZipFileHolder).zipTree.timeStamp
         }
 
-        // Cancel any existing listing job
-        listingJob?.cancel()
-
-        // CRITICAL: activeFolderContent.clear() is called later in the listing job.
-        // When items go from N → 0, Compose's lazy layout clamps LazyListState.firstVisibleItemIndex
-        // to 0 regardless of what it was before. This silently destroys any scroll position
-        // stored in a reused state object.
-        //
-        // Solution: ALWAYS create a fresh LazyListState/LazyGridState before the content reload.
-        // For back navigation (rememberListState=true): inject the saved position directly into
-        // the constructor so the list initialises at the correct row on its very first layout pass.
-        // For forward navigation (rememberListState=false): start at top (0, 0).
-        //
-        // The constructor-based approach has NO race condition — the initial position is set before
-        // the first composition, independent of whether items have been measured yet.
-
-        if (!rememberListState) {
-            savedFolderScrollPositions.remove(item.uniquePath)
-            contentListStates.remove(item.uniquePath)
-            contentColumnListStates.remove(item.uniquePath)
-            activeListState = LazyGridState(0, 0)
-            activeColumnListState = LazyListState(0, 0)
+        withContext(Dispatchers.Main) {
+            if (requestGeneration != listingGeneration.get()) return@withContext
+            if (!rememberListState) {
+                savedFolderScrollPositions.remove(item.uniquePath)
+                contentListStates.remove(item.uniquePath)
+                contentColumnListStates.remove(item.uniquePath)
+            }
+            activeListState = contentListStates[item.uniquePath] ?: LazyGridState(0, 0)
+                .also { contentListStates[item.uniquePath] = it }
+            activeColumnListState = contentColumnListStates[item.uniquePath] ?: LazyListState(0, 0)
+                .also { contentColumnListStates[item.uniquePath] = it }
         }
 
-        val targetSavedPos = if (rememberListState) savedFolderScrollPositions[item.uniquePath] else null
-
         // Get display config for this folder
-        updateDisplayConfig()
+        withContext(Dispatchers.Main) {
+            updateDisplayConfig()
+            updateSortingConfig()
+        }
+        val targetSavedPos = withContext(Dispatchers.Main) {
+            if (rememberListState) savedFolderScrollPositions[item.uniquePath] else null
+        }
+
+        if (requestGeneration != listingGeneration.get()) return
+
+        // When "Only refresh sort icon on navigation" is enabled, reuse cached folder listings
+        // when navigating back and forth between folders whose contents haven't changed on disk,
+        // refreshing the sort icon without forcing a full folder reload.
+        if (globalClass.preferencesManager.onlyRefreshSortIconOnNavigation && item is LocalFileHolder) {
+            val cached = folderListingCache.get(item.uniquePath)
+            if (cached != null) {
+                val currentMtime = item.file.lastModified()
+                val currentChildCount = item.file.list()?.size ?: -1
+                val currentShowHidden = globalClass.preferencesManager.showHiddenFiles
+                if (cached.mtime == currentMtime &&
+                    cached.childCount == currentChildCount &&
+                    cached.showHidden == currentShowHidden
+                ) {
+                    val effectiveSort = globalClass.preferencesManager.getSortingPrefsFor(item)
+                    val sameSortOrder = cached.sortingPrefs.sortMethod == effectiveSort.sortMethod &&
+                            cached.sortingPrefs.reverseSorting == effectiveSort.reverseSorting &&
+                            cached.sortingPrefs.showFoldersFirst == effectiveSort.showFoldersFirst &&
+                            effectiveSort.sortMethod != com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_SHUFFLED
+                    val resolvedItems = if (sameSortOrder) {
+                        cached.items
+                    } else {
+                        ContentHolder.sortItemsWithPrefs(cached.items, effectiveSort).also { reSorted ->
+                            folderListingCache.put(
+                                item.uniquePath,
+                                cached.copy(sortingPrefs = effectiveSort, items = reSorted)
+                            )
+                        }
+                    }
+                    lastKnownDirMtime = currentMtime
+                    lastKnownChildCount = currentChildCount
+                    withContext(Dispatchers.Main) {
+                        if (requestGeneration != listingGeneration.get()) return@withContext
+                        isLoading = false
+                        sortingPrefs = effectiveSort
+                        foldersCount = cached.foldersCount
+                        filesCount = cached.filesCount
+                        showCategories = false
+                        activeFolderContent.clear()
+                        activeFolderContent.addAll(resolvedItems)
+                        updateContentSnapshot()
+                        applyFolderScrollRestore(item.uniquePath, rememberListState, resolvedItems.size)
+                        requestHomeToolbarUpdate()
+                        postEvent()
+                    }
+                    return
+                }
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            if (requestGeneration == listingGeneration.get()) isLoading = true
+        }
 
         listingJob = scope.launch(Dispatchers.IO) {
-            isLoading = true
+            if (requestGeneration != listingGeneration.get()) return@launch
             try {
-                if (activeFolder is LocalFileHolder) {
-                    val localFolder = activeFolder as LocalFileHolder
-                    lastKnownDirMtime = localFolder.file.lastModified()
-                    lastKnownChildCount = localFolder.file.list()?.size ?: -1
+                if (item is LocalFileHolder) {
+                    val localFolder = item
+                    val dirMtime = localFolder.file.lastModified()
+                    val dirChildCount = localFolder.file.list()?.size ?: -1
+                    lastKnownDirMtime = dirMtime
+                    lastKnownChildCount = dirChildCount
 
                     val sorted = localFolder.listSortedContent()
-                    if (!isActive) return@launch
+                    if (!isActive || requestGeneration != listingGeneration.get()) return@launch
 
                     val count = localFolder.getContentCount()
                     withContext(Dispatchers.Main) {
+                        if (requestGeneration != listingGeneration.get()) return@withContext
                         foldersCount = count.folders
                         filesCount = count.files
                         showCategories = false
                     }
 
                     val displayItems = if (sorted.size > 10_000) sorted.subList(0, 10_000) else sorted
-                    val initialTake = if (targetSavedPos != null && targetSavedPos.first > 0) {
-                        maxOf(256, minOf(targetSavedPos.first + 64, displayItems.size))
+                    folderListingCache.put(
+                        localFolder.uniquePath,
+                        CachedFolderListing(
+                            mtime = dirMtime,
+                            childCount = dirChildCount,
+                            foldersCount = count.folders,
+                            filesCount = count.files,
+                            showHidden = globalClass.preferencesManager.showHiddenFiles,
+                            sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(localFolder),
+                            items = displayItems.toList()
+                        )
+                    )
+                    val matchingSavedPos = targetSavedPos?.takeIf { it.viewType == viewConfig.viewType }
+                    val initialTake = if (matchingSavedPos != null && matchingSavedPos.index > 0) {
+                        val itemsPerSavedPosition = if (viewConfig.viewType == ViewType.LIST) {
+                            maxOf(1, viewConfig.columnCount)
+                        } else {
+                            1
+                        }
+                        maxOf(
+                            256,
+                            minOf((matchingSavedPos.index + 64) * itemsPerSavedPosition, displayItems.size)
+                        )
                     } else {
                         minOf(256, displayItems.size)
                     }
                     val firstChunk = displayItems.take(initialTake)
 
                     withContext(Dispatchers.Main) {
+                        if (requestGeneration != listingGeneration.get()) return@withContext
                         activeFolderContent.clear()
                         activeFolderContent.addAll(firstChunk)
                         updateContentSnapshot()
@@ -743,26 +998,28 @@ class FilesTab(
 
                     var offset = initialTake
                     val appendChunkSize = 512
-                    while (isActive && offset < displayItems.size) {
+                    while (isActive && requestGeneration == listingGeneration.get() && offset < displayItems.size) {
                         val end = minOf(offset + appendChunkSize, displayItems.size)
                         val nextChunk = displayItems.subList(offset, end)
                         offset = end
                         withContext(Dispatchers.Main) {
+                            if (requestGeneration != listingGeneration.get()) return@withContext
                             activeFolderContent.addAll(nextChunk)
                             updateContentSnapshot()
                         }
                         kotlinx.coroutines.yield()
                     }
-                } else if (activeFolder is VirtualFileHolder) {
-                    val vFolder = activeFolder as VirtualFileHolder
+                } else if (item is VirtualFileHolder) {
+                    val vFolder = item
                     val check = StorageProvider.getCategoryQuickCheck(vFolder.type)
                     lastKnownCategoryCount = check.first
                     lastKnownCategoryMaxDate = check.second
 
                     val firstPage = vFolder.listSortedContent()
-                    if (!isActive) return@launch
+                    if (!isActive || requestGeneration != listingGeneration.get()) return@launch
 
                     withContext(Dispatchers.Main) {
+                        if (requestGeneration != listingGeneration.get()) return@withContext
                         activeFolderContent.clear()
                         activeFolderContent.addAll(firstPage)
                         updateContentSnapshot()
@@ -776,11 +1033,15 @@ class FilesTab(
                         postEvent()
                     }
 
-                    // Background append for remaining pages up to 5,000
-                    while (isActive && vFolder.hasMoreContent && activeFolderContent.size < 5000) {
+                    // Background append for remaining pages (up to 5,000 for media categories, or all items for Unlimited Recent / All Files)
+                    val pageCap = if (vFolder.isUnlimitedMode()) Int.MAX_VALUE else 5000
+                    var loadedCount = firstPage.size
+                    while (isActive && requestGeneration == listingGeneration.get() && vFolder.hasMoreContent && loadedCount < pageCap) {
                         val nextPage = vFolder.loadNextPage()
-                        if (!isActive || nextPage.isEmpty()) break
+                        if (!isActive || requestGeneration != listingGeneration.get() || nextPage.isEmpty()) break
+                        loadedCount += nextPage.size
                         withContext(Dispatchers.Main) {
+                            if (requestGeneration != listingGeneration.get()) return@withContext
                             activeFolderContent.addAll(nextPage)
                             updateContentSnapshot()
                             filesCount = activeFolderContent.size
@@ -793,7 +1054,7 @@ class FilesTab(
                     }
 
                     // Optional background filesystem walk if enabled in preferences
-                    if (isActive && globalClass.preferencesManager.deepScanCategories) {
+                    if (isActive && requestGeneration == listingGeneration.get() && globalClass.preferencesManager.deepScanCategories) {
                         val ext = when (vFolder.type) {
                             VirtualFileHolder.IMAGE -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
                             VirtualFileHolder.VIDEO -> com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
@@ -804,10 +1065,18 @@ class FilesTab(
                             else -> emptySet()
                         }
                         if (ext.isNotEmpty()) {
-                            val existingPaths = activeFolderContent.map { it.uniquePath }.toSet()
+                            val existingPaths = withContext(Dispatchers.Main) {
+                                if (requestGeneration == listingGeneration.get()) {
+                                    activeFolderContent.map { it.uniquePath }.toSet()
+                                } else {
+                                    emptySet()
+                                }
+                            }
+                            if (requestGeneration != listingGeneration.get()) return@launch
                             CategoryFileScanner.walkStorageRootsBackground(ext, existingPaths) { batch ->
-                                if (isActive && batch.isNotEmpty()) {
+                                if (isActive && requestGeneration == listingGeneration.get() && batch.isNotEmpty()) {
                                     withContext(Dispatchers.Main) {
+                                        if (requestGeneration != listingGeneration.get()) return@withContext
                                         activeFolderContent.addAll(batch)
                                         updateContentSnapshot()
                                         filesCount = activeFolderContent.size
@@ -818,10 +1087,11 @@ class FilesTab(
                         }
                     }
                 } else {
-                    val sorted = activeFolder.listSortedContent()
-                    if (!isActive) return@launch
-                    val count = activeFolder.getContentCount()
+                    val sorted = item.listSortedContent()
+                    if (!isActive || requestGeneration != listingGeneration.get()) return@launch
+                    val count = item.getContentCount()
                     withContext(Dispatchers.Main) {
+                        if (requestGeneration != listingGeneration.get()) return@withContext
                         activeFolderContent.clear()
                         activeFolderContent.addAll(sorted)
                         updateContentSnapshot()
@@ -835,23 +1105,29 @@ class FilesTab(
                 }
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoading = false
-                    requestHomeToolbarUpdate()
+                    if (requestGeneration == listingGeneration.get()) {
+                        isLoading = false
+                        requestHomeToolbarUpdate()
+                    }
                 }
             }
         }
     }
 
-    private fun shouldNavigateToParentTab(): Boolean {
-        return parentTab isNot null
-                && activeFolder is ZipFileHolder
-                && with(activeFolder as ZipFileHolder) {
+    private fun shouldNavigateToParentTab(folder: ContentHolder = activeFolder): Boolean {
+        if (parentTab == null) return false
+        if (historyBackStack.isEmpty() && folder.uniquePath == homeDir.uniquePath) {
+            return true
+        }
+        return folder is ZipFileHolder
+                && with(folder) {
             runBlocking { getParent()?.uniquePath == zipTree.source.getParent()?.uniquePath }
         }
     }
 
     suspend fun validateActiveFolder() {
         pruneInvalidHistory()
+        pruneInvalidBreadcrumbSegments()
         if (!activeFolder.isValid()) {
             // Try to find a valid parent folder
             var validParent: ContentHolder? = null
@@ -1005,50 +1281,38 @@ class FilesTab(
 
     fun quickReloadFiles() {
         scope.launch {
-            // terminate if the tab is busy
-            if (isLoading) return@launch
-
-            // Put the content in a temporary list
-            val temp = arrayListOf<ContentHolder>().apply { addAll(activeFolderContent) }
-
-            // Recheck the back gesture
-            handleBackGesture = selectedFiles.isNotEmpty()
-                    || (activeFolder.hasParent() && !shouldNavigateToParentTab())
-
-            // Update the bottom bar options
-            _bottomOptionsBarState.update {
-                it.copy(
-                    showQuickOptions = selectedFiles.isNotEmpty(),
-                    showMoreOptionsButton = selectedFiles.isNotEmpty(),
-                    showEmptyRecycleBinButton = activeFolder is LocalFileHolder &&
-                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
-                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath),
-                    showRestoreButton = activeFolder is LocalFileHolder &&
-                            selectedFiles.isNotEmpty() &&
-                            ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
-                                    activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
-                )
+            val (busy, folder) = withContext(Dispatchers.Main) {
+                isLoading to activeFolder
             }
+            if (busy) return@launch
+
+            val folderHasParent = folder.hasParent()
+            val navigateToParentTab = shouldNavigateToParentTab(folder)
 
             withContext(Dispatchers.Main) {
+                // All reads of Compose state and mutable selection collections stay on Main.
+                if (isLoading || activeFolder.uniquePath != folder.uniquePath) return@withContext
+
                 selectedFilesCount = selectedFiles.size
                 updateSelectedFilesSize()
+                handleBackGesture = selectedFiles.isNotEmpty()
+                        || (folderHasParent && !navigateToParentTab)
 
-                val contentChanged = activeFolderContent.size != temp.size ||
-                        activeFolderContent.map { it.uniquePath } != temp.map { it.uniquePath }
-                if (contentChanged) {
-                    val savedIndex = activeListState.firstVisibleItemIndex
-                    val savedOffset = activeListState.firstVisibleItemScrollOffset
-                    // Reload the list
-                    activeFolderContent.clear()
-                    activeFolderContent.addAll(temp)
-                    updateContentSnapshot()
-                    if (savedIndex > 0 || savedOffset > 0) {
-                        try {
-                            activeListState.scrollToItem(savedIndex.coerceAtMost((temp.size - 1).coerceAtLeast(0)), savedOffset)
-                        } catch (_: Exception) {}
-                    }
+                val inRecycleBin = activeFolder is LocalFileHolder &&
+                        ((activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
+                                activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
+                _bottomOptionsBarState.update {
+                    it.copy(
+                        showQuickOptions = selectedFiles.isNotEmpty(),
+                        showMoreOptionsButton = selectedFiles.isNotEmpty(),
+                        showEmptyRecycleBinButton = inRecycleBin,
+                        showRestoreButton = inRecycleBin && selectedFiles.isNotEmpty()
+                    )
                 }
+
+                // Recompute the immutable UI snapshot without clearing/replacing the live list.
+                // Replacing it from a background copy could race a folder listing and lose newer items.
+                updateContentSnapshot()
 
                 // Update title and subtitle
                 requestHomeToolbarUpdate()
@@ -1162,6 +1426,7 @@ class FilesTab(
     }
 
     fun reloadFiles(postEvent: () -> Unit = {}) {
+        invalidateFolderListingCache(activeFolder.uniquePath)
         scope.launch {
             openFolderImpl(activeFolder) { postEvent() }
         }
@@ -1211,12 +1476,79 @@ class FilesTab(
         contentListStates[activeFolder.uniquePath] = it
     }
 
+    fun toggleCopyHereMode(target: ContentHolder = activeFolder) {
+        copyHereTargetFolder = if (copyHereTargetFolder?.uniquePath == target.uniquePath) {
+            null
+        } else {
+            target
+        }
+        tabViewLabel = createTabLabel()
+    }
+
+    fun exitCopyHereMode() {
+        copyHereTargetFolder = null
+        tabViewLabel = createTabLabel()
+    }
+
     private fun createTabLabel(): String {
+        val folderForLabel = copyHereTargetFolder ?: activeFolder
         val fullName =
-            activeFolder.displayName.orIf(globalClass.getString(R.string.internal_storage)) {
-                activeFolder.uniquePath == Environment.getExternalStorageDirectory().absolutePath
+            folderForLabel.displayName.orIf(globalClass.getString(R.string.internal_storage)) {
+                folderForLabel.uniquePath == Environment.getExternalStorageDirectory().absolutePath
             }
         return if (fullName.length > 18) fullName.substring(0, 15) + "..." else fullName
+    }
+
+    fun breadcrumbSegmentKey(holder: ContentHolder): String {
+        return when (holder) {
+            is ZipFileHolder -> "zip:${holder.zipTree.source.uniquePath}:${holder.uniquePath}"
+            else -> "${holder::class.simpleName}:${holder.uniquePath}"
+        }
+    }
+
+    suspend fun isBreadcrumbSegmentValid(holder: ContentHolder): Boolean {
+        val cleanOnExitPath = globalClass.cleanOnExitDir.uniquePath
+        return runCatching {
+            when (holder) {
+                is ZipFileHolder -> {
+                    val archiveFile = holder.zipTree.source.file
+                    if (!archiveFile.exists() || !archiveFile.isFile) {
+                        false
+                    } else if (holder.uniquePath.isEmpty()) {
+                        true
+                    } else if (holder.zipTree.isReady) {
+                        holder.zipTree.findNodeByPath(holder.uniquePath) != null
+                    } else {
+                        true
+                    }
+                }
+                is LocalFileHolder -> {
+                    !holder.uniquePath.startsWith(cleanOnExitPath) &&
+                            holder.file.exists() &&
+                            holder.file.isDirectory &&
+                            holder.canRead
+                }
+                else -> holder.canRead && holder.isValid()
+            }
+        }.getOrDefault(false)
+    }
+
+    suspend fun pruneInvalidBreadcrumbSegments() {
+        val existing = withContext(Dispatchers.Main) { currentPathSegments.toList() }
+        if (existing.isEmpty()) return
+        val validPrefix = ArrayList<ContentHolder>(existing.size)
+        for (segment in existing) {
+            if (isBreadcrumbSegmentValid(segment)) {
+                validPrefix.add(segment)
+            } else {
+                break
+            }
+        }
+        if (validPrefix.size != existing.size) {
+            withContext(Dispatchers.Main) {
+                currentPathSegments = validPrefix
+            }
+        }
     }
 
     private suspend fun updatePathList() {
@@ -1232,10 +1564,33 @@ class FilesTab(
             curr = curr.getParent()
         }
 
-        val newPathSegments = paths.reversed()
+        val newAncestorSegments = paths.reversed()
+        val existingSegments = withContext(Dispatchers.Main) { currentPathSegments.toList() }
+
+        // Keep forward breadcrumb history (greyed-out child path segments) when navigating up
+        // a folder, while validating each trailing segment so deleted archives/folders are pruned
+        // immediately without ever causing a crash.
+        val mergedSegments = ArrayList<ContentHolder>(maxOf(newAncestorSegments.size, existingSegments.size))
+        mergedSegments.addAll(newAncestorSegments)
+
+        if (newAncestorSegments.isNotEmpty() && existingSegments.size > newAncestorSegments.size) {
+            val matchesPrefix = newAncestorSegments.indices.all { idx ->
+                breadcrumbSegmentKey(existingSegments[idx]) == breadcrumbSegmentKey(newAncestorSegments[idx])
+            }
+            if (matchesPrefix) {
+                for (i in newAncestorSegments.size until existingSegments.size) {
+                    val trailing = existingSegments[i]
+                    if (isBreadcrumbSegmentValid(trailing)) {
+                        mergedSegments.add(trailing)
+                    } else {
+                        break
+                    }
+                }
+            }
+        }
 
         withContext(Dispatchers.Main) {
-            currentPathSegments = newPathSegments
+            currentPathSegments = mergedSegments
             highlightedPathSegment = activeFolder
         }
     }

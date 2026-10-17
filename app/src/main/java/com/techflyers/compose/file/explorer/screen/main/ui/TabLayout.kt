@@ -3,6 +3,8 @@ package com.techflyers.compose.file.explorer.screen.main.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +26,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MoveToInbox
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Tab
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -71,6 +78,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.apps.AppsTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -97,6 +105,7 @@ fun TabLayout(
     }
 
     val mainActivityManager = globalClass.mainActivityManager
+    val prefs = globalClass.preferencesManager
 
     var from by remember { mutableIntStateOf(-1) }
     var to by remember { mutableIntStateOf(-1) }
@@ -122,9 +131,20 @@ fun TabLayout(
     }
 
     LaunchedEffect(tabs) {
-        list.clear()
-        list.addAll(tabs.map { it.id })
+        if (list.size == tabs.size) {
+            tabs.forEachIndexed { idx, tab ->
+                if (list[idx] != tab.id) {
+                    list[idx] = tab.id
+                }
+            }
+        } else {
+            list.clear()
+            list.addAll(tabs.map { it.id })
+        }
     }
+
+    val activeTab = tabs.getOrNull(selectedTabIndex)
+    val showRibbonToggle = activeTab is FilesTab && activeTab.activeFolder !is VirtualFileHolder
 
     Row(
         Modifier
@@ -158,11 +178,14 @@ fun TabLayout(
                         }
 
                         val isSelected = selectedTabIndex == index
+                        val isCopyHereDestination = (tab as? FilesTab)?.copyHereTargetFolder != null
 
                         val backgroundColorAnim = animateColorAsState(
                             targetValue =
                                 if (isDragged) {
                                     draggedTabBackgroundColor
+                                } else if (isCopyHereDestination) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isSelected) 0.9f else 0.55f)
                                 } else if (isSelected) {
                                     selectedTabBackgroundColor
                                 } else {
@@ -174,13 +197,15 @@ fun TabLayout(
                             targetValue =
                                 if (isDragged) {
                                     draggedTabTextColor
+                                } else if (isCopyHereDestination) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
                                 } else {
                                     Color.Unspecified
                                 }
                         )
 
                         val alphaAnim = animateFloatAsState(
-                            targetValue = if (isSelected && draggedItem == -1) 1f else 0.5f
+                            targetValue = if ((isSelected || isCopyHereDestination) && draggedItem == -1) 1f else 0.5f
                         )
 
                         var showTabHeaderMenu by remember(tab.id) {
@@ -208,10 +233,12 @@ fun TabLayout(
                                         if (currentTime - lastClickTime < 300L) {
                                             lastClickTime = 0L
                                             showTabHeaderMenu = false
-                                            if (tabs.size > 1) {
-                                                mainActivityManager.removeTabAt(index)
-                                            } else if (tab !is HomeTab) {
-                                                mainActivityManager.replaceCurrentTabWith(HomeTab())
+                                            if (!tab.isPinned) {
+                                                if (tabs.size > 1) {
+                                                    mainActivityManager.removeTabAt(index)
+                                                } else if (tab !is HomeTab) {
+                                                    mainActivityManager.replaceCurrentTabWith(HomeTab())
+                                                }
                                             }
                                         } else {
                                             lastClickTime = currentTime
@@ -221,12 +248,15 @@ fun TabLayout(
                                                 showTabHeaderMenu = true
                                             }
                                         }
+                                    },
+                                    onLongClick = {
+                                        showTabHeaderMenu = true
                                     }
                                 )
-                                .padding(horizontal = 20.dp)
+                                .padding(horizontal = 16.dp)
                                 .longPressDraggableHandle()
                                 .then(
-                                    if (!globalClass.preferencesManager.disableNavigationGestures) {
+                                    if (!globalClass.preferencesManager.disableNavigationGestures && !tab.isPinned) {
                                         Modifier.detectVerticalSwipe(
                                             onSwipeDown = {
                                                 if (!isAtBottom) mainActivityManager.removeTabAt(index)
@@ -240,10 +270,34 @@ fun TabLayout(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
+                            if (tab.isPinned) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PushPin,
+                                    contentDescription = "Pinned tab",
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .padding(end = 2.dp)
+                                        .alpha(alphaAnim.value),
+                                    tint = if (isDragged) draggedTabTextColor else MaterialTheme.colorScheme.primary
+                                )
+                                Space(2.dp)
+                            }
+                            if (isCopyHereDestination) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MoveToInbox,
+                                    contentDescription = "Copy here destination",
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .alpha(alphaAnim.value),
+                                    tint = if (isDragged) draggedTabTextColor else MaterialTheme.colorScheme.primary
+                                )
+                                Space(4.dp)
+                            }
                             Text(
                                 modifier = Modifier.alpha(alphaAnim.value),
                                 text = tab.header,
                                 fontSize = 14.sp,
+                                fontWeight = if (isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
                                 color = textColorAnim.value
                             )
                             if (showTabHeaderMenu) {
@@ -257,6 +311,27 @@ fun TabLayout(
                         }
                     }
                 }
+            }
+        }
+        if (showRibbonToggle) {
+            IconButton(
+                onClick = {
+                    prefs.showDirectoryTypeFilterRibbon = !prefs.showDirectoryTypeFilterRibbon
+                }
+            ) {
+                Icon(
+                    imageVector = if (prefs.showDirectoryTypeFilterRibbon) {
+                        Icons.Rounded.FilterList
+                    } else {
+                        Icons.Rounded.FilterListOff
+                    },
+                    contentDescription = stringResource(R.string.show_directory_type_filter_ribbon),
+                    tint = if (prefs.showDirectoryTypeFilterRibbon) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
             }
         }
         if (globalClass.preferencesManager.hideToolbar) {
@@ -281,6 +356,26 @@ fun OptionsMenu(
     onDismiss: () -> Unit,
     onShowClosedTabsHistory: () -> Unit = {}
 ) {
+    var showCloseOthersConfirm by remember { mutableStateOf(false) }
+    if (showCloseOthersConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCloseOthersConfirm = false },
+            title = { Text(text = stringResource(R.string.close_others)) },
+            text = { Text(text = "Close all other unpinned tabs? The current tab will remain open.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    globalClass.mainActivityManager.removeOtherTabs(index)
+                    showCloseOthersConfirm = false
+                    onDismiss()
+                }) { Text("Close others") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloseOthersConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
@@ -295,6 +390,37 @@ fun OptionsMenu(
                 addAll(startupTabsObj.tabs)
             }
         }
+
+        DropdownMenuItem(
+            text = { Text(text = "Duplicate tab") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                globalClass.mainActivityManager.duplicateTabAt(index)
+                onDismiss()
+            }
+        )
+
+        DropdownMenuItem(
+            text = { Text(text = if (tab.isPinned) "Unpin tab" else "Pin tab") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.PushPin,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = if (tab.isPinned) MaterialTheme.colorScheme.primary else Color.Unspecified
+                )
+            },
+            onClick = {
+                globalClass.mainActivityManager.togglePinTabAt(index)
+                onDismiss()
+            }
+        )
 
         @Composable
         fun addStartupTabMenuItems(
@@ -368,7 +494,7 @@ fun OptionsMenu(
             }
         }
 
-        if (index > 0) {
+        if (!tab.isPinned && globalClass.mainActivityManager.state.value.tabs.size > 1) {
             DropdownMenuItem(
                 text = { Text(text = stringResource(R.string.close)) },
                 onClick = {
@@ -380,10 +506,7 @@ fun OptionsMenu(
 
         DropdownMenuItem(
             text = { Text(text = stringResource(R.string.close_others)) },
-            onClick = {
-                globalClass.mainActivityManager.removeOtherTabs(index)
-                onDismiss()
-            }
+            onClick = { showCloseOthersConfirm = true }
         )
 
         DropdownMenuItem(
@@ -397,17 +520,31 @@ fun OptionsMenu(
                         text = stringResource(R.string.reopen_closed_tab),
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    IconButton(
-                        onClick = {
-                            onDismiss()
-                            onShowClosedTabsHistory()
-                        },
-                        modifier = Modifier.size(28.dp)
+                    Space(8.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+                                shape = RoundedCornerShape(4.dp)
+                            )
+                            .border(
+                                width = 0.8.dp,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                                shape = RoundedCornerShape(4.dp)
+                            )
+                            .clickable {
+                                onDismiss()
+                                onShowClosedTabsHistory()
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.History,
                             contentDescription = stringResource(R.string.closed_tabs_history),
-                            modifier = Modifier.size(18.dp)
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }

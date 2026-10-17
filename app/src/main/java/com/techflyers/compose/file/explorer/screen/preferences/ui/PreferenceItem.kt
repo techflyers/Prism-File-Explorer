@@ -61,23 +61,27 @@ fun PreferenceItem(
     label: String,
     supportingText: String,
     icon: ImageVector,
+    enabled: Boolean = true,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {},
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     PreferenceItem(
         modifier = modifier.combinedClickable(
+            enabled = enabled,
             onClick = onClick,
             onLongClick = onLongClick
         ),
         leadingContent = {
             Icon(
+                modifier = Modifier.alpha(if (enabled) 1f else 0.38f),
                 imageVector = icon,
                 contentDescription = null
             )
         },
         label = {
             Text(
+                modifier = Modifier.alpha(if (enabled) 1f else 0.38f),
                 text = label,
                 fontSize = 16.sp
             )
@@ -85,7 +89,7 @@ fun PreferenceItem(
         supportingText = if (supportingText.isEmpty()) null else {
             {
                 Text(
-                    modifier = Modifier.alpha(0.7f),
+                    modifier = Modifier.alpha(if (enabled) 0.7f else 0.38f),
                     text = supportingText,
                     fontSize = 14.sp
                 )
@@ -101,19 +105,22 @@ fun PreferenceItem(
     label: String,
     supportingText: String? = null,
     icon: ImageVector,
+    enabled: Boolean = true,
     switchState: Boolean,
     onSwitchChange: (switched: Boolean) -> Unit
 ) {
-    var switch by remember { mutableStateOf(switchState) }
+    var switch by remember(switchState) { mutableStateOf(switchState) }
 
     PreferenceItem(
         label = label,
         supportingText = supportingText ?: emptyString,
         icon = icon,
+        enabled = enabled,
         modifier = modifier,
         trailingContent = {
             Switch(
                 checked = switch,
+                enabled = enabled,
                 onCheckedChange = {
                     switch = it
                     onSwitchChange(it)
@@ -121,8 +128,10 @@ fun PreferenceItem(
             )
         },
         onClick = {
-            switch = !switch
-            onSwitchChange(switch)
+            if (enabled) {
+                switch = !switch
+                onSwitchChange(switch)
+            }
         }
     )
 }

@@ -77,7 +77,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontStyle
@@ -155,6 +154,13 @@ fun ColumnScope.FilesList(tab: FilesTab) {
     val coroutineScope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
 
+    LaunchedEffect(preferencesManager.showDirectoryTypeFilterRibbon, tab.activeFolder.uniquePath) {
+        if (!preferencesManager.showDirectoryTypeFilterRibbon && tab.selectedTypeFilters.isNotEmpty()) {
+            tab.selectedTypeFilters = emptySet()
+            tab.updateContentSnapshot()
+        }
+    }
+
     // Resolve parent folder once for the `..` entry
     var parentFolder by remember(tab.activeFolder.uniquePath) {
         mutableStateOf<ContentHolder?>(null)
@@ -174,7 +180,73 @@ fun ColumnScope.FilesList(tab: FilesTab) {
         parentFolderResolved = true
     }
 
-    Box(Modifier.weight(1f)) {
+    val areaSwipeDensity = LocalDensity.current
+    val areaSwipeThresholdPx = with(areaSwipeDensity) { 56.dp.toPx() }
+    val areaSwipeTouchSlop = LocalViewConfiguration.current.touchSlop
+    val middleZonePercent = preferencesManager.middleSwipeZoneWidthPercent
+
+    Box(
+        Modifier
+            .weight(1f)
+            .then(
+                if (!preferencesManager.disableNavigationGestures && tab.showCategories && tab.categories.isNotEmpty()) {
+                    Modifier.pointerInput(
+                        tab.showCategories,
+                        tab.categories.size,
+                        tab.selectedCategory,
+                        middleZonePercent
+                    ) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val middleFraction = (middleZonePercent.coerceIn(20, 70)) / 100f
+                            val leftBoundary = size.width * (1f - middleFraction) / 2f
+                            val rightBoundary = size.width * (1f + middleFraction) / 2f
+                            if (down.position.x !in leftBoundary..rightBoundary) return@awaitEachGesture
+
+                            var totalDx = 0f
+                            var totalDy = 0f
+                            var lockedHorizontal = false
+
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.find { it.id == down.id } ?: break
+                                val dx = change.position.x - change.previousPosition.x
+                                val dy = change.position.y - change.previousPosition.y
+                                totalDx += dx
+                                totalDy += dy
+
+                                if (!lockedHorizontal) {
+                                    if (kotlin.math.abs(totalDy) > areaSwipeTouchSlop && kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
+                                        return@awaitEachGesture
+                                    }
+                                    if (kotlin.math.abs(totalDx) > areaSwipeTouchSlop && kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy) * 1.2f) {
+                                        lockedHorizontal = true
+                                    }
+                                }
+
+                                if (lockedHorizontal) {
+                                    change.consume()
+                                }
+                            } while (event.changes.any { it.pressed })
+
+                            if (lockedHorizontal && kotlin.math.abs(totalDx) >= areaSwipeThresholdPx) {
+                                val currentIdx = tab.selectedCategory?.let { tab.categories.indexOf(it) + 1 } ?: 0
+                                val maxIdx = tab.categories.size
+                                val nextIdx = if (totalDx < 0f) {
+                                    (currentIdx + 1).coerceAtMost(maxIdx)
+                                } else {
+                                    (currentIdx - 1).coerceAtLeast(0)
+                                }
+                                if (nextIdx != currentIdx) {
+                                    tab.selectedCategory = if (nextIdx == 0) null else tab.categories.getOrNull(nextIdx - 1)
+                                    tab.reloadFiles()
+                                }
+                            }
+                        }
+                    }
+                } else Modifier
+            )
+    ) {
         if (tab.activeFolderContent.isEmpty() && !tab.isLoading) {
             EmptyFolderContent(tab)
         }
@@ -544,6 +616,67 @@ fun ColumnScope.FilesList(tab: FilesTab) {
             }
         }
 
+        val copyHereTab = if (tab.copyHereTargetFolder != null) {
+            tab
+        } else {
+            globalClass.mainActivityManager.state.value.tabs
+                .filterIsInstance<FilesTab>()
+                .firstOrNull { it.copyHereTargetFolder != null }
+        }
+        val copyHereTarget = copyHereTab?.copyHereTargetFolder
+        if (copyHereTarget != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (tab.selectedFiles.isNotEmpty() && copyHereTarget.uniquePath != tab.activeFolder.uniquePath) {
+                        ExtendedFloatingActionButton(
+                            onClick = {
+                                taskManager.addTaskAndRun(
+                                    CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false),
+                                    CopyTaskParameters(copyHereTarget)
+                                )
+                                tab.unselectAllFiles()
+                            },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentPaste,
+                                    contentDescription = null
+                                )
+                            },
+                            text = {
+                                Text("Copy to ${copyHereTarget.displayName}")
+                            }
+                        )
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            copyHereTab.exitCopyHereMode()
+                        },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null
+                            )
+                        },
+                        text = {
+                            Text("Done")
+                        }
+                    )
+                }
+            }
+        }
+
     }
 }
 
@@ -713,13 +846,7 @@ fun FilesListColumns(
         else item.size
 
     val maxSiblingSize = if (folderScanEnabled) (snapshot.maxOfOrNull { effectiveSizeOf(it) }?.coerceAtLeast(1L) ?: tab.maxSiblingSize) else tab.maxSiblingSize
-    // IMPORTANT: We must derive listStates from `tab.activeColumnListState` as a Compose state
-    // value (not just inside remember), otherwise when we navigate back to a folder, Compose
-    // re-uses the old `remember` result (keyed on the OLD uniquePath) even though
-    // tab.activeColumnListState has been updated to the restored state.  By reading the property
-    // in a `remember` that also tracks the state *object identity* we force Compose to pick up
-    // the correct, restored LazyListState every time the folder changes.
-    val primaryColumnState = tab.activeColumnListState  // read as Compose state
+    val primaryColumnState = tab.activeColumnListState
     val listStates = remember(tab.activeFolder.uniquePath, cols, primaryColumnState) {
         List(cols) { colIndex ->
             if (colIndex == 0) primaryColumnState else LazyListState()
@@ -753,6 +880,7 @@ fun FilesListColumns(
                         (itemBottom - safeBottom).coerceAtLeast(0f)
                     } else 0f
 
+                    // Wait 60 ms for layout measurements and toolbar/ribbon resize to settle before measuring overlap
                     delay(60)
 
                     val visibleItem = listState.layoutInfo.visibleItemsInfo.find { it.index == sliceIndex }
@@ -815,7 +943,7 @@ fun FilesListColumns(
 
         val sliceIndex = itemInfo.index
         val globalIndex = colIndex * chunkSize + sliceIndex
-        return if (globalIndex in 0 until tab.activeFolderContent.size) globalIndex else null
+        return if (globalIndex in 0 until totalItems) globalIndex else null
     }
 
     fun getScrollStateForOffset(offset: Offset, viewportWidth: Float): LazyListState? {
@@ -837,6 +965,7 @@ fun FilesListColumns(
             if (targetIndex >= 0) {
                 val targetColumn = (targetIndex / chunkSize).coerceIn(0, listStates.lastIndex)
                 listStates[targetColumn].scrollToItem(targetIndex % chunkSize)
+                tab.pendingScrollRestore = null
                 if (tab.pendingLocateFilePath == path) tab.pendingLocateFilePath = null
             }
         }
@@ -844,20 +973,18 @@ fun FilesListColumns(
 
     LaunchedEffect(
         tab.pendingScrollRestore,
+        tab.pendingLocateFilePath,
         tab.activeFolder.uniquePath,
         snapshot.size,
-        parentFolderResolved
+        parentFolderResolved,
+        cols
     ) {
         val restore = tab.pendingScrollRestore
-        if (restore != null && snapshot.isNotEmpty() && parentFolderResolved) {
-            val targetColumn = (restore.first / chunkSize).coerceIn(0, listStates.lastIndex)
-            val sliceIndex = restore.first % chunkSize
-            val targetState = listStates[targetColumn]
-            if (targetState.firstVisibleItemIndex != sliceIndex ||
-                kotlin.math.abs(targetState.firstVisibleItemScrollOffset - restore.second) > 10
-            ) {
-                targetState.scrollToItem(sliceIndex, restore.second)
-            }
+        val firstColumnSize = columnSlices.firstOrNull()?.size ?: 0
+        if (restore != null && tab.pendingLocateFilePath == null && firstColumnSize > 0 && parentFolderResolved) {
+            val targetState = listStates[0]
+            val targetIndex = restore.first.coerceIn(0, firstColumnSize - 1)
+            targetState.scrollToItem(targetIndex, restore.second.coerceAtLeast(0))
             tab.pendingScrollRestore = null
         }
     }
@@ -927,22 +1054,43 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
     LaunchedEffect(
         tab.pendingLocateFilePath,
         tab.activeFolder.uniquePath,
-        tab.activeFolderContent.size,
+        tab.contentSnapshot.size,
         parentFolder,
         parentFolderResolved
     ) {
         val path = tab.pendingLocateFilePath
         if (path != null && parentFolderResolved) {
-            val targetIndex = tab.activeFolderContent.indexOfFirst { it.uniquePath == path }
+            val targetIndex = tab.contentSnapshot.indexOfFirst { it.uniquePath == path }
             if (targetIndex >= 0) {
                 tab.activeListState.scrollToItem(targetIndex + if (parentFolder != null) 1 else 0)
+                tab.pendingScrollRestore = null
                 if (tab.pendingLocateFilePath == path) tab.pendingLocateFilePath = null
+            } else if (tab.activeFolderContent.any { it.uniquePath == path } && tab.selectedTypeFilters.isNotEmpty()) {
+                tab.selectedTypeFilters = emptySet()
+                tab.updateContentSnapshot()
             }
         }
     }
 
+    LaunchedEffect(
+        tab.pendingScrollRestore,
+        tab.pendingLocateFilePath,
+        tab.activeFolder.uniquePath,
+        tab.contentSnapshot.size,
+        parentFolder,
+        parentFolderResolved
+    ) {
+        val restore = tab.pendingScrollRestore
+        if (restore != null && tab.pendingLocateFilePath == null && tab.contentSnapshot.isNotEmpty() && parentFolderResolved) {
+            val maxValid = tab.contentSnapshot.size + if (parentFolder != null) 0 else -1
+            val targetIndex = restore.first.coerceIn(0, maxOf(0, maxValid))
+            tab.activeListState.scrollToItem(targetIndex, restore.second.coerceAtLeast(0))
+            tab.pendingScrollRestore = null
+        }
+    }
+
     fun findGridItemIndex(offset: Offset): Int? {
-        if (tab.activeFolderContent.isEmpty()) return null
+        if (tab.contentSnapshot.isEmpty()) return null
         val x = offset.x.toInt()
         val y = offset.y.toInt()
         val exact = tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
@@ -956,34 +1104,14 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
         } ?: return null
 
         val contentIndex = if (parentFolder != null) itemInfo.index - 1 else itemInfo.index
-        return if (contentIndex in 0 until tab.activeFolderContent.size) contentIndex else null
+        return if (contentIndex in 0 until tab.contentSnapshot.size) contentIndex else null
     }
 
     val density = LocalDensity.current
 
-    LaunchedEffect(
-        tab.pendingScrollRestore,
-        tab.activeFolder.uniquePath,
-        tab.contentSnapshot.size,
-        parentFolderResolved
-    ) {
-        val restore = tab.pendingScrollRestore
-        if (restore != null && tab.contentSnapshot.isNotEmpty() && parentFolderResolved) {
-            val gridIndex = restore.first + if (parentFolder != null) 1 else 0
-            val maxValid = tab.contentSnapshot.size + (if (parentFolder != null) 0 else -1)
-            val validIndex = gridIndex.coerceIn(0, maxOf(0, maxValid))
-            if (tab.activeListState.firstVisibleItemIndex != validIndex ||
-                kotlin.math.abs(tab.activeListState.firstVisibleItemScrollOffset - restore.second) > 10
-            ) {
-                tab.activeListState.scrollToItem(validIndex, restore.second)
-            }
-            tab.pendingScrollRestore = null
-        }
-    }
-
     DisposableEffect(tab.activeFolder.uniquePath, tab.activeListState) {
         tab.onRequestScrollAboveRibbon = { itemIndex ->
-            if (itemIndex in 0 until tab.activeFolderContent.size) {
+            if (itemIndex in 0 until tab.contentSnapshot.size) {
                 val gridIndex = itemIndex + if (parentFolder != null) 1 else 0
                 coroutineScope.launch {
                     val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
@@ -1001,6 +1129,7 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
                         (itemBottom - safeBottom).coerceAtLeast(0f)
                     } else 0f
 
+                    // Wait 60 ms for layout measurements and toolbar/ribbon resize to settle before measuring overlap
                     delay(60)
 
                     val visibleItem = tab.activeListState.layoutInfo.visibleItemsInfo.find { it.index == gridIndex }
@@ -1162,7 +1291,7 @@ private fun ColumnFileItem(
                     } else if (item.isFile()) {
                         tab.openFile(context, item)
                     } else {
-                        tab.openFolder(item, false)
+                        tab.openFolder(item)
                     }
                 }
             }
@@ -1199,6 +1328,7 @@ private fun ColumnFileItem(
                     isSelected = isSelected || tab.highlightedFiles.contains(currentItemPath),
                     fontSize = fontSize.sp,
                     lineHeight = (fontSize + 2).sp,
+                    maxLines = viewConfigs.filenameMaxLines,
                     color = if (isSelected || tab.highlightedFiles.contains(currentItemPath)) {
                         colorScheme.primary
                     } else {
@@ -1277,7 +1407,7 @@ private fun GridFileItem(
                     } else if (item.isFile()) {
                         tab.openFile(context, item)
                     } else {
-                        tab.openFolder(item, false)
+                        tab.openFolder(item)
                     }
                 }
             }
@@ -1326,7 +1456,7 @@ private fun GridFileItem(
                             } else if (item.isFile()) {
                                 tab.openFile(context, item)
                             } else {
-                                tab.openFolder(item, false)
+                                tab.openFolder(item)
                             }
                         }
                     },
@@ -1367,7 +1497,7 @@ private fun GridFileItem(
                             isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
                             fontSize = fontSize.sp,
                             fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-                            maxLines = 2,
+                            maxLines = viewConfigs.filenameMaxLines,
                             lineHeight = (fontSize + 2).sp,
                             textAlign = TextAlign.Center,
                             color = if (tab.highlightedFiles.contains(itemPath)) {
@@ -1387,7 +1517,7 @@ private fun GridFileItem(
                     isFolder = item.isFolder,
                     isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
                     fontSize = (FileItemSizeMap.getFontSize(viewConfigs.itemSize) - 3).sp,
-                    maxLines = 2,
+                    maxLines = viewConfigs.filenameMaxLines,
                     textAlign = TextAlign.Center,
                     color = if (isSelected || tab.highlightedFiles.contains(itemPath)) {
                         colorScheme.primary

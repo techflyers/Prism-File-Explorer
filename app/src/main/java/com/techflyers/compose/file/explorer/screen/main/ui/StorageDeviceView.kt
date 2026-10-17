@@ -4,8 +4,10 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,11 +24,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
@@ -54,8 +58,7 @@ fun StorageDeviceView(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(12.dp)
-            .padding(end = 12.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -69,33 +72,29 @@ fun StorageDeviceView(
             contentDescription = null
         )
         Space(size = 8.dp)
-        Column {
-            Text(text = storageDevice.title)
-            if (storageDevice.totalSize > 0) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(8.dp),
-                        progress = { animatedProgress },
-                        strokeCap = StrokeCap.Round,
-                        color = if (progress > 0.85f) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        }
-                    )
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = storageDevice.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (storageDevice.totalSize > 0) {
+                    val free = (storageDevice.totalSize - storageDevice.usedSize).coerceAtLeast(0L)
                     Space(size = 8.dp)
                     Text(
-                        modifier = Modifier
-                            .alpha(0.8f)
-                            .weight(1f),
-                        text = "${storageDevice.usedSize.toFormattedSize()}/${storageDevice.totalSize.toFormattedSize()}",
+                        text = stringResource(R.string.free_storage, free.toFormattedSize()),
                         fontSize = 12.sp,
-                        textAlign = TextAlign.End,
+                        fontWeight = FontWeight.Medium,
                         color = if (progress > 0.85f) {
                             MaterialTheme.colorScheme.error
                         } else {
@@ -103,6 +102,46 @@ fun StorageDeviceView(
                         }
                     )
                 }
+            }
+            if (storageDevice.totalSize > 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp),
+                    progress = { animatedProgress },
+                    strokeCap = StrokeCap.Round,
+                    color = if (progress > 0.85f) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${storageDevice.usedSize.toFormattedSize()} used",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                    )
+                    Text(
+                        text = "${storageDevice.totalSize.toFormattedSize()} total",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Unavailable",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
             }
         }
     }

@@ -622,7 +622,12 @@ class ShareReceiverActivity : BaseActivity() {
                                     if (created != null) {
                                         currentHolder = created
                                     } else {
-                                        showMsg(getString(R.string.failed_to_create_folder))
+                                        showMsg(
+                                            com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                getString(R.string.failed_to_create_folder),
+                                                currentHolder.lastCreationError
+                                            )
+                                        )
                                     }
                                 }
                             }

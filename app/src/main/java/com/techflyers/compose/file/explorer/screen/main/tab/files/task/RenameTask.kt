@@ -224,9 +224,19 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
                     }
 
                     if (renamed) {
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
                         itemToRename.status = TaskContentStatus.SUCCESS
                     } else {
-                        throw Exception(globalClass.getString(R.string.failed_to_rename_file))
+                        val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                            targetFile = newFile,
+                            isFolder = localFile.isFolder
+                        )
+                        throw Exception(
+                            com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                globalClass.getString(R.string.failed_to_rename_file),
+                                reason
+                            )
+                        )
                     }
                 } catch (e: Exception) {
                     logger.logError(e)

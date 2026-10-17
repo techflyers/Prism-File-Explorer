@@ -148,10 +148,12 @@ class ZipFileHolder(
     }
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val path = "${if (uniquePath.isEmpty()) emptyString else "$uniquePath/"}$name"
         val sourceFile = zipTree.source.file
         val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
                 ArchiveManager.isNativeArchive(sourceFile.extension)
+        var caughtError: Throwable? = null
 
         if (isNative) {
             try {
@@ -162,16 +164,22 @@ class ZipFileHolder(
                     password = zipTree.password
                 )
             } catch (e: Exception) {
+                caughtError = e
                 logger.logError(e)
             }
         } else {
-            val params = ZipParameters().apply {
-                fileNameInZip = path
-                isOverrideExistingFilesInZip = false
-            }
+            try {
+                val params = ZipParameters().apply {
+                    fileNameInZip = path
+                    isOverrideExistingFilesInZip = false
+                }
 
-            ZipFile(zipTree.source.file).use { zipFile ->
-                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                ZipFile(zipTree.source.file).use { zipFile ->
+                    zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                }
+            } catch (e: Exception) {
+                caughtError = e
+                logger.logError(e)
             }
         }
 
@@ -179,14 +187,23 @@ class ZipFileHolder(
 
         zipTree.findNodeByPath(path)?.let {
             onCreated(ZipFileHolder(zipTree, it))
-        } ?: onCreated(null)
+        } ?: run {
+            lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = sourceFile,
+                isFolder = false,
+                throwable = caughtError
+            )
+            onCreated(null)
+        }
     }
 
     override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val path = "${if (uniquePath.isEmpty()) emptyString else "$uniquePath/"}$name"
         val sourceFile = zipTree.source.file
         val isNative = ArchiveManager.isNativeArchivePath(sourceFile.name) ||
                 ArchiveManager.isNativeArchive(sourceFile.extension)
+        var caughtError: Throwable? = null
 
         if (isNative) {
             try {
@@ -197,16 +214,22 @@ class ZipFileHolder(
                     password = zipTree.password
                 )
             } catch (e: Exception) {
+                caughtError = e
                 logger.logError(e)
             }
         } else {
-            val params = ZipParameters().apply {
-                fileNameInZip = "$path/"
-                isOverrideExistingFilesInZip = false
-            }
+            try {
+                val params = ZipParameters().apply {
+                    fileNameInZip = "$path/"
+                    isOverrideExistingFilesInZip = false
+                }
 
-            ZipFile(zipTree.source.file).use { zipFile ->
-                zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                ZipFile(zipTree.source.file).use { zipFile ->
+                    zipFile.addStream(ByteArrayInputStream(ByteArray(0)), params)
+                }
+            } catch (e: Exception) {
+                caughtError = e
+                logger.logError(e)
             }
         }
 
@@ -214,7 +237,14 @@ class ZipFileHolder(
 
         zipTree.findNodeByPath(path.trimEnd('/'))?.let {
             onCreated(ZipFileHolder(zipTree, it))
-        } ?: onCreated(null)
+        } ?: run {
+            lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = sourceFile,
+                isFolder = true,
+                throwable = caughtError
+            )
+            onCreated(null)
+        }
     }
 
     override suspend fun getContentCount() = contentListCount

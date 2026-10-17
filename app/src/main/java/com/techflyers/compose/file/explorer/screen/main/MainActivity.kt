@@ -3,6 +3,9 @@ package com.techflyers.compose.file.explorer.screen.main
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
+import android.provider.Settings
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,8 +23,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -115,6 +122,52 @@ class MainActivity : BaseActivity() {
                             }
                         )
                         return@SafeSurface
+                    }
+
+                    var showBatteryPrompt by remember { mutableStateOf(false) }
+                    LaunchedEffect(onboardingDone) {
+                        if (onboardingDone && !globalClass.preferencesManager.hasCompletedBatteryOptimizationPrompt) {
+                            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                            val ignoring = try {
+                                pm?.isIgnoringBatteryOptimizations(packageName) == true
+                            } catch (_: Exception) { true }
+                            if (ignoring) {
+                                globalClass.preferencesManager.hasCompletedBatteryOptimizationPrompt = true
+                            } else {
+                                showBatteryPrompt = true
+                            }
+                        }
+                    }
+                    if (showBatteryPrompt) {
+                        AlertDialog(
+                            onDismissRequest = {
+                                globalClass.preferencesManager.hasCompletedBatteryOptimizationPrompt = true
+                                showBatteryPrompt = false
+                            },
+                            title = { Text("Battery optimization") },
+                            text = { Text("For reliable background file operations, you can allow the app to ignore battery optimizations. This is optional.") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    globalClass.preferencesManager.hasCompletedBatteryOptimizationPrompt = true
+                                    showBatteryPrompt = false
+                                    try {
+                                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                    } catch (_: Exception) {
+                                        try {
+                                            startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+                                        } catch (_: Exception) {
+                                            showMsg("Open system Settings → Battery to review optimization for this app.")
+                                        }
+                                    }
+                                }) { Text("Review settings") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = {
+                                    globalClass.preferencesManager.hasCompletedBatteryOptimizationPrompt = true
+                                    showBatteryPrompt = false
+                                }) { Text("Don't remind again") }
+                            }
+                        )
                     }
 
                     val coroutineScope = rememberCoroutineScope()
@@ -215,40 +268,48 @@ class MainActivity : BaseActivity() {
                         val density = androidx.compose.ui.platform.LocalDensity.current
                         val edgeSwipeThresholdPx = with(density as Density) { 24.dp.toPx() }
                         val dragThresholdPx = with(density as Density) { 48.dp.toPx() }
-                        val edgeSwipeEnabled = globalClass.preferencesManager.disableNavigationGestures
+                        val isLandscape = LocalConfiguration.current.orientation ==
+                            android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
                         Column(
                             Modifier
                                 .fillMaxSize()
-                                .then(
-                                    if (edgeSwipeEnabled) {
-                                        Modifier.pointerInput(edgeSwipeEnabled) {
-                                            awaitEachGesture {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
-                                                if (down.position.x > edgeSwipeThresholdPx) return@awaitEachGesture
-                                                var totalDrag = 0f
-                                                do {
-                                                    val event = awaitPointerEvent()
-                                                    val drag = event.changes.firstOrNull()?.positionChange()?.x ?: 0f
-                                                    totalDrag += drag
-                                                    if (totalDrag > dragThresholdPx) {
-                                                        event.changes.forEach { it.consume() }
-                                                        drawerScope.launch { drawerState.open() }
-                                                        return@awaitEachGesture
-                                                    }
-                                                } while (event.changes.any { it.pressed })
+                                .pointerInput(drawerState.isOpen) {
+                                    if (drawerState.isOpen) return@pointerInput
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(
+                                            requireUnconsumed = false,
+                                            pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial
+                                        )
+                                        if (down.position.x > edgeSwipeThresholdPx) return@awaitEachGesture
+                                        var totalDrag = 0f
+                                        do {
+                                            val event = awaitPointerEvent(
+                                                androidx.compose.ui.input.pointer.PointerEventPass.Initial
+                                            )
+                                            val drag = event.changes.firstOrNull()?.positionChange()?.x ?: 0f
+                                            if (drag > 0f) {
+                                                totalDrag += drag
+                                                event.changes.forEach { it.consume() }
                                             }
-                                        }
-                                    } else Modifier
-                                )
+                                            if (totalDrag > dragThresholdPx) {
+                                                drawerScope.launch { drawerState.open() }
+                                                return@awaitEachGesture
+                                            }
+                                        } while (event.changes.any { it.pressed })
+                                    }
+                                }
                         ) {
 
                             val moveToolbarToBottom =
                                 globalClass.preferencesManager.moveToolbarToBottom
                             val moveTabsToBottom =
                                 globalClass.preferencesManager.moveTabsToBottom
-                            val autoHideToolbars =
+                            val autoHideToolbars = if (isLandscape) {
+                                globalClass.preferencesManager.autoHideToolbarsLandscape
+                            } else {
                                 globalClass.preferencesManager.autoHideToolbars
+                            }
 
                             // Track scroll direction for auto-hide
                             var toolbarsVisible by remember { mutableStateOf(true) }
@@ -423,8 +484,9 @@ class MainActivity : BaseActivity() {
             val pagerState = rememberPagerState(initialPage = state.selectedTabIndex) {
                 state.tabs.size
             }
+            val activeTabId = state.tabs.getOrNull(state.selectedTabIndex)?.id
 
-            LaunchedEffect(state.selectedTabIndex) {
+            LaunchedEffect(state.selectedTabIndex, activeTabId) {
                 if (pagerState.currentPage isNot state.selectedTabIndex) {
                     pagerState.scrollToPage(state.selectedTabIndex)
                 }
@@ -547,35 +609,52 @@ class MainActivity : BaseActivity() {
                 }
             }
 
-            HorizontalPager(
-                state = pagerState,
-                // Disable swipe-to-switch-tab when navigation gestures are off
-                userScrollEnabled = gesturesEnabled,
+            val taskManager = globalClass.taskManager
+            val bannerVersion = taskManager.taskAddedBannerVersion
+            var showTaskBanner by remember { mutableStateOf(false) }
+            LaunchedEffect(bannerVersion) {
+                if (bannerVersion > 0 && taskManager.hasUnconsumedTaskBanner) {
+                    taskManager.hasUnconsumedTaskBanner = false
+                    showTaskBanner = true
+                    delay(1800)
+                    showTaskBanner = false
+                }
+            }
+
+            androidx.compose.foundation.layout.Box(
                 modifier = Modifier
                     .weight(1f)
-                    .nestedScroll(nestedScrollConnection)
-                    .then(
-                        if (extraNestedScrollConnection != null)
-                            Modifier.nestedScroll(extraNestedScrollConnection)
-                        else Modifier
-                    ),
-                key = { state.tabs[it].id }
-            ) { index ->
-                key(index) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .graphicsLayer {
-                                translationX = -overscrollAmount
-                            },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if (state.tabs.isNotEmpty()) {
-                            val currentTab = state.tabs[index]
-                            when (currentTab) {
-                                is FilesTab -> {
-                                    FilesTabContentView(currentTab)
-                                }
+                    .fillMaxWidth()
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    // Disable swipe-to-switch-tab when navigation gestures are off
+                    userScrollEnabled = gesturesEnabled,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(nestedScrollConnection)
+                        .then(
+                            if (extraNestedScrollConnection != null)
+                                Modifier.nestedScroll(extraNestedScrollConnection)
+                            else Modifier
+                        ),
+                    key = { state.tabs[it].id }
+                ) { index ->
+                    key(index) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = -overscrollAmount
+                                },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (state.tabs.isNotEmpty()) {
+                                val currentTab = state.tabs[index]
+                                when (currentTab) {
+                                    is FilesTab -> {
+                                        FilesTabContentView(currentTab)
+                                    }
 
                                 is HomeTab -> {
                                     HomeTabContentView(currentTab)
@@ -605,15 +684,44 @@ class MainActivity : BaseActivity() {
                                     RemoteExplorerScreen(currentTab)
                                 }
 
-                                is StorageAnalysisTab -> {
-                                    StorageAnalysisScreen(currentTab)
-                                }
+                                    is StorageAnalysisTab -> {
+                                        StorageAnalysisScreen(currentTab)
+                                    }
 
-                                is DuplicateFinderTab -> {
-                                    DuplicateFinderScreen(currentTab)
+                                    is DuplicateFinderTab -> {
+                                        DuplicateFinderScreen(currentTab)
+                                    }
                                 }
                             }
                         }
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showTaskBanner && taskManager.taskAddedBannerMessage.isNotEmpty(),
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(150)),
+                    modifier = Modifier
+                        .align(
+                            if (globalClass.preferencesManager.moveTabsToBottom) {
+                                Alignment.TopCenter
+                            } else {
+                                Alignment.BottomCenter
+                            }
+                        )
+                        .padding(vertical = 72.dp, horizontal = 24.dp)
+                ) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.inverseOnSurface,
+                        shadowElevation = 6.dp
+                    ) {
+                        Text(
+                            text = taskManager.taskAddedBannerMessage,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
                     }
                 }
             }

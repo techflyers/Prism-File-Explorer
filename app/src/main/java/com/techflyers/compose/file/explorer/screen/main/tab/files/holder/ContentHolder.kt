@@ -53,11 +53,16 @@ abstract class ContentHolder {
 
     abstract suspend fun getParent(): ContentHolder?
 
+    @Volatile
+    var lastCreationError: String? = null
+
     open suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = "Cannot create files in this location"
         onCreated(null)
     }
 
     open suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = "Cannot create folders in this location"
         onCreated(null)
     }
 
@@ -101,42 +106,52 @@ abstract class ContentHolder {
             list.removeIf { it.isHidden() }
         }
 
-        if (sortingPrefs.sortMethod == SORT_BY_SHUFFLED) {
-            list.shuffle()
-            if (sortingPrefs.showFoldersFirst) {
-                list.sortWith(Comparator { f1: ContentHolder, f2: ContentHolder ->
+        return sortItemsWithPrefs(list, sortingPrefs)
+    }
+
+    companion object {
+        fun sortItemsWithPrefs(
+            items: List<ContentHolder>,
+            sortingPrefs: com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileSortingPrefs
+        ): ArrayList<ContentHolder> {
+            val list = ArrayList(items)
+            if (sortingPrefs.sortMethod == SORT_BY_SHUFFLED) {
+                list.shuffle()
+                if (sortingPrefs.showFoldersFirst) {
+                    list.sortWith(Comparator { f1: ContentHolder, f2: ContentHolder ->
+                        if (f1.isFolder != f2.isFolder) {
+                            if (f1.isFolder) -1 else 1
+                        } else {
+                            0
+                        }
+                    })
+                }
+                return list
+            }
+
+            val primaryComparator = when (sortingPrefs.sortMethod) {
+                SORT_BY_NAME -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
+                SORT_BY_DATE -> if (sortingPrefs.reverseSorting) sortOlderFirst else sortNewerFirst
+                SORT_BY_SIZE -> if (sortingPrefs.reverseSorting) sortLargerFirst else sortSmallerFirst
+                SORT_BY_TYPE -> if (sortingPrefs.reverseSorting) sortTypeRev else sortType
+                else -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
+            }
+
+            val compositeComparator = if (sortingPrefs.showFoldersFirst) {
+                Comparator { f1: ContentHolder, f2: ContentHolder ->
                     if (f1.isFolder != f2.isFolder) {
                         if (f1.isFolder) -1 else 1
                     } else {
-                        0
+                        primaryComparator.compare(f1, f2)
                     }
-                })
+                }
+            } else {
+                primaryComparator
             }
+
+            list.sortWith(compositeComparator)
             return list
         }
-
-        val primaryComparator = when (sortingPrefs.sortMethod) {
-            SORT_BY_NAME -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
-            SORT_BY_DATE -> if (sortingPrefs.reverseSorting) sortOlderFirst else sortNewerFirst
-            SORT_BY_SIZE -> if (sortingPrefs.reverseSorting) sortLargerFirst else sortSmallerFirst
-            SORT_BY_TYPE -> if (sortingPrefs.reverseSorting) sortTypeRev else sortType
-            else -> if (sortingPrefs.reverseSorting) sortNameRev else sortName
-        }
-
-        val compositeComparator = if (sortingPrefs.showFoldersFirst) {
-            Comparator { f1: ContentHolder, f2: ContentHolder ->
-                if (f1.isFolder != f2.isFolder) {
-                    if (f1.isFolder) -1 else 1
-                } else {
-                    primaryComparator.compare(f1, f2)
-                }
-            }
-        } else {
-            primaryComparator
-        }
-
-        list.sortWith(compositeComparator)
-        return list
     }
 
     fun isApk(): Boolean = extension == apkFileType

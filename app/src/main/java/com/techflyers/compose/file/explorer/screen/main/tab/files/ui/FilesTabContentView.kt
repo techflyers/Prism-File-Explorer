@@ -99,7 +99,7 @@ fun Dialogs(tab: FilesTab) {
         tab = tab,
         onDismissRequest = {
             tab.toggleSortingMenu(false)
-            tab.reloadFiles()
+            tab.applySortingChange()
         }
     )
 
@@ -183,7 +183,7 @@ fun Dialogs(tab: FilesTab) {
                 if (mode == com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.UNLOCK) {
                     val target = tab.activeFolderContent.find { it.uniquePath == targetPath }
                     if (target != null) {
-                        tab.openFolder(target, false)
+                        tab.openFolder(target)
                     }
                 } else {
                     tab.reloadFiles()

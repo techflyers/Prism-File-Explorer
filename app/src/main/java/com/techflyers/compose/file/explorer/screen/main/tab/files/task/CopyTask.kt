@@ -40,6 +40,7 @@ class CopyTask(
     private var canPerformAtomicFileMove = true
     private var skippedSourceDeletion = false
     val customTargetNames: MutableMap<String, String> = mutableMapOf()
+    private val duplicatedFolderMappings: MutableMap<String, String> = mutableMapOf()
 
     fun setCustomTargetName(sourceUniquePath: String, targetName: String) {
         if (targetName.isNotBlank()) {
@@ -229,18 +230,39 @@ class CopyTask(
         }
     }
 
+    @Volatile
+    private var lastOperationException: Throwable? = null
+
     private fun handleTaskError(e: Exception) {
         logger.logError(e)
+        val destFile = (parameters?.destHolder as? LocalFileHolder)?.file
+            ?: (parameters?.destHolder as? ZipFileHolder)?.zipTree?.source?.file
+        val diagnostic = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+            targetFile = destFile,
+            throwable = e
+        )
         markAsFailed(
             globalClass.resources.getString(
                 R.string.task_summary_failed,
-                e.message ?: globalClass.getString(R.string.unknown_error)
+                diagnostic
             )
         )
     }
 
     private fun finalizeTask() {
         if (progressMonitor.status == TaskStatus.RUNNING) {
+            val failedItems = pendingFiles.filter { it.status == TaskContentStatus.FAILED }
+            if (failedItems.isNotEmpty()) {
+                val destFile = (parameters?.destHolder as? LocalFileHolder)?.file
+                    ?: (parameters?.destHolder as? ZipFileHolder)?.zipTree?.source?.file
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = destFile,
+                    throwable = lastOperationException
+                )
+                markAsFailed(reason)
+                return
+            }
+
             (parameters?.destHolder as? ZipFileHolder)?.let { destZip ->
                 destZip.zipTree.invalidate()
                 destZip.zipTree.prepare()
@@ -269,7 +291,7 @@ class CopyTask(
 
     private fun preparePendingFiles(sourcePath: String) {
         val destHolder = parameters!!.destHolder
-        val renameInSameFolder = destHolder.uniquePath == sourcePath
+        val renameInSameFolder = false
         var hasInvalidNesting = false
         val isSameZipFiles = (sourceFiles.first() is ZipFileHolder && destHolder is ZipFileHolder)
                 && (sourceFiles.first() as ZipFileHolder).zipTree.source.uniquePath == destHolder.zipTree.source.uniquePath
@@ -335,6 +357,15 @@ class CopyTask(
                 true
             }
 
+            TaskContentStatus.DUPLICATE_FOLDER -> {
+                if (item.rootFolderName != null || item.content.isFolder) {
+                    applyDuplicateFolderResolution(item)
+                } else {
+                    item.status = TaskContentStatus.AUTO_RENAME
+                }
+                true
+            }
+
             TaskContentStatus.SKIP -> {
                 item.status = TaskContentStatus.SKIP
                 true
@@ -359,16 +390,68 @@ class CopyTask(
         }
     }
 
+    private fun computeUniqueFolderCopyName(folderName: String): String {
+        val destHolder = parameters?.destHolder
+        var candidate = "$folderName (copy)"
+        var counter = 2
+        when (destHolder) {
+            is LocalFileHolder -> {
+                while (File(destHolder.file, candidate).exists()) {
+                    candidate = "$folderName (copy $counter)"
+                    counter++
+                }
+            }
+            is ShizukuFileHolder -> {
+                fun buildPath(name: String) = if (destHolder.uniquePath == "/") "/$name" else "${destHolder.uniquePath}/$name"
+                while (ShizukuManager.exists(buildPath(candidate))) {
+                    candidate = "$folderName (copy $counter)"
+                    counter++
+                }
+            }
+            is RemoteFileHolder -> {
+                while (destHolder.client.exists(RemotePaths.join(destHolder.remotePath, candidate))) {
+                    candidate = "$folderName (copy $counter)"
+                    counter++
+                }
+            }
+        }
+        return candidate
+    }
+
+    private fun applyDuplicateFolderResolution(item: TaskContentItem) {
+        val rootFolder = item.rootFolderName ?: if (item.content.isFolder) item.content.displayName else item.relativePath.substringBefore("/", "")
+        if (rootFolder.isEmpty()) {
+            item.status = TaskContentStatus.AUTO_RENAME
+            return
+        }
+        val newFolderName = duplicatedFolderMappings.getOrPut(rootFolder) {
+            computeUniqueFolderCopyName(rootFolder)
+        }
+        pendingFiles.forEach { pending ->
+            if (pending.rootFolderName == rootFolder || pending.relativePath == rootFolder || pending.relativePath.startsWith("$rootFolder/") || pending.relativePath.startsWith("$rootFolder\\")) {
+                pending.relativePath = when {
+                    pending.relativePath == rootFolder -> newFolderName
+                    pending.relativePath.startsWith("$rootFolder/") -> newFolderName + pending.relativePath.substring(rootFolder.length)
+                    pending.relativePath.startsWith("$rootFolder\\") -> newFolderName + pending.relativePath.substring(rootFolder.length)
+                    else -> pending.relativePath
+                }
+                if (pending.status == TaskContentStatus.CONFLICT || pending.status == TaskContentStatus.DUPLICATE_FOLDER) {
+                    pending.status = TaskContentStatus.PENDING
+                }
+            }
+        }
+    }
+
     private fun getUniqueLocalFile(file: File): File {
         if (!file.exists()) return file
         val parent = file.parentFile ?: return file
         val nameWithoutExt = file.nameWithoutExtension
         val ext = if (file.extension.isNotEmpty()) ".${file.extension}" else ""
-        var counter = 1
-        var candidate = File(parent, "$nameWithoutExt ($counter)$ext")
+        var candidate = File(parent, "$nameWithoutExt (copy)$ext")
+        var counter = 2
         while (candidate.exists()) {
+            candidate = File(parent, "$nameWithoutExt (copy $counter)$ext")
             counter++
-            candidate = File(parent, "$nameWithoutExt ($counter)$ext")
         }
         return candidate
     }
@@ -422,8 +505,14 @@ class CopyTask(
             }
 
             val local = item.content as LocalFileHolder
-            if (local.file.exists()) {
-                var deleted = local.file.deleteRecursively()
+            val destHolder = parameters?.destHolder
+            val isMovedOntoSelf = destHolder is LocalFileHolder && item.status != TaskContentStatus.AUTO_RENAME && run {
+                val targetFile = File(destHolder.file, item.relativePath)
+                runCatching { targetFile.canonicalPath == local.file.canonicalPath }
+                    .getOrDefault(targetFile.absolutePath == local.file.absolutePath)
+            }
+            if (!isMovedOntoSelf && local.file.exists()) {
+                val deleted = local.file.deleteRecursively()
                 if (!deleted && ShizukuManager.isPrivileged) {
                     ShizukuManager.delete(local.uniquePath)
                 }
@@ -536,6 +625,20 @@ class CopyTask(
                 (item.content as LocalFileHolder).file.length()
             } else 0L
         }
+        if (!deleteSourceFiles && totalBytes > 0L) {
+            try {
+                val statFs = android.os.StatFs(destinationHolder.file.absolutePath)
+                if (statFs.availableBytes < totalBytes) {
+                    markAsFailed(
+                        com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                            targetFile = destinationHolder.file,
+                            requiredBytes = totalBytes
+                        )
+                    )
+                    return
+                }
+            } catch (_: Exception) {}
+        }
         var bytesCopiedSoFar = 0L
 
         progressMonitor.apply {
@@ -557,8 +660,13 @@ class CopyTask(
                 && item.status isNot TaskContentStatus.REPLACE
                 && item.status isNot TaskContentStatus.CONFLICT
                 && item.status isNot TaskContentStatus.AUTO_RENAME
+                && item.status isNot TaskContentStatus.DUPLICATE_FOLDER
             ) {
                 return@forEachIndexed
+            }
+
+            if (item.status == TaskContentStatus.DUPLICATE_FOLDER) {
+                applyDuplicateFolderResolution(item)
             }
 
             val sourceFile = (item.content as LocalFileHolder).file
@@ -585,12 +693,13 @@ class CopyTask(
             }
 
             if (item.status == TaskContentStatus.PENDING) {
-                val conflictExists = destinationFile.exists() && destinationFile.isFile
+                val conflictExists = destinationFile.exists() && (destinationFile.isFile || (item.content.isFolder && item.relativePath == item.rootFolderName))
                 if (conflictExists && !handleConflict(item)) {
                     return
                 }
             }
 
+            destinationFile = File(destinationHolder.file, item.relativePath)
             if (item.status == TaskContentStatus.AUTO_RENAME && destinationFile.exists()) {
                 destinationFile = getUniqueLocalFile(destinationFile)
             }
@@ -618,6 +727,7 @@ class CopyTask(
                             }
                         }
                     ) {
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(destinationFile)
                         TaskContentStatus.SUCCESS
                     } else {
                         TaskContentStatus.FAILED
@@ -636,6 +746,15 @@ class CopyTask(
         overwrite: Boolean,
         onBytesCopied: (bytes: Long) -> Unit
     ): Boolean {
+        val isSameFile = runCatching { source.canonicalPath == destination.canonicalPath }
+            .getOrDefault(source.absolutePath == destination.absolutePath)
+        if (isSameFile) {
+            if (overwrite) {
+                onBytesCopied(source.length())
+                return true
+            }
+            return false
+        }
         if (destination.exists()) {
             if (!overwrite) return false
             destination.delete()
@@ -673,6 +792,7 @@ class CopyTask(
             }
             true
         } catch (e: Exception) {
+            lastOperationException = e
             logger.logError(e)
             try { destination.delete() } catch (_: Exception) {}
             false
@@ -687,6 +807,15 @@ class CopyTask(
     ): Boolean {
         return try {
             if (source.isFile) {
+                val isSameFile = runCatching { source.canonicalPath == destination.canonicalPath }
+                    .getOrDefault(source.absolutePath == destination.absolutePath)
+                if (isSameFile) {
+                    if (overwrite) {
+                        onBytesCopied(source.length())
+                        return true
+                    }
+                    return false
+                }
                 destination.parentFile?.mkdirs()
                 if (destination.parentFile?.exists() != true && ShizukuManager.isPrivileged) {
                     ShizukuManager.createDirectory(destination.parentFile?.absolutePath ?: "")
@@ -718,13 +847,23 @@ class CopyTask(
                     streamCopy(source, destination, overwrite, onBytesCopied)
                 }
             } else {
-                destination.mkdirs() || destination.exists()
-                if (!destination.exists() && ShizukuManager.isPrivileged) {
-                    ShizukuManager.createDirectory(destination.absolutePath)
+                var dirCreated = destination.exists() && destination.isDirectory
+                if (!dirCreated) {
+                    try {
+                        Files.createDirectories(destination.toPath())
+                        dirCreated = true
+                    } catch (e: Exception) {
+                        lastOperationException = e
+                        dirCreated = destination.mkdirs() || destination.exists()
+                    }
                 }
-                true
+                if (!dirCreated && ShizukuManager.isPrivileged) {
+                    dirCreated = ShizukuManager.createDirectory(destination.absolutePath)
+                }
+                dirCreated
             }
         } catch (e: Exception) {
+            lastOperationException = e
             if (ShizukuManager.isPrivileged) {
                 if (deleteSourceFiles) {
                     val res = ShizukuManager.rename(source.absolutePath, destination.absolutePath)
@@ -1648,7 +1787,8 @@ class CopyTask(
                         TaskContentItem(
                             content = LocalFileHolder(file),
                             relativePath = adjustedPath,
-                            status = TaskContentStatus.PENDING
+                            status = TaskContentStatus.PENDING,
+                            rootFolderName = renamedName
                         )
                     }
                 }
@@ -1680,7 +1820,8 @@ class CopyTask(
                     TaskContentItem(
                         content = ZipFileHolder(startFile.zipTree, node),
                         relativePath = adjustedPath,
-                        status = TaskContentStatus.PENDING
+                        status = TaskContentStatus.PENDING,
+                        rootFolderName = renamedName
                     )
                 }
             }
@@ -1701,7 +1842,8 @@ class CopyTask(
                 TaskContentItem(
                     content = holder,
                     relativePath = relative,
-                    status = TaskContentStatus.PENDING
+                    status = TaskContentStatus.PENDING,
+                    rootFolderName = relativeRoot
                 )
             )
             if (holder.isFolder) {
@@ -1841,7 +1983,8 @@ class CopyTask(
                 TaskContentItem(
                     content = holder,
                     relativePath = relative,
-                    status = TaskContentStatus.PENDING
+                    status = TaskContentStatus.PENDING,
+                    rootFolderName = relativeRoot
                 )
             )
             if (holder.isFolder) {
@@ -2277,8 +2420,13 @@ class CopyTask(
         if (item.status isNot TaskContentStatus.PENDING
             && item.status isNot TaskContentStatus.REPLACE
             && item.status isNot TaskContentStatus.CONFLICT
+            && item.status isNot TaskContentStatus.AUTO_RENAME
+            && item.status isNot TaskContentStatus.DUPLICATE_FOLDER
         ) {
             return true
+        }
+        if (item.status == TaskContentStatus.DUPLICATE_FOLDER) {
+            applyDuplicateFolderResolution(item)
         }
         updateProgress(index, item.content.displayName)
         if (item.status == TaskContentStatus.CONFLICT && !handleConflict(item)) {

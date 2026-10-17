@@ -231,7 +231,17 @@ class DeleteTask(
         }
 
         if (failedCount > 0 && failedCount == total) {
-            markAsFailed(globalClass.resources.getString(R.string.task_summary_failed, "Failed to delete files"))
+            val firstFailed = (pendingContent.firstOrNull { it.status == TaskContentStatus.FAILED }?.source as? LocalFileHolder)?.file
+            val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = firstFailed,
+                isFolder = firstFailed?.isDirectory == true
+            )
+            markAsFailed(
+                com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                    "Failed to delete files",
+                    reason
+                )
+            )
         }
     }
 

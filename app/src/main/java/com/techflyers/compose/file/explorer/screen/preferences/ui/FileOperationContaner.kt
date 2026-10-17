@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoDelete
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
@@ -64,6 +65,19 @@ fun FileOperationContainer() {
     }
 
     Container(title = stringResource(R.string.file_operation)) {
+        PreferenceItem(
+            label = "Auto-rename on file conflict",
+            supportingText = "Automatically duplicate with a new name instead of asking to duplicate, skip, overwrite, or cancel",
+            icon = Icons.Rounded.DriveFileRenameOutline,
+            switchState = preferences.autoRenameOnConflict,
+            onSwitchChange = { preferences.autoRenameOnConflict = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
         PreferenceItem(
             label = stringResource(R.string.auto_sign_merged_apk_bundle_files),
             supportingText = stringResource(R.string.auto_sign_merged_apk_bundle_files_description),

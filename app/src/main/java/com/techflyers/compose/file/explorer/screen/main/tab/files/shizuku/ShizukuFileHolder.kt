@@ -160,6 +160,7 @@ class ShizukuFileHolder(
     }
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val targetPath = if (uniquePath == "/") "/$name" else "$uniquePath/$name"
         val success = ShizukuManager.createFile(targetPath)
         if (success) {
@@ -175,11 +176,16 @@ class ShizukuFileHolder(
             )
             onCreated(newHolder)
         } else {
+            lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = File(targetPath),
+                isFolder = false
+            )
             onCreated(null)
         }
     }
 
     override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val targetPath = if (uniquePath == "/") "/$name" else "$uniquePath/$name"
         val success = ShizukuManager.createDirectory(targetPath)
         if (success) {
@@ -195,6 +201,10 @@ class ShizukuFileHolder(
             )
             onCreated(newHolder)
         } else {
+            lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = File(targetPath),
+                isFolder = true
+            )
             onCreated(null)
         }
     }

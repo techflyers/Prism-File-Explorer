@@ -157,7 +157,12 @@ fun CreateNewFileDialog(
                                         tab.activeFolder.createSubFile(finalName) { newFile ->
                                             tab.isLoading = false
                                             if (newFile == null) {
-                                                globalClass.showMsg(R.string.failed_to_create_file)
+                                                globalClass.showMsg(
+                                                    com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                        globalClass.getString(R.string.failed_to_create_file),
+                                                        tab.activeFolder.lastCreationError
+                                                    )
+                                                )
                                             } else {
                                                 tab.onNewFileCreated(
                                                     newFile,
@@ -193,7 +198,12 @@ fun CreateNewFileDialog(
                                         tab.activeFolder.createSubFolder(finalName) { newFile ->
                                             tab.isLoading = false
                                             if (newFile == null) {
-                                                globalClass.showMsg(R.string.failed_to_create_folder)
+                                                globalClass.showMsg(
+                                                    com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                        globalClass.getString(R.string.failed_to_create_folder),
+                                                        tab.activeFolder.lastCreationError
+                                                    )
+                                                )
                                             } else {
                                                 tab.onNewFileCreated(
                                                     newFile,

@@ -2,6 +2,7 @@ package com.techflyers.compose.file.explorer.screen.main.tab.home.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -32,6 +33,10 @@ import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Checkbox
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SearchDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -138,7 +143,7 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         isRefreshing = true
         scope.launch {
             withContext(Dispatchers.IO) {
-                val d1 = async { tab.refreshRecentFiles() }
+                val d1 = async { tab.refreshRecentFilesSuspend(forceInvalidate = true) }
                 val d2 = async { tab.getPinnedFiles() }
                 val d3 = async { mainActivityManager.updateStorageDevices() }
                 d1.await()
@@ -222,6 +227,12 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         }
     }
 
+    SearchDialog(
+        show = tab.showSearchDialog,
+        tab = tab.internalStorageSearchTab,
+        onDismissRequest = { tab.showSearchDialog = false }
+    )
+
     val homeScroll = tab.scrollState
     val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
 
@@ -233,10 +244,48 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                 .fastScrollbar(homeScroll),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!preferencesManager.hideHomeSearchBar) {
+                // Quick Search Internal Storage bar on Home tab
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(top = 12.dp)
+                        .background(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                        .border(
+                            width = 0.5.dp,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { tab.showSearchDialog = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = stringResource(R.string.search),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Search Internal Storage",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
             enabledSections.forEach { section ->
                 when (section.type) {
                     HomeSectionType.RECENT_FILES -> {
-                        RecentFilesSection(tab = tab, mainActivityManager = mainActivityManager)
+                        if (!tab.isRecentDisabledOnHome()) {
+                            RecentFilesSection(tab = tab, mainActivityManager = mainActivityManager)
+                        }
                     }
 
                     HomeSectionType.CATEGORIES -> {
@@ -244,7 +293,9 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                     }
 
                     HomeSectionType.STORAGE -> {
-                        StorageSection(mainActivityManager = mainActivityManager)
+                        StorageSection(
+                            mainActivityManager = mainActivityManager
+                        )
                     }
 
                     HomeSectionType.BOOKMARKS -> {
@@ -536,18 +587,123 @@ private fun RecentFilesSection(
 ) {
     val context = LocalContext.current
 
-    // Recent files
-    Text(
+    // Recent files header + subtle refresh progress indicator
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .padding(top = 12.dp),
-        text = stringResource(R.string.recent_files),
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    )
+            .padding(top = 12.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.recent_files),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        AnimatedVisibility(visible = tab.isLoadingRecentFiles && tab.recentFiles.isNotEmpty()) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+        }
+    }
 
-    if (tab.recentFiles.isEmpty()) {
+    if (tab.recentFiles.isEmpty() && tab.isLoadingRecentFiles) {
+        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "recentFilesFluidLoading")
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.85f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(
+                    durationMillis = 850,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                ),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "recentFilesPulseAlpha"
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(4) {
+                    Column(
+                        modifier = Modifier
+                            .size(110.dp, 128.dp)
+                            .padding(horizontal = 6.dp)
+                            .background(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = pulseAlpha)
+                            )
+                            .border(
+                                width = 0.5.dp,
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(2f)
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulseAlpha * 0.65f)
+                                )
+                        )
+                        Column(
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.82f)
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha * 0.35f)
+                                    )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.55f)
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha * 0.22f)
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else if (tab.recentFiles.isEmpty()) {
         Text(
             modifier = Modifier
                 .fillMaxWidth()
@@ -679,35 +835,71 @@ private fun RecentFilesSection(
 private fun CategoriesSection(
     tab: HomeTab
 ) {
-    // Quick access tiles
-    Text(
+    val prefs = globalClass.preferencesManager
+    // Quick access tiles header with Customize Categories icon
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .padding(top = 12.dp),
-        text = stringResource(R.string.categories),
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = stringResource(R.string.categories),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        IconButton(
+            onClick = { tab.showCustomizeCategoriesDialog = true },
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Tune,
+                contentDescription = "Customize Categories",
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
 
-    val categories = tab.getMainCategories()
+    if (tab.showCustomizeCategoriesDialog) {
+        CustomizeCategoriesDialog(
+            tab = tab,
+            onDismiss = { tab.showCustomizeCategoriesDialog = false }
+        )
+    }
+
+    val categories = remember(
+        prefs.showRecentInCategories,
+        prefs.disabledHomeCategories,
+        prefs.homeCategoriesOrder,
+        tab.showCustomizeCategoriesDialog
+    ) {
+        tab.getMainCategories()
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
     ) {
-        categories.dropLast(1).chunked(3).forEach { rowItems ->
+        val remainder = categories.size % 3
+        val mainChunk = if (remainder == 1) categories.dropLast(1) else categories
+        mainChunk.chunked(3).forEach { rowItems ->
             Row(Modifier.fillMaxWidth()) {
                 rowItems.forEach { category ->
                     HomeCategoryTile(category, Modifier.weight(1f))
                 }
-                repeat(3 - rowItems.size) {
-                    Spacer(Modifier.weight(1f))
+                if (rowItems.size < 3 && remainder != 2) {
+                    repeat(3 - rowItems.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
-        categories.lastOrNull()?.let { category ->
-            HomeCategoryTile(category, Modifier.fillMaxWidth(), fullWidth = true)
+        if (remainder == 1) {
+            categories.lastOrNull()?.let { category ->
+                HomeCategoryTile(category, Modifier.fillMaxWidth(), fullWidth = true)
+            }
         }
     }
 }
@@ -1029,3 +1221,190 @@ fun ReorderPinnedFilesDialog(
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomizeCategoriesDialog(
+    tab: HomeTab,
+    onDismiss: () -> Unit
+) {
+    val prefs = globalClass.preferencesManager
+    val allAvailable = remember { tab.getAllAvailableCategories().toMap() }
+    val orderedIds = remember {
+        mutableStateListOf<String>().apply {
+            addAll(prefs.homeCategoriesOrder)
+        }
+    }
+    var disabledSet by remember {
+        mutableStateOf(prefs.disabledHomeCategories)
+    }
+    var showRecentInCategories by remember {
+        mutableStateOf(prefs.showRecentInCategories)
+    }
+
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(
+        lazyListState = lazyListState,
+        onMove = { from, to ->
+            orderedIds.add(to.index, orderedIds.removeAt(from.index))
+        }
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnClickOutside = false,
+            decorFitsSystemWindows = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        val color = MaterialTheme.colorScheme.surfaceContainerHigh
+        val useDarkIcons = !isSystemInDarkTheme()
+        val systemUiController = rememberSystemUiController()
+        DisposableEffect(systemUiController, useDarkIcons) {
+            systemUiController.setStatusBarColor(color = color, darkIcons = useDarkIcons)
+            onDispose {}
+        }
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "Customize Categories",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = null
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                prefs.homeCategoriesOrder = orderedIds.toList()
+                                prefs.disabledHomeCategories = disabledSet
+                                prefs.showRecentInCategories = showRecentInCategories
+                                if (!showRecentInCategories && !prefs.showRecentInSidebar) {
+                                    prefs.disableRecentOnHomeTab = false
+                                }
+                                onDismiss()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Save"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(vertical = 16.dp)
+            ) {
+                LazyColumn(
+                    state = lazyListState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(orderedIds, key = { it }) { id ->
+                        val category = allAvailable[id] ?: return@items
+                        val isEnabled = if (id == "recent") {
+                            showRecentInCategories && id !in disabledSet
+                        } else {
+                            id !in disabledSet
+                        }
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = id
+                        ) { isDragging ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDragging)
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    else
+                                        MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (isDragging) 8.dp else 2.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                                shape = RoundedCornerShape(10.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = category.icon,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = category.name,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.DragHandle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .padding(end = 8.dp)
+                                            .draggableHandle()
+                                    )
+                                    Checkbox(
+                                        checked = isEnabled,
+                                        onCheckedChange = { checked ->
+                                            if (id == "recent") {
+                                                showRecentInCategories = checked
+                                            }
+                                            disabledSet = if (checked) {
+                                                disabledSet - id
+                                            } else {
+                                                disabledSet + id
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

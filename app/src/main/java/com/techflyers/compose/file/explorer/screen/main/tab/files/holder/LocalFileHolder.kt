@@ -600,34 +600,75 @@ class LocalFileHolder(
     suspend fun getContentCount(showHidden: Boolean): ContentCount = getContentCount()
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
-        File(file, name).let { newFile ->
+        lastCreationError = null
+        val newFile = File(file, name)
+        var caughtError: Throwable? = null
+        try {
+            java.nio.file.Files.createFile(newFile.toPath())
+            com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
+            onCreated(LocalFileHolder(newFile))
+            return
+        } catch (e: Throwable) {
+            caughtError = e
+        }
+        try {
             if (newFile.createNewFile()) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
                 onCreated(LocalFileHolder(newFile))
                 return
             }
-            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
-                if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createFile(newFile.absolutePath)) {
-                    onCreated(LocalFileHolder(newFile))
-                    return
-                }
+        } catch (e: Throwable) {
+            if (caughtError == null) caughtError = e
+        }
+        if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createFile(newFile.absolutePath)) {
+                com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
+                onCreated(LocalFileHolder(newFile))
+                return
             }
         }
+        lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+            targetFile = newFile,
+            isFolder = false,
+            throwable = caughtError
+        )
         onCreated(null)
     }
 
     override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
-        File(file, name).let { newFolder ->
-            if (newFolder.exists() || newFolder.mkdir()) {
+        lastCreationError = null
+        val newFolder = File(file, name)
+        if (newFolder.exists() && newFolder.isDirectory) {
+            onCreated(LocalFileHolder(newFolder))
+            return
+        }
+        var caughtError: Throwable? = null
+        try {
+            java.nio.file.Files.createDirectory(newFolder.toPath())
+            onCreated(LocalFileHolder(newFolder))
+            return
+        } catch (e: Throwable) {
+            caughtError = e
+        }
+        try {
+            if (newFolder.mkdir()) {
                 onCreated(LocalFileHolder(newFolder))
                 return
             }
-            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
-                if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createDirectory(newFolder.absolutePath)) {
-                    onCreated(LocalFileHolder(newFolder))
-                    return
-                }
+        } catch (e: Throwable) {
+            if (caughtError == null) caughtError = e
+        }
+        if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createDirectory(newFolder.absolutePath)) {
+                onCreated(LocalFileHolder(newFolder))
+                return
             }
         }
+        lastCreationError = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+            targetFile = newFolder,
+            isFolder = true,
+            throwable = caughtError
+        )
         onCreated(null)
     }
 
@@ -723,14 +764,7 @@ class LocalFileHolder(
         }
         details = emptyString
         resetCachedTimestamp()
-        try {
-            MediaScannerConnection.scanFile(
-                globalClass,
-                arrayOf(file.absolutePath),
-                null,
-                null
-            )
-        } catch (_: Exception) {}
+        com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(file)
     }
 
     fun readText(): String {

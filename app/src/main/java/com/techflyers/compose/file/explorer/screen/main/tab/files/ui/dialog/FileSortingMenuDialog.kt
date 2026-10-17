@@ -94,6 +94,7 @@ fun FileSortingMenuDialog(
                     prefs.reverse = reverseOrder
                     prefs.defaultSortMethod = sortingMethod
                 }
+                tab.updateSortingConfig()
                 onDismissRequest()
             }
         ) {

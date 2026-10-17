@@ -32,22 +32,32 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,22 +73,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -91,15 +100,24 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.block
 import com.techflyers.compose.file.explorer.common.copyToClipboard
+import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.common.ui.fastScrollbar
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.Companion.SEARCH
 import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchFileFilter
 import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchManager
 import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchOptions
 import com.techflyers.compose.file.explorer.screen.main.tab.files.search.SearchResult
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.FileItemRow
+import com.techflyers.compose.file.explorer.screen.main.ui.TooltipIconButton
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -210,8 +228,16 @@ fun SearchDialog(
                     searchManager = searchManager,
                     tab = tab,
                     context = context,
-                    onExpandClick = {
-                        searchManager.onExpand()
+                    onExpandClick = { selectedHolders ->
+                        val expandedTab = FilesTab(VirtualFileHolder(SEARCH))
+                        if (selectedHolders.isNotEmpty()) {
+                            selectedHolders.forEach { holder ->
+                                expandedTab.selectedFiles[holder.uniquePath] = holder
+                            }
+                            expandedTab.selectedFilesCount = expandedTab.selectedFiles.size
+                            expandedTab.updateSelectedFilesSize()
+                        }
+                        globalClass.mainActivityManager.addTabAndSelect(expandedTab)
                         onDismissRequest()
                     },
                     onDismissRequest = onDismissRequest
@@ -603,9 +629,63 @@ private fun SearchResultsSection(
     searchManager: SearchManager,
     tab: FilesTab,
     context: android.content.Context,
-    onExpandClick: () -> Unit,
+    onExpandClick: (List<ContentHolder>) -> Unit,
     onDismissRequest: () -> Unit
 ) {
+    val selectedSearchFiles = remember { mutableStateMapOf<String, ContentHolder>() }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showPropertiesDialog by remember { mutableStateOf(false) }
+
+    val distinctResultHolders = remember(searchManager.searchResults.size, searchManager.searchResults.toList()) {
+        searchManager.searchResults.map { it.file }.distinctBy { it.uniquePath }
+    }
+
+    LaunchedEffect(searchManager.searchResults.size) {
+        if (searchManager.searchResults.isEmpty()) {
+            selectedSearchFiles.clear()
+        }
+    }
+
+    val isSelectionMode = selectedSearchFiles.isNotEmpty()
+    val allSelected = distinctResultHolders.isNotEmpty() && selectedSearchFiles.size == distinctResultHolders.size
+
+    fun toggleSelectItem(holder: ContentHolder) {
+        if (selectedSearchFiles.containsKey(holder.uniquePath)) {
+            selectedSearchFiles.remove(holder.uniquePath)
+        } else {
+            selectedSearchFiles[holder.uniquePath] = holder
+        }
+    }
+
+    fun toggleSelectAll() {
+        if (allSelected) {
+            selectedSearchFiles.clear()
+        } else {
+            distinctResultHolders.forEach { holder ->
+                selectedSearchFiles[holder.uniquePath] = holder
+            }
+        }
+    }
+
+    DeleteConfirmationDialog(
+        show = showDeleteDialog,
+        tab = tab,
+        customFiles = selectedSearchFiles.values.toList(),
+        onDeleted = { deletedHolders ->
+            val deletedSet = deletedHolders.map { it.uniquePath }.toSet()
+            searchManager.searchResults.removeAll { it.file.uniquePath in deletedSet }
+            selectedSearchFiles.clear()
+        },
+        onDismissRequest = { showDeleteDialog = false }
+    )
+
+    FilePropertiesDialog(
+        show = showPropertiesDialog,
+        tab = tab,
+        customSelection = selectedSearchFiles.values.toList(),
+        onDismissRequest = { showPropertiesDialog = false }
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -620,22 +700,56 @@ private fun SearchResultsSection(
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = stringResource(R.string.search_results, searchManager.searchResults.size),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.primary
-            )
+            if (isSelectionMode) {
+                val foldersCount = selectedSearchFiles.values.count { it.isFolder }
+                val filesCount = selectedSearchFiles.size - foldersCount
+                IconButton(
+                    onClick = { selectedSearchFiles.clear() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.deselect_all),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Space(6.dp)
+                Text(
+                    text = "${selectedSearchFiles.size} selected (📁 $foldersCount  📄 $filesCount)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.search_results, searchManager.searchResults.size),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
             if (searchManager.searchResults.isNotEmpty()) {
                 Spacer(Modifier.weight(1f))
                 TextButton(
-                    onClick = { searchManager.clearResults() }
+                    onClick = { toggleSelectAll() }
                 ) {
-                    Text(stringResource(R.string.clear))
+                    Text(
+                        stringResource(
+                            if (allSelected) R.string.deselect_all else R.string.select_all
+                        )
+                    )
+                }
+                if (!isSelectionMode) {
+                    TextButton(
+                        onClick = { searchManager.clearResults() }
+                    ) {
+                        Text(stringResource(R.string.clear))
+                    }
                 }
                 if (!searchManager.isSearching) {
-                    Space(8.dp)
-                    TextButton(onClick = onExpandClick) {
+                    Space(4.dp)
+                    TextButton(onClick = { onExpandClick(selectedSearchFiles.values.toList()) }) {
                         Text(stringResource(R.string.expand))
                     }
                 }
@@ -649,7 +763,8 @@ private fun SearchResultsSection(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
@@ -671,21 +786,38 @@ private fun SearchResultsSection(
             LazyColumn(
                 state = resultsListState,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .fastScrollbar(resultsListState),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(
                     searchManager.searchResults,
                     key = { index, item -> "${item.file.uniquePath}_${item.matchType}_$index" }
-                ) { index, searchResult ->
+                ) { _, searchResult ->
+                    val isItemSelected = selectedSearchFiles.containsKey(searchResult.file.uniquePath)
                     SearchResultItem(
                         searchResult = searchResult,
+                        isSelected = isItemSelected,
+                        isSelectionMode = isSelectionMode,
+                        onToggleSelect = { toggleSelectItem(searchResult.file) },
                         onItemClick = {
-                            if (searchResult.file.isFile()) {
+                            if (isSelectionMode) {
+                                toggleSelectItem(searchResult.file)
+                            } else if (searchResult.file.isFile()) {
                                 tab.openFile(context, searchResult.file)
                             } else {
-                                tab.openFolder(searchResult.file, rememberListState = false)
+                                val activeTab = globalClass.mainActivityManager.getActiveTab()
+                                if (activeTab !== tab) {
+                                    onDismissRequest()
+                                    globalClass.mainActivityManager.replaceCurrentTabWith(
+                                        FilesTab(searchResult.file),
+                                        keepCurrentTabAsParent = true
+                                    )
+                                } else {
+                                    onDismissRequest()
+                                    tab.openFolder(searchResult.file, rememberListState = false)
+                                }
                             }
                         },
                         onLocateClick = {
@@ -702,12 +834,127 @@ private fun SearchResultsSection(
                 }
             }
         }
+
+        // Bottom Multi-Select Action Bar for Search Results
+        AnimatedVisibility(visible = isSelectionMode) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TooltipIconButton(
+                        tooltip = stringResource(if (allSelected) R.string.deselect_all else R.string.select_all),
+                        onClick = { toggleSelectAll() }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SelectAll,
+                            contentDescription = stringResource(R.string.select_all)
+                        )
+                    }
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.copy),
+                        onClick = {
+                            val items = selectedSearchFiles.values.toList()
+                            val copyHereTarget = tab.copyHereTargetFolder
+                                ?: globalClass.mainActivityManager.state.value.tabs
+                                    .filterIsInstance<FilesTab>()
+                                    .firstOrNull { it.copyHereTargetFolder != null }
+                                    ?.copyHereTargetFolder
+                            if (copyHereTarget != null) {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(items, deleteSourceFiles = false),
+                                    CopyTaskParameters(copyHereTarget)
+                                )
+                            } else {
+                                globalClass.taskManager.addTask(
+                                    CopyTask(items, deleteSourceFiles = false)
+                                )
+                                showMsg("Copied ${items.size} item(s) to task clipboard")
+                            }
+                            selectedSearchFiles.clear()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FileCopy,
+                            contentDescription = stringResource(R.string.copy)
+                        )
+                    }
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.cut),
+                        onClick = {
+                            val items = selectedSearchFiles.values.toList()
+                            val copyHereTarget = tab.copyHereTargetFolder
+                                ?: globalClass.mainActivityManager.state.value.tabs
+                                    .filterIsInstance<FilesTab>()
+                                    .firstOrNull { it.copyHereTargetFolder != null }
+                                    ?.copyHereTargetFolder
+                            if (copyHereTarget != null) {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(items, deleteSourceFiles = true),
+                                    CopyTaskParameters(copyHereTarget)
+                                )
+                            } else {
+                                globalClass.taskManager.addTask(
+                                    CopyTask(items, deleteSourceFiles = true)
+                                )
+                                showMsg("Cut ${items.size} item(s) to task clipboard")
+                            }
+                            selectedSearchFiles.clear()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCut,
+                            contentDescription = stringResource(R.string.cut)
+                        )
+                    }
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.delete),
+                        onClick = { showDeleteDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.file_properties),
+                        onClick = { showPropertiesDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = stringResource(R.string.file_properties)
+                        )
+                    }
+                    TooltipIconButton(
+                        tooltip = stringResource(R.string.expand),
+                        onClick = { onExpandClick(selectedSearchFiles.values.toList()) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = stringResource(R.string.expand)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun SearchResultItem(
     searchResult: SearchResult,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    onToggleSelect: () -> Unit,
     onItemClick: () -> Unit,
     onLocateClick: () -> Unit,
     onCopyPathClick: () -> Unit
@@ -719,20 +966,43 @@ private fun SearchResultItem(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onItemClick,
-                onLongClick = { showMoreOptionsMenu = true }
+                onLongClick = {
+                    if (!isSelected) {
+                        onToggleSelect()
+                    } else {
+                        showMoreOptionsMenu = true
+                    }
+                }
             ),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
         shadowElevation = 1.dp
     ) {
         Column(
             modifier = Modifier.padding(6.dp)
         ) {
-            // File item row
-            FileItemRow(
-                item = searchResult.file,
-                fileDetails = if (searchResult.file is LocalFileHolder)
-                    searchResult.file.basePath else searchResult.file.uniquePath,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    // File item row (tapping the file/folder icon also toggles selection)
+                    FileItemRow(
+                        item = searchResult.file,
+                        fileDetails = if (searchResult.file is LocalFileHolder)
+                            searchResult.file.basePath else searchResult.file.uniquePath,
+                        onFileIconClick = onToggleSelect
+                    )
+                }
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelect() },
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+            }
 
             // Content preview for content matches
             if (searchResult.matchType == SearchResult.MatchType.CONTENT &&
@@ -771,6 +1041,19 @@ private fun SearchResultItem(
             expanded = showMoreOptionsMenu,
             onDismissRequest = { showMoreOptionsMenu = false }
         ) {
+            DropdownMenuItem(
+                text = { Text(text = if (isSelected) "Deselect" else "Select") },
+                onClick = {
+                    showMoreOptionsMenu = false
+                    onToggleSelect()
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null
+                    )
+                }
+            )
             DropdownMenuItem(
                 text = { Text(text = stringResource(R.string.locate)) },
                 onClick = {

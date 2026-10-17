@@ -144,6 +144,41 @@ fun BehaviorContainer() {
             onSwitchChange = { prefs.disableNavigationGestures = it }
         )
 
+        if (!prefs.disableNavigationGestures) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                thickness = 3.dp
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Middle Swipe Area Width (${prefs.middleSwipeZoneWidthPercent}%)",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = "Center zone swipes between sub-categories (2nd tab bar); left and right zones swipe between main tabs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+                Slider(
+                    value = prefs.middleSwipeZoneWidthPercent.toFloat(),
+                    onValueChange = { prefs.middleSwipeZoneWidthPercent = it.toInt().coerceIn(20, 70) },
+                    valueRange = 20f..70f
+                )
+            }
+        }
+
         HorizontalDivider(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             thickness = 3.dp

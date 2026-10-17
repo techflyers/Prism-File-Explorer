@@ -80,6 +80,7 @@ fun BreadcrumbBar(tab: FilesTab) {
             FormatRibbon(tab)
         }
     } else if (tab.activeFolder !is VirtualFileHolder) {
+        TypeFilterRibbon(tab)
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -110,18 +111,33 @@ fun BreadcrumbBar(tab: FilesTab) {
             ) {
                 IconButton(
                     onClick = {
-                        tab.openFolder(tab.homeDir, false)
+                        val homeIndex = globalClass.mainActivityManager.state.value.tabs.indexOfFirst {
+                            it is com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
+                        }
+                        if (homeIndex != -1) {
+                            globalClass.mainActivityManager.selectTabAt(homeIndex)
+                        } else {
+                            tab.openFolder(tab.homeDir, false)
+                        }
                     }
                 ) {
-                    Icon(imageVector = Icons.Rounded.Home, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.Home,
+                        contentDescription = stringResource(id = R.string.home_tab_title)
+                    )
                 }
             }
 
             val animationScope = rememberCoroutineScope()
 
-            LaunchedEffect(key1 = tab.highlightedPathSegment) {
-                val index =
-                    tab.currentPathSegments.getIndexIf { uniquePath == tab.highlightedPathSegment.uniquePath }
+            val highlightedIndex = tab.currentPathSegments.indexOfFirst {
+                tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
+            }
+
+            LaunchedEffect(key1 = tab.highlightedPathSegment, key2 = tab.currentPathSegments.size) {
+                val index = tab.currentPathSegments.indexOfFirst {
+                    tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
+                }
                 animationScope.launch {
                     tab.currentPathSegmentsListState.scrollToItem(max(index, 0))
                 }
@@ -152,9 +168,12 @@ fun BreadcrumbBar(tab: FilesTab) {
                     .nestedScroll(consumeLeftoverScroll),
                 state = tab.currentPathSegmentsListState,
             ) {
-                itemsIndexed(tab.currentPathSegments, key = { _, it -> it.uid }) { index, item ->
-                    val isHighlighted = item.uniquePath == tab.highlightedPathSegment.uniquePath
-                    val isCurrentFolder = item.uniquePath == tab.activeFolder.uniquePath
+                itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
+                    val isHighlighted = index == highlightedIndex ||
+                            (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
+                    val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
+                    val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
+                    val isCopyHereTarget = tab.copyHereTargetFolder?.uniquePath == item.uniquePath
                     val isDropTarget = !isCurrentFolder
                     val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
                     val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
@@ -169,12 +188,14 @@ fun BreadcrumbBar(tab: FilesTab) {
                         modifier = Modifier,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BreadcrumbSeparator(
-                            index = index,
-                            currentItem = item,
-                            pathSegments = tab.currentPathSegments,
-                            tab = tab
-                        )
+                        Box(modifier = Modifier.alpha(if (isHistorySegment) 0.42f else 1f)) {
+                            BreadcrumbSeparator(
+                                index = index,
+                                currentItem = item,
+                                pathSegments = tab.currentPathSegments,
+                                tab = tab
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .onGloballyPositioned { coordinates ->
@@ -205,6 +226,17 @@ fun BreadcrumbBar(tab: FilesTab) {
                                                 MaterialTheme.colorScheme.error,
                                                 RoundedCornerShape(8.dp)
                                             )
+                                    } else if (isCopyHereTarget) {
+                                        Modifier
+                                            .background(
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(8.dp)
+                                            )
                                     } else Modifier
                                 )
                                 .padding(horizontal = 2.dp)
@@ -214,10 +246,22 @@ fun BreadcrumbBar(tab: FilesTab) {
                                     .clip(CircleShape)
                                     .combinedClickable(
                                         onClick = {
-                                            tab.openFolder(
-                                                item = item,
-                                                rememberSelectedFiles = true,
-                                            )
+                                            tab.scope.launch {
+                                                if (tab.isBreadcrumbSegmentValid(item)) {
+                                                    tab.openFolderImpl(
+                                                        item = item,
+                                                        rememberSelectedFiles = true,
+                                                    )
+                                                } else {
+                                                    tab.pruneInvalidBreadcrumbSegments()
+                                                    tab.reloadFiles()
+                                                }
+                                            }
+                                        },
+                                        onDoubleClick = {
+                                            if (item.canAddNewContent) {
+                                                tab.toggleCopyHereMode(item)
+                                            }
                                         },
                                         onLongClick = {
                                             item.uniquePath.copyToClipboard()
@@ -225,7 +269,13 @@ fun BreadcrumbBar(tab: FilesTab) {
                                         }
                                     )
                                     .padding(8.dp)
-                                    .alpha(0.8f),
+                                    .alpha(
+                                        when {
+                                            isCopyHereTarget || isHighlighted -> 1f
+                                            isHistorySegment -> 0.45f
+                                            else -> 0.8f
+                                        }
+                                    ),
                                 text = item.displayName
                                     .orIf(stringResource(id = R.string.internal_storage)) {
                                         item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
@@ -234,8 +284,12 @@ fun BreadcrumbBar(tab: FilesTab) {
                                         item.uniquePath == File.separator
                                     },
                                 fontSize = 14.sp,
-                                fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
-                                color = if (isHighlighted) highlightedPathListItemColor else Color.Unspecified
+                                fontWeight = if (isHighlighted || isCopyHereTarget) FontWeight.Medium else FontWeight.Normal,
+                                color = when {
+                                    isHighlighted || isCopyHereTarget -> highlightedPathListItemColor
+                                    isHistorySegment -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    else -> Color.Unspecified
+                                }
                             )
                         }
                     }

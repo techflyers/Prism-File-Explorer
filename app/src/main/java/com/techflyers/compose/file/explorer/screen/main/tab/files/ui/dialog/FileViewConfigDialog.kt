@@ -103,6 +103,10 @@ fun FileViewConfigDialog(
             mutableStateOf(tab.viewConfig.hideMediaNames)
         }
 
+        var filenameMaxLines by remember {
+            mutableIntStateOf(tab.viewConfig.filenameMaxLines.coerceIn(1, 5))
+        }
+
         fun saveConfigs() {
             val configs = ViewConfigs(
                 viewType = if (viewType == ViewType.GRID.ordinal) ViewType.GRID else ViewType.LIST,
@@ -110,11 +114,13 @@ fun FileViewConfigDialog(
                 cropThumbnails = cropThumbnails,
                 galleryMode = galleryMode,
                 hideMediaNames = hideMediaNames,
-                itemSize = itemSize
+                itemSize = itemSize,
+                filenameMaxLines = filenameMaxLines
             )
             if (applyToThisPathOnly) {
                 prefs.setViewConfigPrefsFor(tab.activeFolder, configs)
             } else {
+                prefs.filenameMaxLines = filenameMaxLines
                 prefs.setDefaultViewConfigPrefs(configs)
             }
             tab.viewConfig = configs
@@ -388,6 +394,54 @@ fun FileViewConfigDialog(
                         checked = cropThumbnails,
                         onCheckedChange = { cropThumbnails = it }
                     )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(
+                        horizontal = 8.dp,
+                        vertical = 4.dp
+                    )
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (filenameMaxLines <= 1) {
+                                stringResource(R.string.filename_wrap_lines) + ": " + stringResource(R.string.filename_wrap_lines_off)
+                            } else {
+                                stringResource(R.string.filename_wrap_lines) + ": " + stringResource(R.string.filename_wrap_lines_n, filenameMaxLines)
+                            },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "1",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Space(8.dp)
+                            Slider(
+                                value = filenameMaxLines.toFloat(),
+                                onValueChange = { filenameMaxLines = it.roundToInt().coerceIn(1, 5) },
+                                valueRange = 1f..5f,
+                                steps = 3,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Space(8.dp)
+                            Text(
+                                text = "5",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 if (viewType == ViewType.GRID.ordinal) {

@@ -5,7 +5,7 @@ import java.util.UUID
 abstract class Task(
     val id: String = UUID.randomUUID().toString()
 ) {
-    var commonConflictResolution = TaskContentStatus.AUTO_RENAME
+    var commonConflictResolution = TaskContentStatus.ASK
 
     @Volatile
     var aborted = false

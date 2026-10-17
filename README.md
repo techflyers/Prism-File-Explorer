@@ -200,11 +200,11 @@ See the [LICENSE](LICENSE) file for the full license text.
 
 ## 💬 Support & Community
 
-| Platform               | Purpose                       |
-|------------------------|-------------------------------|
-| **GitHub Issues**      | Bug reports, feature requests |
-| **GitHub Discussions** | Community support, questions  |
-| **Email**              | Private inquiries             |
+| Platform                                                                      | Purpose                       |
+|-------------------------------------------------------------------------------|-------------------------------|
+| [**GitHub Issues**](https://github.com/techflyers/Prism-File-Explorer/issues) | Bug reports, feature requests |
+| [**GitHub Discussions**](https://github.com/techflyers/Prism-File-Explorer/discussions) | Community support, questions  |
+| [**Email**](mailto:techflyermail@gmail.com)                                   | Private inquiries             |
 
 **⭐ If you find this project useful, please consider giving it a star !**
 

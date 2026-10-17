@@ -11,7 +11,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,10 +27,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Shortcut
@@ -43,6 +46,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Groups
@@ -50,23 +54,17 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.rememberCoroutineScope
-import com.techflyers.compose.file.explorer.common.toFormattedSize
-import com.techflyers.compose.file.explorer.screen.main.ui.TooltipIconButton
-import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTask
-import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTaskParameters
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +72,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,9 +80,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,25 +92,44 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.block
 import com.techflyers.compose.file.explorer.common.copyToClipboard
 import com.techflyers.compose.file.explorer.common.showMsg
+import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.common.ui.BottomSheetDialog
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.common.ui.fastScrollbar
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.CalculationProgress
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.ContentPropertiesProvider
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.PropertiesState
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTask
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.DeleteTaskParameters
+import com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.ui.FileSelectionDialog
+import com.techflyers.compose.file.explorer.screen.main.ui.TooltipIconButton
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 @Composable
 fun FilePropertiesDialog(
     show: Boolean,
     tab: FilesTab,
+    customSelection: List<ContentHolder>? = null,
     onDismissRequest: () -> Unit
 ) {
     if (show) {
-        val selection = tab.selectedFiles.map { it.value }.toList()
-        val contentPropertiesProvider = remember { ContentPropertiesProvider(selection) }
+        val initialSelection = remember(customSelection, tab.selectedFiles.keys.toList()) {
+            customSelection ?: tab.selectedFiles.map { it.value }.toList()
+        }
+        var currentSelection by remember(initialSelection) {
+            mutableStateOf(initialSelection)
+        }
+        var showComparisonPicker by remember { mutableStateOf(false) }
+
+        val contentPropertiesProvider = remember(currentSelection) {
+            ContentPropertiesProvider(currentSelection)
+        }
         val uiState by contentPropertiesProvider.uiState.collectAsState()
 
         DisposableEffect(contentPropertiesProvider) {
@@ -125,6 +143,31 @@ fun FilePropertiesDialog(
             is PropertiesState.MultipleContentProperties -> stringResource(R.string.selection_properties)
             else -> stringResource(R.string.loading_properties)
         }
+
+        val initialPickerDirectory = remember(currentSelection) {
+            val firstLocal = currentSelection.filterIsInstance<LocalFileHolder>().firstOrNull()
+            if (firstLocal != null) {
+                firstLocal.file.parentFile ?: firstLocal.file
+            } else {
+                (tab.activeFolder as? LocalFileHolder)?.file
+            }
+        }
+
+        FileSelectionDialog(
+            show = showComparisonPicker,
+            initialDirectory = initialPickerDirectory,
+            onDismissRequest = { showComparisonPicker = false },
+            onItemsSelected = { files ->
+                showComparisonPicker = false
+                val addedHolders = files.map { LocalFileHolder(it) }
+                val merged = (currentSelection + addedHolders).distinctBy { it.uniquePath }
+                if (merged.size == currentSelection.size) {
+                    showMsg("Selected item is already in comparison")
+                } else {
+                    currentSelection = merged
+                }
+            }
+        )
 
         BottomSheetDialog(
             onDismissRequest = onDismissRequest
@@ -179,12 +222,18 @@ fun FilePropertiesDialog(
                                 is PropertiesState.SingleContentProperties -> {
                                     SingleFileContent(
                                         details = details,
-                                        onReload = { contentPropertiesProvider.reload() }
+                                        onReload = { contentPropertiesProvider.reload() },
+                                        onAddFilesForComparison = { showComparisonPicker = true }
                                     )
                                 }
 
                                 is PropertiesState.MultipleContentProperties -> {
-                                    MultipleFilesContent(details, tab, onDismissRequest)
+                                    MultipleFilesContent(
+                                        details = details,
+                                        tab = tab,
+                                        onDismissRequest = onDismissRequest,
+                                        onAddMoreForComparison = { showComparisonPicker = true }
+                                    )
                                 }
                             }
                         }
@@ -226,7 +275,8 @@ private fun LoadingContent() {
 @Composable
 private fun SingleFileContent(
     details: PropertiesState.SingleContentProperties,
-    onReload: () -> Unit
+    onReload: () -> Unit,
+    onAddFilesForComparison: () -> Unit
 ) {
     var showSetModeDialog by remember { mutableStateOf(false) }
     var showSetOwnerDialog by remember { mutableStateOf(false) }
@@ -330,9 +380,78 @@ private fun SingleFileContent(
             AsyncPropertyRow(
                 icon = Icons.Default.Fingerprint,
                 label = stringResource(R.string.sha1_checksum),
+                valueFlow = details.sha1,
+                progressFlow = details.sha1Progress
+            )
+            AsyncPropertyRow(
+                icon = Icons.Default.Fingerprint,
+                label = "SHA-256",
                 valueFlow = details.sha256,
                 progressFlow = details.sha256Progress
             )
+            if (details.fileHolder != null && details.fileHolder.isFile()) {
+                val md5Val by details.checksum.collectAsState()
+                val sha1Val by details.sha1.collectAsState()
+                val sha256Val by details.sha256.collectAsState()
+                var compareInput by remember { mutableStateOf("") }
+                val normalizedInput = compareInput.trim().lowercase()
+
+                androidx.compose.material3.OutlinedTextField(
+                    value = compareInput,
+                    onValueChange = { compareInput = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    singleLine = true,
+                    label = { Text("Verify checksum (paste MD5 / SHA-1 / SHA-256)") },
+                    supportingText = if (normalizedInput.isNotEmpty()) {
+                        {
+                            val matchedAlgo = when {
+                                md5Val.isNotBlank() && md5Val.lowercase() == normalizedInput -> "MD5"
+                                sha1Val.isNotBlank() && sha1Val.lowercase() == normalizedInput -> "SHA-1"
+                                sha256Val.isNotBlank() && sha256Val.lowercase() == normalizedInput -> "SHA-256"
+                                else -> null
+                            }
+                            Text(
+                                text = if (matchedAlgo != null) {
+                                    "Matches $matchedAlgo checksum"
+                                } else {
+                                    "Does not match computed checksums"
+                                },
+                                color = if (matchedAlgo != null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else null
+                )
+            }
+
+            if (details.fileHolder != null) {
+                OutlinedButton(
+                    onClick = onAddFilesForComparison,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.CompareArrows,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Space(8.dp)
+                    Text(
+                        text = if (details.fileHolder.isFolder) {
+                            "Add folders / files for comparison"
+                        } else {
+                            "Add files for comparison"
+                        }
+                    )
+                }
+            }
         }
 
         if (details.fileHolder != null && details.fileHolder.isFile()) {
@@ -402,11 +521,12 @@ private fun SingleFileContent(
 private fun MultipleFilesContent(
     details: PropertiesState.MultipleContentProperties,
     tab: FilesTab,
-    onDismissRequest: () -> Unit
+    onDismissRequest: () -> Unit,
+    onAddMoreForComparison: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var fileToDelete by remember { mutableStateOf<com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder?>(null) }
+    var fileToDelete by remember { mutableStateOf<ContentHolder?>(null) }
     var deletedPaths by remember { mutableStateOf(setOf<String>()) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -428,6 +548,30 @@ private fun MultipleFilesContent(
                 valueFlow = details.totalFileCount,
                 progressFlow = details.countProgress
             )
+            OutlinedButton(
+                onClick = onAddMoreForComparison,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Space(8.dp)
+                Text("Add more files / folders for comparison")
+            }
+        }
+
+        if (details.hasDirectoryComparison) {
+            DirectoryComparisonSection(
+                details = details,
+                tab = tab,
+                deletedPaths = deletedPaths,
+                onDeleteFile = { fileToDelete = it },
+                onDismissRequest = onDismissRequest
+            )
         }
 
         PropertySection(title = stringResource(R.string.checksums_and_duplicates)) {
@@ -437,11 +581,110 @@ private fun MultipleFilesContent(
                 valueFlow = details.checksumStatus,
                 progressFlow = details.checksumProgress
             )
-            val duplicates by details.duplicateGroups.collectAsState()
-            if (duplicates.isNotEmpty()) {
-                duplicates.forEach { (hash, duplicateFiles) ->
-                    val visibleFiles = duplicateFiles.filter { it.uniquePath !in deletedPaths }
+            val twoFileComparison by details.twoFileComparison.collectAsState()
+            twoFileComparison?.let { comp ->
+                val bothMatch = comp.isMatch
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (bothMatch) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                        }
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (bothMatch) {
+                                "2-File Checksum Comparison: IDENTICAL"
+                            } else {
+                                "2-File Checksum Comparison: DIFFERENT"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (bothMatch) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${comp.file1Name} (MD5: ${comp.file1Md5.take(12)}..., SHA-256: ${comp.file1Sha256.take(12)}...)",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (comp.file1Sha256.isNotBlank()) {
+                                TooltipIconButton(
+                                    tooltip = "Copy SHA-256 (${comp.file1Name})",
+                                    onClick = {
+                                        comp.file1Sha256.copyToClipboard()
+                                        showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ContentCopy,
+                                        contentDescription = "Copy SHA-256",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${comp.file2Name} (MD5: ${comp.file2Md5.take(12)}..., SHA-256: ${comp.file2Sha256.take(12)}...)",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (comp.file2Sha256.isNotBlank()) {
+                                TooltipIconButton(
+                                    tooltip = "Copy SHA-256 (${comp.file2Name})",
+                                    onClick = {
+                                        comp.file2Sha256.copyToClipboard()
+                                        showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ContentCopy,
+                                        contentDescription = "Copy SHA-256",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val checksumGroups by details.duplicateGroups.collectAsState()
+            if (checksumGroups.isNotEmpty()) {
+                checksumGroups.forEach { (hash, groupFiles) ->
+                    val visibleFiles = groupFiles.filter { it.uniquePath !in deletedPaths }
                     if (visibleFiles.isNotEmpty()) {
+                        val isDuplicateGroup = visibleFiles.size > 1
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -459,7 +702,7 @@ private fun MultipleFilesContent(
                                         Text(
                                             text = hash,
                                             style = MaterialTheme.typography.labelMedium.copy(
-                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                fontFamily = FontFamily.Monospace
                                             ),
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.primary,
@@ -468,7 +711,11 @@ private fun MultipleFilesContent(
                                         )
                                     }
                                     Text(
-                                        text = "${visibleFiles.size} duplicate files",
+                                        text = if (isDuplicateGroup) {
+                                            "${visibleFiles.size} duplicate files"
+                                        } else {
+                                            "1 file (distinct checksum)"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -495,10 +742,14 @@ private fun MultipleFilesContent(
                                             onDismissRequest()
                                             globalClass.mainActivityManager.addTabAndSelect(
                                                 FilesTab(
-                                                    com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder(
-                                                        type = com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.DUPLICATES,
+                                                    VirtualFileHolder(
+                                                        type = VirtualFileHolder.DUPLICATES,
                                                         customItems = visibleFiles,
-                                                        customTitle = "Duplicates (${hash.take(6)})"
+                                                        customTitle = if (isDuplicateGroup) {
+                                                            "Duplicates (${hash.take(6)})"
+                                                        } else {
+                                                            "Checksum (${hash.take(6)})"
+                                                        }
                                                     )
                                                 )
                                             )
@@ -533,7 +784,7 @@ private fun MultipleFilesContent(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (file.isFolder) Icons.Default.FolderOpen else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.InsertDriveFile,
+                                            imageVector = if (file.isFolder) Icons.Default.FolderOpen else Icons.AutoMirrored.Rounded.InsertDriveFile,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(22.dp)
@@ -570,7 +821,7 @@ private fun MultipleFilesContent(
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
-                                                imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.OpenInNew,
+                                                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                                                 contentDescription = stringResource(R.string.open),
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -617,12 +868,16 @@ private fun MultipleFilesContent(
 
     // Delete Confirmation Dialog
     fileToDelete?.let { target ->
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { fileToDelete = null },
             title = { Text(stringResource(R.string.delete)) },
-            text = { Text("Are you sure you want to delete \"${target.displayName}\"?") },
+            text = {
+                Text(
+                    "Are you sure you want to delete \"${target.displayName}\" (${target.size.toFormattedSize()})?"
+                )
+            },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = {
                         val path = target.uniquePath
                         fileToDelete = null
@@ -638,11 +893,311 @@ private fun MultipleFilesContent(
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { fileToDelete = null }) {
+                TextButton(onClick = { fileToDelete = null }) {
                     Text(stringResource(R.string.cancel))
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun DirectoryComparisonSection(
+    details: PropertiesState.MultipleContentProperties,
+    tab: FilesTab,
+    deletedPaths: Set<String>,
+    onDeleteFile: (ContentHolder) -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val dirComp by details.directoryComparison.collectAsState()
+    var selectedFilter by remember { mutableStateOf("ALL") }
+
+    PropertySection(title = "Directory Comparison") {
+        AsyncPropertyRow(
+            icon = Icons.AutoMirrored.Rounded.CompareArrows,
+            label = "Status",
+            valueFlow = details.directoryComparisonStatus,
+            progressFlow = details.directoryComparisonProgress
+        )
+
+        dirComp?.let { comp ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (comp.isIdentical) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                    }
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = if (comp.isIdentical) {
+                            "Directory Comparison: IDENTICAL"
+                        } else {
+                            "Directory Comparison: DIFFERENT"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (comp.isIdentical) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        }
+                    )
+                    comp.folderNames.forEachIndexed { idx, name ->
+                        val path = comp.folderPaths.getOrNull(idx) ?: ""
+                        Text(
+                            text = "• $name ($path)",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Space(2.dp)
+                    Text(
+                        text = "Identical: ${comp.identicalCount}  •  Different content: ${comp.modifiedCount}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    comp.uniqueCountsByFolder.forEach { (folderLabel, count) ->
+                        if (count > 0) {
+                            Text(
+                                text = "Only in $folderLabel: $count",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (comp.entries.isNotEmpty()) {
+                val uniqueTotal = comp.entries.count { it.status == PropertiesState.DirectoryEntryStatus.UNIQUE }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedFilter == "ALL",
+                        onClick = { selectedFilter = "ALL" },
+                        label = { Text("All (${comp.entries.size})") }
+                    )
+                    if (comp.modifiedCount > 0) {
+                        FilterChip(
+                            selected = selectedFilter == "MODIFIED",
+                            onClick = { selectedFilter = "MODIFIED" },
+                            label = { Text("Different (${comp.modifiedCount})") }
+                        )
+                    }
+                    if (uniqueTotal > 0) {
+                        FilterChip(
+                            selected = selectedFilter == "UNIQUE",
+                            onClick = { selectedFilter = "UNIQUE" },
+                            label = { Text("Unique ($uniqueTotal)") }
+                        )
+                    }
+                    if (comp.identicalCount > 0) {
+                        FilterChip(
+                            selected = selectedFilter == "IDENTICAL",
+                            onClick = { selectedFilter = "IDENTICAL" },
+                            label = { Text("Identical (${comp.identicalCount})") }
+                        )
+                    }
+                }
+
+                val filteredEntries = remember(comp.entries, selectedFilter, deletedPaths) {
+                    comp.entries.filter { entry ->
+                        val matchesStatus = when (selectedFilter) {
+                            "MODIFIED" -> entry.status == PropertiesState.DirectoryEntryStatus.MODIFIED
+                            "UNIQUE" -> entry.status == PropertiesState.DirectoryEntryStatus.UNIQUE
+                            "IDENTICAL" -> entry.status == PropertiesState.DirectoryEntryStatus.IDENTICAL
+                            else -> true
+                        }
+                        val hasVisibleFiles = entry.entriesByFolder.any { it.holder.uniquePath !in deletedPaths }
+                        matchesStatus && hasVisibleFiles
+                    }
+                }
+
+                filteredEntries.take(100).forEach { entry ->
+                    val statusLabel = when (entry.status) {
+                        PropertiesState.DirectoryEntryStatus.IDENTICAL -> "IDENTICAL"
+                        PropertiesState.DirectoryEntryStatus.MODIFIED -> "DIFFERENT"
+                        PropertiesState.DirectoryEntryStatus.UNIQUE -> {
+                            val presentIn = entry.entriesByFolder.joinToString(", ") { it.folderName }
+                            "ONLY IN $presentIn"
+                        }
+                    }
+                    val statusColor = when (entry.status) {
+                        PropertiesState.DirectoryEntryStatus.IDENTICAL -> MaterialTheme.colorScheme.primary
+                        PropertiesState.DirectoryEntryStatus.MODIFIED -> MaterialTheme.colorScheme.error
+                        PropertiesState.DirectoryEntryStatus.UNIQUE -> MaterialTheme.colorScheme.tertiary
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (entry.isFolder) Icons.Default.FolderOpen else Icons.AutoMirrored.Rounded.InsertDriveFile,
+                                        contentDescription = null,
+                                        tint = statusColor,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = entry.relativePath,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Space(6.dp)
+                                Text(
+                                    text = statusLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = statusColor
+                                )
+                            }
+
+                            entry.entriesByFolder
+                                .filter { it.holder.uniquePath !in deletedPaths }
+                                .forEach { info ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceContainerLow,
+                                                RoundedCornerShape(6.dp)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "${info.folderName} • ${if (entry.isFolder) "Folder" else info.size.toFormattedSize()}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (info.md5.isNotBlank()) {
+                                                SelectionContainer {
+                                                    Text(
+                                                        text = "MD5: ${info.md5}",
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontFamily = FontFamily.Monospace
+                                                        ),
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (info.md5.isNotBlank()) {
+                                            TooltipIconButton(
+                                                tooltip = stringResource(R.string.copy_hash),
+                                                onClick = {
+                                                    info.md5.copyToClipboard()
+                                                    showMsg(globalClass.getString(R.string.copied_to_clipboard))
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.ContentCopy,
+                                                    contentDescription = stringResource(R.string.copy_hash),
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        if (!entry.isFolder) {
+                                            TooltipIconButton(
+                                                tooltip = stringResource(R.string.open),
+                                                onClick = {
+                                                    onDismissRequest()
+                                                    tab.openFile(context, info.holder)
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                                    contentDescription = stringResource(R.string.open),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        TooltipIconButton(
+                                            tooltip = stringResource(R.string.open_containing_folder),
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    globalClass.mainActivityManager.addTabAndSelect(FilesTab(info.holder))
+                                                    onDismissRequest()
+                                                }
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.FolderOpen,
+                                                contentDescription = stringResource(R.string.open_containing_folder),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        TooltipIconButton(
+                                            tooltip = stringResource(R.string.delete),
+                                            onClick = { onDeleteFile(info.holder) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Delete,
+                                                contentDescription = stringResource(R.string.delete),
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

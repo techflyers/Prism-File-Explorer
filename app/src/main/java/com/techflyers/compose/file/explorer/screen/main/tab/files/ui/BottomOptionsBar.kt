@@ -48,9 +48,11 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import com.techflyers.compose.file.explorer.common.icons.getSortIcon
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -82,7 +84,16 @@ import kotlinx.coroutines.withContext
 @Composable
 fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
     val context = LocalContext.current
-    val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar && !forceLandscapeOverride
+    val prefs = globalClass.preferencesManager
+    val enableBottomToolbar = prefs.enableBottomToolbar && !forceLandscapeOverride
+    LaunchedEffect(
+        tab.activeFolder.uniquePath,
+        prefs.defaultSortMethod,
+        prefs.reverse,
+        prefs.showFoldersFirst
+    ) {
+        tab.updateSortingConfig()
+    }
     val bottomOptionsBarState by tab.bottomOptionsBarState.collectAsState()
     val isSelectionActive = tab.selectedFilesCount > 0 || bottomOptionsBarState.showQuickOptions || tab.selectedFiles.isNotEmpty()
     val isRecycleBin = bottomOptionsBarState.showEmptyRecycleBinButton || (tab.activeFolder is LocalFileHolder &&
@@ -260,9 +271,21 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                             SelectionRibbonIconButton(
                                 tooltip = stringResource(R.string.cut),
                                 onClick = {
-                                    globalClass.taskManager.addTask(
-                                        CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = true)
-                                    )
+                                    val copyHereTarget = tab.copyHereTargetFolder
+                                        ?: globalClass.mainActivityManager.state.value.tabs
+                                            .filterIsInstance<FilesTab>()
+                                            .firstOrNull { it.copyHereTargetFolder != null }
+                                            ?.copyHereTargetFolder
+                                    if (copyHereTarget != null) {
+                                        globalClass.taskManager.addTaskAndRun(
+                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = true),
+                                            CopyTaskParameters(copyHereTarget)
+                                        )
+                                    } else {
+                                        globalClass.taskManager.addTask(
+                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = true)
+                                        )
+                                    }
                                     tab.unselectAllFiles()
                                 }
                             ) {
@@ -276,9 +299,21 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                             SelectionRibbonIconButton(
                                 tooltip = stringResource(R.string.copy),
                                 onClick = {
-                                    globalClass.taskManager.addTask(
-                                        CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false)
-                                    )
+                                    val copyHereTarget = tab.copyHereTargetFolder
+                                        ?: globalClass.mainActivityManager.state.value.tabs
+                                            .filterIsInstance<FilesTab>()
+                                            .firstOrNull { it.copyHereTargetFolder != null }
+                                            ?.copyHereTargetFolder
+                                    if (copyHereTarget != null) {
+                                        globalClass.taskManager.addTaskAndRun(
+                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false),
+                                            CopyTaskParameters(copyHereTarget)
+                                        )
+                                    } else {
+                                        globalClass.taskManager.addTask(
+                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false)
+                                        )
+                                    }
                                     tab.unselectAllFiles()
                                 }
                             ) {
@@ -466,7 +501,10 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                     tab.toggleFileOptionsMenu(tab.selectedFiles.values.first())
                 }
             } else {
-                BottomOptionsBarButton(Icons.Rounded.SortByAlpha, stringResource(R.string.sort)) {
+                val sortIcon = remember(tab.sortingPrefs.sortMethod, tab.sortingPrefs.reverseSorting) {
+                    getSortIcon(tab.sortingPrefs.sortMethod, tab.sortingPrefs.reverseSorting)
+                }
+                BottomOptionsBarButton(sortIcon, stringResource(R.string.sort)) {
                     tab.toggleSortingMenu(true)
                 }
 
@@ -508,7 +546,7 @@ fun RowScope.BottomOptionsBarButton(
         Icon(
             modifier = Modifier.size(20.dp),
             imageVector = imageVector,
-            contentDescription = null
+            contentDescription = text
         )
 
         Space(size = 4.dp)

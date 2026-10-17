@@ -25,6 +25,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -39,6 +40,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionModel
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
@@ -78,6 +80,7 @@ fun NFileDrawerContent(
         mutableStateOf(NetworkConnectionsService.getConnections(context))
     }
     var isRefreshing by remember { mutableStateOf(false) }
+    val editingSections = remember { mutableStateMapOf<String, Boolean>() }
 
     val refreshDrawer: () -> Unit = {
         isRefreshing = true
@@ -107,6 +110,23 @@ fun NFileDrawerContent(
         }
     }
 
+    fun toggleItemHidden(itemId: String) {
+        val current = preferencesManager.drawerHiddenItems.toMutableSet()
+        if (itemId in current) current.remove(itemId) else current.add(itemId)
+        preferencesManager.drawerHiddenItems = current
+    }
+
+    fun moveSection(sectionId: String, delta: Int) {
+        val currentOrder = preferencesManager.drawerSectionsOrder.toMutableList()
+        val idx = currentOrder.indexOf(sectionId)
+        if (idx == -1) return
+        val targetIdx = (idx + delta).coerceIn(0, currentOrder.lastIndex)
+        if (idx != targetIdx) {
+            currentOrder.add(targetIdx, currentOrder.removeAt(idx))
+            preferencesManager.drawerSectionsOrder = currentOrder
+        }
+    }
+
     ModalDrawerSheet(
         modifier = Modifier
             .fillMaxHeight()
@@ -121,7 +141,16 @@ fun NFileDrawerContent(
                     .fillMaxSize()
                     .verticalScroll(drawerScroll)
             ) {
-                // Section 0: Open Tabs
+                val sectionOrder = preferencesManager.drawerSectionsOrder
+                val hiddenItems = preferencesManager.drawerHiddenItems
+
+                sectionOrder.forEachIndexed { sectionIndex, sectionId ->
+                    val isEditMode = editingSections[sectionId] == true
+                    val canMoveUp = sectionIndex > 0
+                    val canMoveDown = sectionIndex < sectionOrder.lastIndex
+
+                    when (sectionId) {
+                "tabs" -> {
                 if (preferencesManager.showTabsInDrawer) {
                     val tabs = mainActivityState.tabs
                     val tabsTitle = stringResource(R.string.tabs)
@@ -130,6 +159,10 @@ fun NFileDrawerContent(
                     CollapsibleDrawerSection(
                         sectionId = "tabs",
                         title = "$tabsTitle (${tabs.size})",
+                        isEditMode = isEditMode,
+                        onToggleEditMode = { editingSections["tabs"] = !isEditMode },
+                        onMoveSectionUp = if (canMoveUp) ({ moveSection("tabs", -1) }) else null,
+                        onMoveSectionDown = if (canMoveDown) ({ moveSection("tabs", 1) }) else null,
                         action = if (tabs.size > 1) {
                             {
                                 IconButton(
@@ -149,10 +182,13 @@ fun NFileDrawerContent(
                     ) {
                         tabs.forEachIndexed { index, tab ->
                             val label = (tab as? FilesTab)?.tabViewLabel ?: tab.header
+                            val isCopyHereActive = (tab as? FilesTab)?.copyHereTargetFolder != null
                             val isActive = index == mainActivityState.selectedTabIndex
                             DrawerTabItem(
                                 label = label,
                                 isActive = isActive,
+                                isPinned = tab.isPinned,
+                                isCopyHereDestination = isCopyHereActive,
                                 index = index,
                                 totalTabs = tabs.size,
                                 isReorderMode = isReorderingTabs,
@@ -175,19 +211,27 @@ fun NFileDrawerContent(
                                 }
                             )
                         }
-                        DrawerItem(
-                            icon = Icons.Rounded.Add,
-                            label = stringResource(R.string.new_tab),
-                            tint = MaterialTheme.colorScheme.secondary,
-                            textColor = MaterialTheme.colorScheme.secondary
-                        ) {
-                            manager.addDefaultOrOverriddenNewTab()
-                            onNavigate()
+                        val newTabItemId = "tabs_new_tab"
+                        val isNewTabHidden = newTabItemId in hiddenItems
+                        if (isEditMode || !isNewTabHidden) {
+                            DrawerItem(
+                                icon = Icons.Rounded.Add,
+                                label = stringResource(R.string.new_tab),
+                                tint = MaterialTheme.colorScheme.secondary,
+                                textColor = MaterialTheme.colorScheme.secondary,
+                                isEditMode = isEditMode,
+                                isHiddenItem = isNewTabHidden,
+                                onToggleVisibility = { toggleItemHidden(newTabItemId) }
+                            ) {
+                                manager.addDefaultOrOverriddenNewTab()
+                                onNavigate()
+                            }
                         }
                     }
                 }
+                }
 
-                // Section 0b: Bookmarks
+                "bookmarks" -> {
                 if (preferencesManager.showBookmarksInDrawer) {
                     var showAddBookmarkDialog by remember { mutableStateOf(false) }
                     val bookmarks = preferencesManager.bookmarks
@@ -208,6 +252,10 @@ fun NFileDrawerContent(
                     CollapsibleDrawerSection(
                         sectionId = "bookmarks",
                         title = "$bookmarksTitle (${bookmarks.size})",
+                        isEditMode = isEditMode,
+                        onToggleEditMode = { editingSections["bookmarks"] = !isEditMode },
+                        onMoveSectionUp = if (canMoveUp) ({ moveSection("bookmarks", -1) }) else null,
+                        onMoveSectionDown = if (canMoveDown) ({ moveSection("bookmarks", 1) }) else null,
                         action = {
                             IconButton(
                                 onClick = { showAddBookmarkDialog = true },
@@ -231,163 +279,338 @@ fun NFileDrawerContent(
                             )
                         } else {
                             bookmarks.forEach { path ->
-                                val file = File(path)
-                                DrawerItem(
-                                    icon = Icons.Rounded.Bookmark,
-                                    label = file.name.ifEmpty { path }
-                                ) {
-                                    manager.replaceCurrentTabWith(FilesTab(LocalFileHolder(file)))
-                                    onNavigate()
+                                val itemId = "bookmark_$path"
+                                val isHidden = itemId in hiddenItems
+                                if (isEditMode || !isHidden) {
+                                    val file = File(path)
+                                    DrawerItem(
+                                        icon = Icons.Rounded.Bookmark,
+                                        label = file.name.ifEmpty { path },
+                                        isEditMode = isEditMode,
+                                        isHiddenItem = isHidden,
+                                        onToggleVisibility = { toggleItemHidden(itemId) }
+                                    ) {
+                                        manager.replaceCurrentTabWith(
+                                            FilesTab(LocalFileHolder(file)),
+                                            keepCurrentTabAsParent = true
+                                        )
+                                        onNavigate()
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                }
 
-                // Section 1: Dashboard Navigation
-                CollapsibleDrawerSection(sectionId = "navigation", title = "Navigation") {
-                    DrawerItem(
-                        icon = Icons.Rounded.Home,
-                        label = "Dashboard Home"
-                    ) {
-                        manager.replaceCurrentTabWith(HomeTab())
-                        onNavigate()
+                "navigation" -> {
+                CollapsibleDrawerSection(
+                    sectionId = "navigation",
+                    title = "Navigation",
+                    isEditMode = isEditMode,
+                    onToggleEditMode = { editingSections["navigation"] = !isEditMode },
+                    onMoveSectionUp = if (canMoveUp) ({ moveSection("navigation", -1) }) else null,
+                    onMoveSectionDown = if (canMoveDown) ({ moveSection("navigation", 1) }) else null
+                ) {
+                    val navHomeHidden = "nav_home" in hiddenItems
+                    if (isEditMode || !navHomeHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Home,
+                            label = "Dashboard Home",
+                            isEditMode = isEditMode,
+                            isHiddenItem = navHomeHidden,
+                            onToggleVisibility = { toggleItemHidden("nav_home") }
+                        ) {
+                            manager.replaceCurrentTabWith(HomeTab(), keepCurrentTabAsParent = true)
+                            onNavigate()
+                        }
                     }
 
-                    DrawerItem(
-                        icon = Icons.Rounded.Dns,
-                        label = "System Root"
-                    ) {
-                        manager.replaceCurrentTabWith(FilesTab(LocalFileHolder(File("/"))))
-                        onNavigate()
-                    }
-
-                    DrawerItem(
-                        icon = Icons.Rounded.DeleteSweep,
-                        label = "Recycle Bin"
-                    ) {
-                        manager.replaceCurrentTabWith(FilesTab(globalClass.recycleBinDir))
-                        onNavigate()
-                    }
-                } // end Navigation section
-
-                // Section 2: Storage Devices
-                if (storageList.isNotEmpty()) {
-                    CollapsibleDrawerSection(sectionId = "storage", title = "Storage Devices") {
-                        for (device in storageList) {
-                            StorageDrawerItem(device = device) {
-                                manager.replaceCurrentTabWith(FilesTab(device.contentHolder))
+                    if (preferencesManager.showRecentInSidebar) {
+                        val navRecentHidden = "nav_recent_files" in hiddenItems
+                        if (isEditMode || !navRecentHidden) {
+                            DrawerItem(
+                                icon = Icons.Rounded.History,
+                                label = stringResource(R.string.recent_files),
+                                isEditMode = isEditMode,
+                                isHiddenItem = navRecentHidden,
+                                onToggleVisibility = { toggleItemHidden("nav_recent_files") }
+                            ) {
+                                manager.replaceCurrentTabWith(
+                                    FilesTab(VirtualFileHolder(VirtualFileHolder.RECENT)),
+                                    keepCurrentTabAsParent = true
+                                )
                                 onNavigate()
                             }
                         }
-                    } // end Storage section
+                    }
+
+                    val navAllFilesHidden = "nav_all_files" in hiddenItems
+                    if (isEditMode || !navAllFilesHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.FolderCopy,
+                            label = "All Files",
+                            isEditMode = isEditMode,
+                            isHiddenItem = navAllFilesHidden,
+                            onToggleVisibility = { toggleItemHidden("nav_all_files") }
+                        ) {
+                            manager.replaceCurrentTabWith(
+                                FilesTab(VirtualFileHolder(VirtualFileHolder.ALL_FILES)),
+                                keepCurrentTabAsParent = true
+                            )
+                            onNavigate()
+                        }
+                    }
+
+                    val navRootHidden = "nav_root" in hiddenItems
+                    if (isEditMode || !navRootHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Dns,
+                            label = "System Root",
+                            isEditMode = isEditMode,
+                            isHiddenItem = navRootHidden,
+                            onToggleVisibility = { toggleItemHidden("nav_root") }
+                        ) {
+                            manager.replaceCurrentTabWith(
+                                FilesTab(LocalFileHolder(File("/"))),
+                                keepCurrentTabAsParent = true
+                            )
+                            onNavigate()
+                        }
+                    }
+
+                    val navBinHidden = "nav_recycle_bin" in hiddenItems
+                    if (isEditMode || !navBinHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.DeleteSweep,
+                            label = "Recycle Bin",
+                            isEditMode = isEditMode,
+                            isHiddenItem = navBinHidden,
+                            onToggleVisibility = { toggleItemHidden("nav_recycle_bin") }
+                        ) {
+                            manager.replaceCurrentTabWith(
+                                FilesTab(globalClass.recycleBinDir),
+                                keepCurrentTabAsParent = true
+                            )
+                            onNavigate()
+                        }
+                    }
+                }
                 }
 
-                // Section 3: Servers & Tools
-                CollapsibleDrawerSection(sectionId = "tools", title = "Servers & Tools") {
-
-                    DrawerItem(
-                        icon = Icons.Rounded.VpnKey,
-                        label = "Private Wallet"
+                "storage" -> {
+                if (storageList.isNotEmpty()) {
+                    CollapsibleDrawerSection(
+                        sectionId = "storage",
+                        title = "Storage Devices",
+                        isEditMode = isEditMode,
+                        onToggleEditMode = { editingSections["storage"] = !isEditMode },
+                        onMoveSectionUp = if (canMoveUp) ({ moveSection("storage", -1) }) else null,
+                        onMoveSectionDown = if (canMoveDown) ({ moveSection("storage", 1) }) else null
                     ) {
-                        manager.replaceCurrentTabWith(VaultTab())
-                        onNavigate()
-                    }
-
-                    DrawerItem(
-                        icon = Icons.Rounded.SettingsEthernet,
-                        label = "FTP Server"
-                    ) {
-                        manager.replaceCurrentTabWith(FtpServerTab())
-                        onNavigate()
-                    }
-
-                    DrawerItem(
-                        icon = Icons.Rounded.Share,
-                        label = "Web Sharing"
-                    ) {
-                        manager.replaceCurrentTabWith(WebSharingTab())
-                        onNavigate()
-                    }
-
-                    DrawerItem(
-                        icon = Icons.Rounded.PieChart,
-                        label = stringResource(R.string.storage_analysis)
-                    ) {
-                        manager.replaceCurrentTabWith(StorageAnalysisTab())
-                        onNavigate()
-                    }
-
-                    DrawerItem(
-                        icon = Icons.Rounded.Difference,
-                        label = stringResource(R.string.duplicate_finder)
-                    ) {
-                        manager.replaceCurrentTabWith(DuplicateFinderTab())
-                        onNavigate()
-                    }
-                } // end Tools section
-
-                // Section 4: Remote Connections
-                CollapsibleDrawerSection(sectionId = "remote", title = "Remote Connections") {
-
-                    for (conn in remoteConnections) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 2.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    manager.replaceCurrentTabWith(FilesTab(RemoteFileHolder.rootHolder(conn)))
+                        for (device in storageList) {
+                            val itemId = "storage_${device.title}"
+                            val isHidden = itemId in hiddenItems
+                            if (isEditMode || !isHidden) {
+                                StorageDrawerItem(
+                                    device = device,
+                                    isEditMode = isEditMode,
+                                    isHiddenItem = isHidden,
+                                    onToggleVisibility = { toggleItemHidden(itemId) }
+                                ) {
+                                    manager.replaceCurrentTabWith(
+                                        FilesTab(device.contentHolder),
+                                        keepCurrentTabAsParent = true
+                                    )
                                     onNavigate()
                                 }
-                                .padding(vertical = 10.dp, horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            }
+                        }
+                    }
+                }
+                }
+
+                "tools" -> {
+                CollapsibleDrawerSection(
+                    sectionId = "tools",
+                    title = "Servers & Tools",
+                    isEditMode = isEditMode,
+                    onToggleEditMode = { editingSections["tools"] = !isEditMode },
+                    onMoveSectionUp = if (canMoveUp) ({ moveSection("tools", -1) }) else null,
+                    onMoveSectionDown = if (canMoveDown) ({ moveSection("tools", 1) }) else null
+                ) {
+                    val vaultHidden = "tool_vault" in hiddenItems
+                    if (isEditMode || !vaultHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.VpnKey,
+                            label = "Private Wallet",
+                            isEditMode = isEditMode,
+                            isHiddenItem = vaultHidden,
+                            onToggleVisibility = { toggleItemHidden("tool_vault") }
                         ) {
-                            Icon(
-                                imageVector = when (conn.type) {
-                                    "FTP" -> Icons.Rounded.SettingsEthernet
-                                    "SFTP" -> Icons.Rounded.Dns
-                                    "WebDav" -> Icons.Rounded.Cloud
-                                    else -> Icons.Rounded.NetworkWifi
-                                },
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(
-                                text = conn.name,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            // Delete Connection Icon
-                            IconButton(
-                                onClick = {
-                                    NetworkConnectionsService.deleteConnection(context, conn.id)
-                                    remoteConnections = NetworkConnectionsService.getConnections(context)
-                                },
-                                modifier = Modifier.size(24.dp)
+                            manager.openToolInNewTab(VaultTab())
+                            onNavigate()
+                        }
+                    }
+
+                    val ftpHidden = "tool_ftp" in hiddenItems
+                    if (isEditMode || !ftpHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.SettingsEthernet,
+                            label = "FTP Server",
+                            isEditMode = isEditMode,
+                            isHiddenItem = ftpHidden,
+                            onToggleVisibility = { toggleItemHidden("tool_ftp") }
+                        ) {
+                            manager.openToolInNewTab(FtpServerTab())
+                            onNavigate()
+                        }
+                    }
+
+                    val webShareHidden = "tool_web_share" in hiddenItems
+                    if (isEditMode || !webShareHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Share,
+                            label = "Web Sharing",
+                            isEditMode = isEditMode,
+                            isHiddenItem = webShareHidden,
+                            onToggleVisibility = { toggleItemHidden("tool_web_share") }
+                        ) {
+                            manager.openToolInNewTab(WebSharingTab())
+                            onNavigate()
+                        }
+                    }
+
+                    val storageAnalysisHidden = "tool_storage_analysis" in hiddenItems
+                    if (isEditMode || !storageAnalysisHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.PieChart,
+                            label = stringResource(R.string.storage_analysis),
+                            isEditMode = isEditMode,
+                            isHiddenItem = storageAnalysisHidden,
+                            onToggleVisibility = { toggleItemHidden("tool_storage_analysis") }
+                        ) {
+                            manager.openToolInNewTab(StorageAnalysisTab())
+                            onNavigate()
+                        }
+                    }
+
+                    val duplicateFinderHidden = "tool_duplicate_finder" in hiddenItems
+                    if (isEditMode || !duplicateFinderHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Difference,
+                            label = stringResource(R.string.duplicate_finder),
+                            isEditMode = isEditMode,
+                            isHiddenItem = duplicateFinderHidden,
+                            onToggleVisibility = { toggleItemHidden("tool_duplicate_finder") }
+                        ) {
+                            manager.openToolInNewTab(DuplicateFinderTab())
+                            onNavigate()
+                        }
+                    }
+                }
+                }
+
+                "remote" -> {
+                CollapsibleDrawerSection(
+                    sectionId = "remote",
+                    title = "Remote Connections",
+                    isEditMode = isEditMode,
+                    onToggleEditMode = { editingSections["remote"] = !isEditMode },
+                    onMoveSectionUp = if (canMoveUp) ({ moveSection("remote", -1) }) else null,
+                    onMoveSectionDown = if (canMoveDown) ({ moveSection("remote", 1) }) else null
+                ) {
+                    for (conn in remoteConnections) {
+                        val itemId = "remote_${conn.id}"
+                        val isHidden = itemId in hiddenItems
+                        if (isEditMode || !isHidden) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .alpha(if (isHidden) 0.45f else 1f)
+                                    .clickable {
+                                        if (isEditMode) {
+                                            toggleItemHidden(itemId)
+                                        } else {
+                                            manager.replaceCurrentTabWith(
+                                                FilesTab(RemoteFileHolder.rootHolder(conn)),
+                                                keepCurrentTabAsParent = true
+                                            )
+                                            onNavigate()
+                                        }
+                                    }
+                                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Delete,
-                                    contentDescription = "Delete Connection",
-                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(20.dp)
+                                    imageVector = when (conn.type) {
+                                        "FTP" -> Icons.Rounded.SettingsEthernet
+                                        "SFTP" -> Icons.Rounded.Dns
+                                        "WebDav" -> Icons.Rounded.Cloud
+                                        else -> Icons.Rounded.NetworkWifi
+                                    },
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
                                 )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = conn.name,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                if (isEditMode) {
+                                    IconButton(
+                                        onClick = { toggleItemHidden(itemId) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isHidden) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                            contentDescription = if (isHidden) "Show item" else "Hide item",
+                                            tint = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        NetworkConnectionsService.deleteConnection(context, conn.id)
+                                        remoteConnections = NetworkConnectionsService.getConnections(context)
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = "Delete Connection",
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // Add Remote Connection button
-                    DrawerItem(
-                        icon = Icons.Rounded.AddLink,
-                        label = "Add Remote Connection",
-                        tint = MaterialTheme.colorScheme.secondary
-                    ) {
-                        manager.replaceCurrentTabWith(NetworkConnectionWizardTab())
-                        onNavigate()
+                    val remoteAddHidden = "remote_add" in hiddenItems
+                    if (isEditMode || !remoteAddHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.AddLink,
+                            label = "Add Remote Connection",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            isEditMode = isEditMode,
+                            isHiddenItem = remoteAddHidden,
+                            onToggleVisibility = { toggleItemHidden("remote_add") }
+                        ) {
+                            manager.openToolInNewTab(NetworkConnectionWizardTab())
+                            onNavigate()
+                        }
                     }
-                } // end Remote section
+                }
+                }
+                    }
+                }
 
                 // Settings / Preferences button
                 DrawerItem(
@@ -450,6 +673,10 @@ fun NFileDrawerContent(
 private fun CollapsibleDrawerSection(
     sectionId: String,
     title: String,
+    isEditMode: Boolean = false,
+    onToggleEditMode: (() -> Unit)? = null,
+    onMoveSectionUp: (() -> Unit)? = null,
+    onMoveSectionDown: (() -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -479,9 +706,53 @@ private fun CollapsibleDrawerSection(
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
             modifier = Modifier.weight(1f)
         )
+        if (isEditMode) {
+            IconButton(
+                onClick = { onMoveSectionUp?.invoke() },
+                enabled = onMoveSectionUp != null,
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowUp,
+                    contentDescription = "Move section up",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (onMoveSectionUp != null) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                )
+            }
+            IconButton(
+                onClick = { onMoveSectionDown?.invoke() },
+                enabled = onMoveSectionDown != null,
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Move section down",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (onMoveSectionDown != null) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+        }
         if (action != null) {
             action()
             Spacer(modifier = Modifier.width(6.dp))
+        }
+        if (onToggleEditMode != null) {
+            IconButton(
+                onClick = onToggleEditMode,
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = if (isEditMode) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                    contentDescription = "Edit section items and order",
+                    modifier = Modifier.size(15.dp),
+                    tint = if (isEditMode) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
         }
         Icon(
             imageVector = Icons.Rounded.ExpandMore,
@@ -494,7 +765,7 @@ private fun CollapsibleDrawerSection(
     }
 
     AnimatedVisibility(
-        visible = !isCollapsed,
+        visible = !isCollapsed || isEditMode,
         enter = expandVertically(),
         exit = shrinkVertically()
     ) {
@@ -506,6 +777,8 @@ private fun CollapsibleDrawerSection(
 private fun DrawerTabItem(
     label: String,
     isActive: Boolean,
+    isPinned: Boolean = false,
+    isCopyHereDestination: Boolean = false,
     index: Int,
     totalTabs: Int,
     isReorderMode: Boolean,
@@ -528,9 +801,13 @@ private fun DrawerTabItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = Icons.Rounded.Tab,
+            imageVector = when {
+                isCopyHereDestination -> Icons.Rounded.MoveToInbox
+                isPinned -> Icons.Rounded.PushPin
+                else -> Icons.Rounded.Tab
+            },
             contentDescription = null,
-            tint = if (isActive) MaterialTheme.colorScheme.primary
+            tint = if (isActive || isCopyHereDestination) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp)
         )
@@ -575,7 +852,7 @@ private fun DrawerTabItem(
             }
         }
 
-        if (totalTabs > 1) {
+        if (totalTabs > 1 && !isPinned) {
             IconButton(
                 onClick = onClose,
                 modifier = Modifier.size(28.dp)
@@ -611,6 +888,9 @@ private fun DrawerItem(
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     fontWeight: FontWeight? = null,
+    isEditMode: Boolean = false,
+    isHiddenItem: Boolean = false,
+    onToggleVisibility: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Row(
@@ -618,7 +898,14 @@ private fun DrawerItem(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() }
+            .alpha(if (isHiddenItem) 0.45f else 1f)
+            .clickable {
+                if (isEditMode && onToggleVisibility != null) {
+                    onToggleVisibility()
+                } else {
+                    onClick()
+                }
+            }
             .padding(vertical = 12.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -638,12 +925,28 @@ private fun DrawerItem(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        if (isEditMode && onToggleVisibility != null) {
+            IconButton(
+                onClick = onToggleVisibility,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = if (isHiddenItem) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                    contentDescription = if (isHiddenItem) "Show item" else "Hide item",
+                    tint = if (isHiddenItem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun StorageDrawerItem(
     device: StorageDevice,
+    isEditMode: Boolean = false,
+    isHiddenItem: Boolean = false,
+    onToggleVisibility: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val progress = if (device.totalSize > 0) {
@@ -661,7 +964,14 @@ private fun StorageDrawerItem(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() }
+            .alpha(if (isHiddenItem) 0.45f else 1f)
+            .clickable {
+                if (isEditMode && onToggleVisibility != null) {
+                    onToggleVisibility()
+                } else {
+                    onClick()
+                }
+            }
             .padding(vertical = 10.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -703,6 +1013,20 @@ private fun StorageDrawerItem(
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (isEditMode && onToggleVisibility != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = onToggleVisibility,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = if (isHiddenItem) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                    contentDescription = if (isHiddenItem) "Show item" else "Hide item",
+                    tint = if (isHiddenItem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

@@ -236,8 +236,18 @@ class TextEditorManager {
                 withContext(Dispatchers.Main) { onSaved() }
             } catch (e: Exception) {
                 logger.logError(e)
+                val targetFile = (fileInstance.file as? com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder)?.file
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = targetFile,
+                    throwable = e
+                )
                 withContext(Dispatchers.Main) {
-                    globalClass.showMsg(R.string.failed_to_save)
+                    globalClass.showMsg(
+                        com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                            globalClass.getString(R.string.failed_to_save),
+                            reason
+                        )
+                    )
                 }
             } finally {
                 isSaving = false

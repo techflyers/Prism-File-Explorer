@@ -495,8 +495,12 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                     )
                     NetworkConnectionsService.saveConnection(context, connectionModel)
                     Toast.makeText(context, "Connection Saved!", Toast.LENGTH_SHORT).show()
-                    // Go back to home
-                    globalClass.mainActivityManager.replaceCurrentTabWith(HomeTab())
+                    // Return to previous tab if opened from one, otherwise Home
+                    if (tab.parentTab != null) {
+                        globalClass.mainActivityManager.canExit()
+                    } else {
+                        globalClass.mainActivityManager.replaceCurrentTabWith(HomeTab())
+                    }
                 },
                 modifier = Modifier
                     .weight(1f)

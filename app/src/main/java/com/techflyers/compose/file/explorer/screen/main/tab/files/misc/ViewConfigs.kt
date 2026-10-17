@@ -8,5 +8,6 @@ data class ViewConfigs(
     val cropThumbnails: Boolean = false,
     val galleryMode: Boolean = false,
     val hideMediaNames: Boolean = false,
-    val itemSize: Int = globalClass.preferencesManager.itemSize
+    val itemSize: Int = globalClass.preferencesManager.itemSize,
+    val filenameMaxLines: Int = globalClass.preferencesManager.filenameMaxLines
 )

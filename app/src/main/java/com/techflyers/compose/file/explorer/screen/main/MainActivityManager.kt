@@ -70,71 +70,82 @@ class MainActivityManager {
     private val closedTabsHistory = mutableListOf<ClosedTabEntry>()
     var lastHomeTab: HomeTab? = null
 
-    private fun createClosedTabEntry(tab: Tab): ClosedTabEntry {
+    private fun createClosedTabEntry(tab: Tab, originalIndex: Int = -1): ClosedTabEntry {
         return when (tab) {
             is FilesTab -> {
                 val folder = tab.activeFolder
                 ClosedTabEntry(
                     title = tab.header.ifEmpty { folder.displayName },
                     subtitle = folder.displayName,
+                    originalIndex = originalIndex,
                     createTab = { FilesTab(source = folder) }
                 )
             }
             is HomeTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Home" },
                 subtitle = "Home",
+                originalIndex = originalIndex,
                 createTab = { HomeTab() }
             )
             is AppsTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Apps" },
                 subtitle = "Apps",
+                originalIndex = originalIndex,
                 createTab = { AppsTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Vault" },
                 subtitle = "Vault",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "FTP Server" },
                 subtitle = "FTP Server",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Web Sharing" },
                 subtitle = "Web Sharing",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Network Wizard" },
                 subtitle = "Network Connection",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.RemoteExplorerTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { tab.connection.name },
                 subtitle = tab.connection.name,
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.RemoteExplorerTab(tab.connection) }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Storage" },
                 subtitle = "Storage Analysis",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab() }
             )
             is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Duplicates" },
                 subtitle = "Duplicate Finder",
+                originalIndex = originalIndex,
                 createTab = { com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab() }
             )
             else -> ClosedTabEntry(
                 title = tab.header.ifEmpty { "Tab" },
                 subtitle = "",
+                originalIndex = originalIndex,
                 createTab = { HomeTab() }
             )
         }
     }
 
-    fun recordClosedTab(tab: Tab) {
-        val entry = createClosedTabEntry(tab)
+    fun recordClosedTab(tab: Tab, originalIndex: Int = -1) {
+        val entry = createClosedTabEntry(tab, originalIndex)
         synchronized(closedTabsHistory) {
             closedTabsHistory.add(0, entry)
             if (closedTabsHistory.size > 30) {
@@ -149,7 +160,7 @@ class MainActivityManager {
             closedTabsHistory.removeAt(0)
         }
         val restoredTab = entry.createTab()
-        addTabAndSelect(restoredTab)
+        addTabAndSelect(restoredTab, entry.originalIndex)
         return true
     }
 
@@ -158,7 +169,40 @@ class MainActivityManager {
             closedTabsHistory.remove(entry)
         }
         val restoredTab = entry.createTab()
-        addTabAndSelect(restoredTab)
+        addTabAndSelect(restoredTab, entry.originalIndex)
+    }
+
+    fun duplicateTabAt(index: Int) {
+        val currentTabs = _state.value.tabs
+        if (index !in currentTabs.indices) return
+        val sourceTab = currentTabs[index]
+        val clonedTab = createClosedTabEntry(sourceTab, index + 1).createTab()
+        addTabAndSelect(clonedTab, index + 1)
+    }
+
+    fun togglePinTabAt(index: Int) {
+        val currentTabs = _state.value.tabs
+        if (index !in currentTabs.indices) return
+        val targetTab = currentTabs[index]
+        val activeTab = getActiveTab()
+        val newPinnedState = !targetTab.isPinned
+        targetTab.isPinned = newPinnedState
+
+        _state.update { state ->
+            val mutable = state.tabs.toMutableList()
+            mutable.removeAt(index)
+            val insertIndex = if (newPinnedState) {
+                val lastPinned = mutable.indexOfLast { it.isPinned }
+                if (lastPinned == -1) 0 else lastPinned + 1
+            } else {
+                val lastPinned = mutable.indexOfLast { it.isPinned }
+                if (lastPinned == -1) 0 else lastPinned + 1
+            }
+            mutable.add(insertIndex.coerceIn(0, mutable.size), targetTab)
+            val newSelected = activeTab?.let { act -> mutable.indexOfFirst { it.id == act.id }.takeIf { it >= 0 } }
+                ?: insertIndex
+            state.copy(tabs = mutable, selectedTabIndex = newSelected)
+        }
     }
 
     fun removeClosedTab(entry: ClosedTabEntry) {
@@ -180,31 +224,32 @@ class MainActivityManager {
     }
 
     /**
-     * Removes all tabs except the one at the given index.
-     *
-     * If the tab at the given index is not already selected, it will be selected first.
-     * Then, all other tabs will be removed.
+     * Removes all tabs except the one at the given index (and any pinned tabs).
      *
      * @param tabIndex The index of the tab to keep.
      */
     fun removeOtherTabs(tabIndex: Int) {
-        // For now, you can only remove tabs other than the selected tab
-        if (tabIndex isNot _state.value.selectedTabIndex) return
-
-        val tabToKeep = _state.value.tabs[tabIndex]
-        val tabsToRemove = _state.value.tabs.filter { it != tabToKeep }
-
-        // Call onTabRemoved on tabs being removed BEFORE state update
-        tabsToRemove.forEach {
-            recordClosedTab(it)
-            it.onTabRemoved()
+        if (tabIndex !in _state.value.tabs.indices) return
+        if (tabIndex isNot _state.value.selectedTabIndex) {
+            selectTabAt(tabIndex, true)
         }
 
-        // Update the state
+        val currentTabs = _state.value.tabs
+        val tabToKeep = currentTabs[tabIndex]
+        val tabsToKeep = currentTabs.filter { it == tabToKeep || it.isPinned }
+
+        currentTabs.forEachIndexed { idx, tab ->
+            if (tab !in tabsToKeep) {
+                recordClosedTab(tab, idx)
+                tab.onTabRemoved()
+            }
+        }
+
+        val newSelectedIndex = tabsToKeep.indexOfFirst { it.id == tabToKeep.id }.coerceAtLeast(0)
         _state.update {
             it.copy(
-                tabs = listOf(tabToKeep),
-                selectedTabIndex = 0
+                tabs = tabsToKeep,
+                selectedTabIndex = newSelectedIndex
             )
         }
     }
@@ -212,11 +257,16 @@ class MainActivityManager {
     fun removeTabAt(index: Int) {
         // There must be at least one tab
         if (_state.value.tabs.size <= 1) return
+        if (index !in _state.value.tabs.indices) return
 
         val tabToRemove = _state.value.tabs[index]
+        if (tabToRemove.isPinned) {
+            showMsg("Unpin tab before closing")
+            return
+        }
         val currentSelectedIndex = _state.value.selectedTabIndex
 
-        recordClosedTab(tabToRemove)
+        recordClosedTab(tabToRemove, index)
 
         // Call callbacks on the tab to be removed BEFORE state update
         if (currentSelectedIndex == index) {
@@ -261,18 +311,22 @@ class MainActivityManager {
         // Stop the active tab BEFORE state update
         currentActiveTab?.onTabStopped()
 
-        // Validate the index
+        val currentTabs = _state.value.tabs
+        val firstUnpinned = currentTabs.indexOfFirst { !it.isPinned }.let { if (it == -1) currentTabs.size else it }
         val validatedIndex = if (index isNot -1) {
-            max(0, min(index, _state.value.tabs.lastIndex + 1))
+            max(firstUnpinned, min(index, currentTabs.size))
         } else {
-            _state.value.tabs.lastIndex + 1
+            currentTabs.size
         }
 
-        // Update the state
+        // Update the state by inserting at validatedIndex
         _state.update {
+            val updated = it.tabs.toMutableList().apply {
+                add(validatedIndex.coerceIn(0, size), tab)
+            }
             it.copy(
-                tabs = _state.value.tabs + tab,
-                selectedTabIndex = validatedIndex
+                tabs = updated,
+                selectedTabIndex = validatedIndex.coerceIn(0, updated.lastIndex)
             )
         }
 
@@ -282,6 +336,16 @@ class MainActivityManager {
         } else {
             tab.onTabStarted()
         }
+    }
+
+
+    /** Opens a tool tab in a new tab with parentTab set for Back (#70). */
+    fun openToolInNewTab(tab: Tab) {
+        val origin = getActiveTab()
+        if (origin != null && origin !== tab) {
+            tab.parentTab = origin
+        }
+        addTabAndSelect(tab)
     }
 
     fun selectTabAt(index: Int, skipTabRefresh: Boolean = false) {
@@ -321,8 +385,28 @@ class MainActivityManager {
 
     fun replaceCurrentTabWith(tab: Tab, keepCurrentTabAsParent: Boolean = false) {
         val currentActiveTab = getActiveTab()
+        val currentSelectedIndex = _state.value.selectedTabIndex
         if (currentActiveTab is HomeTab) lastHomeTab = currentActiveTab
         if (tab is HomeTab) lastHomeTab = tab
+
+        // Prevent duplicate tab IDs if `tab` is already open at another index
+        val existingIdx = _state.value.tabs.indexOfFirst { it === tab || it.id == tab.id }
+        if (existingIdx != -1 && existingIdx != currentSelectedIndex) {
+            val target = _state.value.tabs[existingIdx]
+            currentActiveTab?.apply {
+                onTabStopped()
+                if (!keepCurrentTabAsParent) onTabRemoved()
+            }
+            val newSelected = if (currentSelectedIndex < existingIdx) existingIdx - 1 else existingIdx
+            _state.update { state ->
+                state.copy(
+                    tabs = state.tabs.filterIndexed { i, _ -> i != currentSelectedIndex },
+                    selectedTabIndex = newSelected
+                )
+            }
+            if (target.isCreated) target.onTabResumed() else target.onTabStarted()
+            return
+        }
 
         // Stop and remove the active tab BEFORE state update
         currentActiveTab?.apply {
@@ -330,8 +414,13 @@ class MainActivityManager {
             if (!keepCurrentTabAsParent) onTabRemoved()
         }
 
-        if (keepCurrentTabAsParent) {
+        if (keepCurrentTabAsParent && currentActiveTab !== tab) {
             tab.parentTab = currentActiveTab
+        }
+
+        // Preserve pin status if replacing in-place
+        if (currentActiveTab?.isPinned == true) {
+            tab.isPinned = true
         }
 
         // Update the state
@@ -468,16 +557,57 @@ class MainActivityManager {
             return false
         }
 
-        // Replace with parent tab if exists
-        if (getActiveTab()!!.parentTab != null) {
-            replaceCurrentTabWith(getActiveTab()!!.parentTab!!, false)
-            return false
+        // Replace with parent tab; resolve by stable id if object was closed/reordered (#70)
+        val activeForParent = getActiveTab()!!
+        val parent = activeForParent.parentTab
+        if (parent != null) {
+            val existingIndex = _state.value.tabs.indexOfFirst { it === parent || it.id == parent.id }
+            if (existingIndex != -1 && existingIndex != selectedTabIndex) {
+                val target = _state.value.tabs[existingIndex]
+                activeForParent.onTabStopped()
+                activeForParent.onTabRemoved()
+                val newSelectedIndex = if (selectedTabIndex < existingIndex) existingIndex - 1 else existingIndex
+                _state.update { state ->
+                    state.copy(
+                        tabs = state.tabs.filterIndexed { i, _ -> i != selectedTabIndex },
+                        selectedTabIndex = newSelectedIndex
+                    )
+                }
+                if (target.isCreated) {
+                    target.onTabResumed()
+                } else {
+                    target.onTabStarted()
+                }
+                return false
+            } else if (existingIndex == -1) {
+                replaceCurrentTabWith(parent, false)
+                return false
+            }
+            activeForParent.parentTab = null
         }
 
         // Replace the active tab with the home tab (if turned on in settings)
         if (getActiveTab() !is HomeTab && !globalClass.preferencesManager.skipHomeWhenTabClosed) {
             isExitingViaBackPress = true
-            replaceCurrentTabWith(lastHomeTab ?: HomeTab())
+            val existingHomeIndex = _state.value.tabs.indexOfFirst { it is HomeTab }
+            if (existingHomeIndex != -1 && existingHomeIndex != selectedTabIndex && _state.value.tabs.size > 1) {
+                val homeTarget = _state.value.tabs[existingHomeIndex]
+                activeForParent.onTabStopped()
+                activeForParent.onTabRemoved()
+                val newSelectedIndex = if (selectedTabIndex < existingHomeIndex) existingHomeIndex - 1 else existingHomeIndex
+                _state.update { state ->
+                    state.copy(
+                        tabs = state.tabs.filterIndexed { i, _ -> i != selectedTabIndex },
+                        selectedTabIndex = newSelectedIndex
+                    )
+                }
+                if (homeTarget.isCreated) homeTarget.onTabResumed() else homeTarget.onTabStarted()
+            } else {
+                val reusableHome = lastHomeTab?.takeIf { home ->
+                    _state.value.tabs.none { it === home || it.id == home.id }
+                } ?: HomeTab()
+                replaceCurrentTabWith(reusableHome)
+            }
             return false
         }
 
@@ -778,13 +908,14 @@ class MainActivityManager {
     }
 
     fun reorderTabs(from: Int, to: Int) {
-        _state.update {
-            it.copy(
-                tabs = _state.value.tabs.toMutableList().apply {
-                    add(to, removeAt(from))
-                },
-                selectedTabIndex = _state.value.tabs.indexOf(getActiveTab())
-            )
+        val active = getActiveTab()
+        _state.update { state ->
+            val newTabs = state.tabs.toMutableList().apply {
+                add(to, removeAt(from))
+            }
+            val newSelected = active?.let { t -> newTabs.indexOf(t).takeIf { it >= 0 } }
+                ?: state.selectedTabIndex.coerceIn(0, newTabs.lastIndex.coerceAtLeast(0))
+            state.copy(tabs = newTabs, selectedTabIndex = newSelected)
         }
     }
 

@@ -17,5 +17,6 @@ enum class TaskContentStatus {
     SKIP,
     REPLACE,
     ASK,
-    AUTO_RENAME
+    AUTO_RENAME,
+    DUPLICATE_FOLDER
 }

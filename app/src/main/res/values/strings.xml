@@ -216,6 +216,8 @@
     <string name="unknown_artist">Unknown Artist</string>
     <string name="show_folder_s_content_count">Show folder\'s content count</string>
     <string name="show_hidden_files">Show hidden files</string>
+    <string name="show_directory_type_filter_ribbon">Show directory type filters</string>
+    <string name="show_directory_type_filter_ribbon_desc">Show optional Images, Videos, Audio, Docs and Archives filters in folders</string>
     <string name="delete_confirmation_message">Do you really want to delete the selected files?</string>
     <string name="task_subtitle">Content: %1$d</string>
     <string name="cursor_position">%1$d:%2$d</string>

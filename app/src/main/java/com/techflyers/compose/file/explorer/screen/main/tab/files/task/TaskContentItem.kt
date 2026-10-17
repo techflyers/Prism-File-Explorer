@@ -4,6 +4,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.Content
 
 data class TaskContentItem(
     val content: ContentHolder,
-    val relativePath: String,
-    var status: TaskContentStatus
+    var relativePath: String,
+    var status: TaskContentStatus,
+    val rootFolderName: String? = null
 )

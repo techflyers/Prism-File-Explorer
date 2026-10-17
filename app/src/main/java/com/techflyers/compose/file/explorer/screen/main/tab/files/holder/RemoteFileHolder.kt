@@ -128,6 +128,7 @@ class RemoteFileHolder(
     }
 
     override suspend fun createSubFile(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val path = RemotePaths.join(remotePath, name)
         try {
             client.createFile(path)
@@ -140,11 +141,13 @@ class RemoteFileHolder(
             )
         } catch (e: Exception) {
             logger.logError(e)
+            lastCreationError = e.message ?: "Remote server rejected file creation"
             onCreated(null)
         }
     }
 
     override suspend fun createSubFolder(name: String, onCreated: (ContentHolder?) -> Unit) {
+        lastCreationError = null
         val path = RemotePaths.join(remotePath, name)
         try {
             client.createDirectory(path)
@@ -157,6 +160,7 @@ class RemoteFileHolder(
             )
         } catch (e: Exception) {
             logger.logError(e)
+            lastCreationError = e.message ?: "Remote server rejected folder creation"
             onCreated(null)
         }
     }

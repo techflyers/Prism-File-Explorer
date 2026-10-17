@@ -24,6 +24,9 @@ class TaskManager {
     private val allTasks = ConcurrentHashMap<String, Task>()
 
     var pendingTasksVersion by mutableStateOf(0)
+    var taskAddedBannerVersion by mutableStateOf(0)
+    var hasUnconsumedTaskBanner by mutableStateOf(false)
+    var taskAddedBannerMessage by mutableStateOf(emptyString)
 
     val pendingTasks: MutableCollection<Task> = Collections.synchronizedList(mutableListOf<Task>())
     val runningTasks: MutableCollection<Task> = Collections.synchronizedList(mutableListOf<Task>())
@@ -44,7 +47,11 @@ class TaskManager {
         allTasks[task.id] = task
         pendingTasks.add(task)
         pendingTasksVersion++
-        if (notifyUser) globalClass.showMsg(globalClass.resources.getString(R.string.new_task_has_been_added))
+        if (notifyUser) {
+            taskAddedBannerMessage = globalClass.resources.getString(R.string.new_task_has_been_added)
+            hasUnconsumedTaskBanner = true
+            taskAddedBannerVersion++
+        }
     }
 
     fun addTaskAndRun(task: Task, parameters: TaskParameters) {
@@ -163,7 +170,17 @@ class TaskManager {
             TaskStatus.FAILED -> {
                 runningTasks.removeIf { it.id == task.id }
                 failedTasks.add(task)
-                showMsg(R.string.task_failed)
+                val summary = task.progressMonitor.summary.trim()
+                if (summary.isNotEmpty()) {
+                    showMsg(
+                        com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                            globalClass.getString(R.string.task_failed),
+                            summary
+                        )
+                    )
+                } else {
+                    showMsg(R.string.task_failed)
+                }
             }
 
             TaskStatus.PAUSED -> {
@@ -239,6 +256,10 @@ class TaskManager {
             private set
         var message by mutableStateOf(emptyString)
             private set
+        var isFolderConflict by mutableStateOf(false)
+            private set
+        var rootFolderName by mutableStateOf<String?>(null)
+            private set
         var taskContentItem by mutableStateOf<TaskContentItem?>(null)
             private set
         var task by mutableStateOf<Task?>(null)
@@ -246,10 +267,23 @@ class TaskManager {
 
         fun interceptTask(taskContentItem: TaskContentItem, task: Task) {
             this.hasConflict = true
-            this.message = globalClass.resources.getString(
-                R.string.file_already_exists,
-                taskContentItem.content.displayName
-            )
+            val folderName = taskContentItem.rootFolderName
+            this.isFolderConflict = folderName != null || taskContentItem.content.isFolder
+            this.rootFolderName = folderName
+                ?: if (taskContentItem.content.isFolder) taskContentItem.content.displayName else null
+            this.message = if (taskContentItem.content.isFolder) {
+                globalClass.resources.getString(
+                    R.string.file_already_exists,
+                    taskContentItem.content.displayName
+                )
+            } else if (folderName != null) {
+                "\"${taskContentItem.content.displayName}\" already exists in folder \"$folderName\"."
+            } else {
+                globalClass.resources.getString(
+                    R.string.file_already_exists,
+                    taskContentItem.content.displayName
+                )
+            }
             this.taskContentItem = taskContentItem
             this.task = task
         }
@@ -258,11 +292,22 @@ class TaskManager {
             hasConflict = false
             task = null
             message = emptyString
+            isFolderConflict = false
+            rootFolderName = null
             taskContentItem = null
         }
 
         fun hide() {
             reset()
+        }
+
+        fun cancel() {
+            val currentTask = task
+            reset()
+            if (currentTask != null) {
+                globalClass.taskManager.removeTask(currentTask.id)
+                globalClass.taskManager.hideRunningTaskDialog()
+            }
         }
 
         fun resolve(resolution: TaskContentStatus, applyToAllConflicts: Boolean = false) {

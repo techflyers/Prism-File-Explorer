@@ -4,19 +4,28 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Environment
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -122,9 +131,19 @@ import com.techflyers.compose.file.explorer.common.icons.SortSizeSmaller
 import com.techflyers.compose.file.explorer.common.icons.SortSizeLarger
 import com.techflyers.compose.file.explorer.common.icons.SortTypeAscending
 import com.techflyers.compose.file.explorer.common.icons.SortTypeDescending
+import com.techflyers.compose.file.explorer.common.icons.getSortIcon
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FileSortingMenuDialog
 import com.techflyers.compose.file.explorer.common.orIf
 import com.techflyers.compose.file.explorer.common.showMsg
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.FilterListOff
+import androidx.compose.material.icons.rounded.MoveToInbox
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
+import com.techflyers.compose.file.explorer.common.detectVerticalSwipe
+import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
@@ -136,6 +155,8 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskP
 import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 import com.techflyers.compose.file.explorer.screen.preferences.PreferencesActivity
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.io.File
 import kotlin.math.max
 
@@ -234,167 +255,170 @@ fun Toolbar(
             }
         }
 
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (disableTabBar) {
-                SingleRowTabsControl(state.tabs, state.selectedTabIndex)
-            } else {
-                Text(
-                    text = title,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    lineHeight = 20.sp,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (isFilesTab) {
-                val filesTab = activeTab as FilesTab
-                val selectedCount = filesTab.selectedFilesCount.coerceAtLeast(filesTab.selectedFiles.size)
-                if (selectedCount > 0) {
-                    val selectedFolders = filesTab.selectedFiles.values.count { it.isFolder }
-                    val selectedFilesCount = filesTab.selectedFiles.values.count { !it.isFolder }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.alpha(0.9f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Folder,
-                                contentDescription = null,
-                                modifier = Modifier.size(9.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "$selectedFolders",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.InsertDriveFile,
-                                contentDescription = null,
-                                modifier = Modifier.size(9.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "$selectedFilesCount",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = "•",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                text = filesTab.selectedFilesTotalSize.toFormattedSize() +
-                                        if (filesTab.isCalculatingSelectedSize) "…" else "",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                } else if (filesTab.foldersCount == 0 && filesTab.filesCount == 0) {
-                    Icon(
-                        imageVector = Icons.Rounded.Block,
-                        contentDescription = null,
-                        modifier = Modifier.size(10.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                } else if (globalClass.preferencesManager.deepEmptyFolderCheck &&
-                    filesTab.foldersCount > 0 && filesTab.filesCount == 0 &&
-                    filesTab.activeFolder is LocalFileHolder &&
-                    com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker.isFolderEmptyWithin((filesTab.activeFolder as LocalFileHolder).file)
+        if (isLandscape) {
+            val showInlineBreadcrumb = isFilesTab && globalClass.preferencesManager.showPathBar
+            val isTabBarDisabledPref = globalClass.preferencesManager.disableTabBar
+
+            BoxWithConstraints(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                val availableWidth = maxWidth
+                val estimatedTabsWidth = remember(
+                    state.tabs.size,
+                    state.selectedTabIndex,
+                    isTabBarDisabledPref,
+                    (activeTab as? FilesTab)?.tabViewLabel
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.RadioButtonUnchecked,
-                        contentDescription = null,
-                        modifier = Modifier.size(10.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.alpha(0.7f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Folder,
-                                contentDescription = null,
-                                modifier = Modifier.size(9.dp)
-                            )
-                            Text(
-                                text = "${filesTab.foldersCount}",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp
-                            )
+                    if (isTabBarDisabledPref) {
+                        165.dp
+                    } else {
+                        val tabsSum = state.tabs.sumOf { tab ->
+                            val labelLen = ((tab as? FilesTab)?.tabViewLabel ?: tab.header).length
+                            val base = maxOf(88, (labelLen * 7.5f).toInt() + 28)
+                            val pinExtra = if (tab.isPinned) 16 else 0
+                            base + pinExtra + 4
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.InsertDriveFile,
-                                contentDescription = null,
-                                modifier = Modifier.size(9.dp)
-                            )
-                            Text(
-                                text = "${filesTab.filesCount}",
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp
-                            )
-                        }
+                        (36 + tabsSum).dp
                     }
                 }
-            } else {
-                AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+
+                val filesTabForBreadcrumb = activeTab as? FilesTab
+                val estimatedBreadcrumbWidth = remember(
+                    showInlineBreadcrumb,
+                    filesTabForBreadcrumb?.currentPathSegments,
+                    filesTabForBreadcrumb?.highlightedPathSegment
+                ) {
+                    if (!showInlineBreadcrumb || filesTabForBreadcrumb == null) {
+                        0.dp
+                    } else {
+                        val segSum = filesTabForBreadcrumb.currentPathSegments.sumOf { seg ->
+                            val labelLen = when {
+                                seg.uniquePath == Environment.getExternalStorageDirectory().absolutePath -> 16
+                                seg.uniquePath == File.separator -> 4
+                                else -> seg.displayName.length
+                            }
+                            14 + (labelLen * 7.2f).toInt() + 14
+                        }
+                        (34 + segSum).dp
+                    }
+                }
+
+                val targetTabsMaxWidth = if (!showInlineBreadcrumb) {
+                    availableWidth
+                } else if (estimatedTabsWidth + estimatedBreadcrumbWidth <= availableWidth) {
+                    estimatedTabsWidth
+                } else {
+                    val minTabsWidth = minOf(
+                        estimatedTabsWidth,
+                        (availableWidth * 0.34f).coerceAtLeast(140.dp)
+                    )
+                    val minBreadcrumbWidth = minOf(
+                        estimatedBreadcrumbWidth,
+                        (availableWidth * 0.35f).coerceAtLeast(150.dp)
+                    )
+                    val desiredBreadcrumb = estimatedBreadcrumbWidth.coerceAtMost(availableWidth - minTabsWidth)
+                    if (estimatedTabsWidth <= availableWidth - desiredBreadcrumb) {
+                        estimatedTabsWidth
+                    } else {
+                        val totalDesired = (estimatedTabsWidth.value + estimatedBreadcrumbWidth.value).coerceAtLeast(1f)
+                        val breadcrumbShare = (estimatedBreadcrumbWidth.value / totalDesired).coerceIn(0.38f, 0.68f)
+                        val allocatedBreadcrumb = (availableWidth * breadcrumbShare)
+                            .coerceIn(minBreadcrumbWidth, availableWidth - minTabsWidth)
+                        (availableWidth - allocatedBreadcrumb).coerceAtLeast(minTabsWidth)
+                    }
+                }
+
+                val animatedTabsMaxWidth by animateDpAsState(
+                    targetValue = targetTabsMaxWidth,
+                    label = "landscapeTabsMaxWidth"
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = if (showInlineBreadcrumb) {
+                            Modifier.widthIn(max = animatedTabsMaxWidth)
+                        } else {
+                            Modifier.weight(1f)
+                        },
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        if (isTabBarDisabledPref) {
+                            SingleRowTabsControl(state.tabs, state.selectedTabIndex)
+                        } else {
+                            InlineLandscapeTabBar(
+                                tabLayoutState = state.tabLayoutState,
+                                tabs = state.tabs,
+                                selectedTabIndex = state.selectedTabIndex,
+                                onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+                                onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() }
+                            )
+                        }
+                        if (isFilesTab) {
+                            FilesTabSubtitleIndicator(activeTab as FilesTab)
+                        } else {
+                            AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+                                Text(
+                                    modifier = Modifier.alpha(0.7f),
+                                    text = subtitle,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    lineHeight = 16.sp,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    if (showInlineBreadcrumb && filesTabForBreadcrumb != null) {
+                        VerticalDivider(
+                            modifier = Modifier
+                                .height(24.dp)
+                                .padding(horizontal = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+                        InlineToolbarBreadcrumb(
+                            tab = filesTabForBreadcrumb,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                if (disableTabBar) {
+                    SingleRowTabsControl(state.tabs, state.selectedTabIndex)
+                } else {
                     Text(
-                        modifier = Modifier.alpha(0.7f),
-                        text = subtitle,
-                        fontSize = 10.sp,
+                        text = title,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
-                        lineHeight = 16.sp,
+                        lineHeight = 20.sp,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (isFilesTab) {
+                    FilesTabSubtitleIndicator(activeTab as FilesTab)
+                } else {
+                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+                        Text(
+                            modifier = Modifier.alpha(0.7f),
+                            text = subtitle,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            lineHeight = 16.sp,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
-        }
-
-        // Inline breadcrumb bar in landscape mode (between title and action buttons)
-        if (isLandscape && isFilesTab) {
-            val filesTab = activeTab as FilesTab
-            InlineToolbarBreadcrumb(
-                tab = filesTab,
-                modifier = Modifier.weight(1f)
-            )
         }
 
         if (isFilesTab) {
@@ -435,6 +459,18 @@ fun Toolbar(
             // Overflow menu
             MoreOptionsButton(modifier = buttonModifier)
         } else {
+            if (activeTab is HomeTab) {
+                TooltipIconButton(
+                    tooltip = stringResource(R.string.search),
+                    onClick = { activeTab.showSearchDialog = true },
+                    modifier = buttonModifier
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = stringResource(R.string.search)
+                    )
+                }
+            }
             MoreOptionsButton(modifier = buttonModifier)
         }
     }
@@ -449,6 +485,7 @@ fun SingleRowTabsControl(
     var showTabDropdown by remember { mutableStateOf(false) }
     val currentTab = tabs.getOrNull(selectedTabIndex)
     val currentLabel = (currentTab as? FilesTab)?.tabViewLabel ?: currentTab?.header ?: ""
+    val isCurrentCopyHere = (currentTab as? FilesTab)?.copyHereTargetFolder != null
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -464,6 +501,14 @@ fun SingleRowTabsControl(
                     .clickable { showTabDropdown = true }
                     .padding(horizontal = 6.dp, vertical = 4.dp)
             ) {
+                if (isCurrentCopyHere) {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentPaste,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp).padding(end = 3.dp)
+                    )
+                }
                 Text(
                     text = currentLabel,
                     style = MaterialTheme.typography.titleMedium,
@@ -701,7 +746,8 @@ fun MoreOptionsButton(modifier: Modifier = Modifier) {
                 }
 
                 // If single row navigation mode is active, Create New File moves into overflow
-                if (globalClass.preferencesManager.disableTabBar && !isRecycleBin) {
+                val isLandscapeMenu = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+                if ((globalClass.preferencesManager.disableTabBar || isLandscapeMenu) && !isRecycleBin) {
                     DropdownMenuItem(
                         text = { Text(text = stringResource(R.string.create_new)) },
                         onClick = {
@@ -717,35 +763,31 @@ fun MoreOptionsButton(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Tasks panel
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(R.string.tasks)) },
-                    onClick = {
-                        activeTab.toggleTasksPanel(true)
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.AddTask,
-                            contentDescription = null
-                        )
-                    }
-                )
-
-                // Bookmarks
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(R.string.bookmarks)) },
-                    onClick = {
-                        activeTab.toggleBookmarksDialog(true)
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.Bookmark,
-                            contentDescription = null
-                        )
-                    }
-                )
+                val bottomToolbarVisible = globalClass.preferencesManager.enableBottomToolbar
+                val inSelection = activeTab.selectedFiles.isNotEmpty()
+                val showTasksBookmarksInOverflow = !bottomToolbarVisible || inSelection || isRecycleBin
+                if (showTasksBookmarksInOverflow) {
+                    DropdownMenuItem(
+                        text = { Text(text = stringResource(R.string.tasks)) },
+                        onClick = {
+                            activeTab.toggleTasksPanel(true)
+                            showOptionsMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(imageVector = Icons.Rounded.AddTask, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(text = stringResource(R.string.bookmarks)) },
+                        onClick = {
+                            activeTab.toggleBookmarksDialog(true)
+                            showOptionsMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(imageVector = Icons.Rounded.Bookmark, contentDescription = null)
+                        }
+                    )
+                }
 
                 HorizontalDivider()
 
@@ -868,40 +910,23 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
     var showMenu by remember { mutableStateOf(false) }
     var showOptionsDialog by remember { mutableStateOf(false) }
 
-    // Local observable state — initialized from prefs each time menu opens, updated on click
-    var applyForThisFolder by remember { mutableStateOf(false) }
-    var currentMethod by remember { mutableStateOf(prefs.defaultSortMethod) }
-    var currentReverse by remember { mutableStateOf(prefs.reverse) }
-    var currentFoldersFirst by remember { mutableStateOf(prefs.showFoldersFirst) }
-
-    // Helper: load latest values from prefs into local state
-    fun loadFromPrefs() {
-        val specific = prefs.getSortingPrefsFor(tab.activeFolder)
-        applyForThisFolder = specific.applyForThisFileOnly
-        if (applyForThisFolder) {
-            currentMethod = specific.sortMethod
-            currentReverse = specific.reverseSorting
-            currentFoldersFirst = specific.showFoldersFirst
-        } else {
-            currentMethod = prefs.defaultSortMethod
-            currentReverse = prefs.reverse
-            currentFoldersFirst = prefs.showFoldersFirst
-        }
+    LaunchedEffect(
+        tab.activeFolder.uniquePath,
+        prefs.defaultSortMethod,
+        prefs.reverse,
+        prefs.showFoldersFirst
+    ) {
+        tab.updateSortingConfig()
     }
 
-    LaunchedEffect(tab.activeFolder.uniquePath, prefs.defaultSortMethod, prefs.reverse, prefs.showFoldersFirst) {
-        loadFromPrefs()
-    }
+    val sortingPrefs = tab.sortingPrefs
+    val currentMethod = sortingPrefs.sortMethod
+    val currentReverse = sortingPrefs.reverseSorting
+    val currentFoldersFirst = sortingPrefs.showFoldersFirst
+    val applyForThisFolder = sortingPrefs.applyForThisFileOnly
 
     val currentSortIcon = remember(currentMethod, currentReverse) {
-        when (currentMethod) {
-            SortingMethod.SORT_BY_NAME -> if (currentReverse) PrismIcons.SortNameDescending else PrismIcons.SortNameAscending
-            SortingMethod.SORT_BY_SIZE -> if (currentReverse) PrismIcons.SortSizeLarger else PrismIcons.SortSizeSmaller
-            SortingMethod.SORT_BY_DATE -> if (currentReverse) Icons.Rounded.History else Icons.Rounded.Update
-            SortingMethod.SORT_BY_TYPE -> if (currentReverse) PrismIcons.SortTypeDescending else PrismIcons.SortTypeAscending
-            SortingMethod.SORT_BY_SHUFFLED -> Icons.Default.Shuffle
-            else -> PrismIcons.SortNameAscending
-        }
+        getSortIcon(currentMethod, currentReverse)
     }
 
     val sortItems = remember {
@@ -926,7 +951,7 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
         Box {
             IconButton(
                 onClick = {
-                    loadFromPrefs()   // always fresh when menu opens
+                    tab.updateSortingConfig()
                     showMenu = true
                 },
                 modifier = modifier
@@ -962,23 +987,20 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
                             )
                         },
                         onClick = {
-                            currentMethod = item.method
-                            currentReverse = item.reverse
+                            val previousPrefs = tab.sortingPrefs
                             if (applyForThisFolder) {
-                                prefs.setSortingPrefsFor(
-                                    tab.activeFolder,
-                                    FileSortingPrefs(
-                                        sortMethod = item.method,
-                                        showFoldersFirst = currentFoldersFirst,
-                                        reverseSorting = item.reverse,
-                                        applyForThisFileOnly = true
-                                    )
+                                val newPrefs = FileSortingPrefs(
+                                    sortMethod = item.method,
+                                    showFoldersFirst = currentFoldersFirst,
+                                    reverseSorting = item.reverse,
+                                    applyForThisFileOnly = true
                                 )
+                                prefs.setSortingPrefsFor(tab.activeFolder, newPrefs)
                             } else {
                                 prefs.defaultSortMethod = item.method
                                 prefs.reverse = item.reverse
                             }
-                            tab.openFolder(tab.activeFolder, rememberListState = false)
+                            tab.applySortingChange(previousPrefs)
                             showMenu = false
                         },
                         leadingIcon = {
@@ -1006,22 +1028,20 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
                 DropdownMenuItem(
                     text = { Text(text = stringResource(R.string.folders_first)) },
                     onClick = {
+                        val previousPrefs = tab.sortingPrefs
                         val newFoldersFirst = !currentFoldersFirst
-                        currentFoldersFirst = newFoldersFirst  // update local state immediately
                         if (applyForThisFolder) {
-                            prefs.setSortingPrefsFor(
-                                tab.activeFolder,
-                                FileSortingPrefs(
-                                    sortMethod = currentMethod,
-                                    showFoldersFirst = newFoldersFirst,
-                                    reverseSorting = currentReverse,
-                                    applyForThisFileOnly = true
-                                )
+                            val newPrefs = FileSortingPrefs(
+                                sortMethod = currentMethod,
+                                showFoldersFirst = newFoldersFirst,
+                                reverseSorting = currentReverse,
+                                applyForThisFileOnly = true
                             )
+                            prefs.setSortingPrefsFor(tab.activeFolder, newPrefs)
                         } else {
                             prefs.showFoldersFirst = newFoldersFirst
                         }
-                        tab.openFolder(tab.activeFolder, rememberListState = false)
+                        tab.applySortingChange(previousPrefs)
                     },
                     leadingIcon = {
                         Icon(imageVector = Icons.Rounded.Folder, contentDescription = null)
@@ -1038,22 +1058,20 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
                 DropdownMenuItem(
                     text = { Text(text = stringResource(R.string.apply_to_this_folder_only)) },
                     onClick = {
+                        val previousPrefs = tab.sortingPrefs
                         val newApply = !applyForThisFolder
-                        applyForThisFolder = newApply       // update local state immediately
                         if (newApply) {
-                            prefs.setSortingPrefsFor(
-                                tab.activeFolder,
-                                FileSortingPrefs(
-                                    sortMethod = currentMethod,
-                                    showFoldersFirst = currentFoldersFirst,
-                                    reverseSorting = currentReverse,
-                                    applyForThisFileOnly = true
-                                )
+                            val newPrefs = FileSortingPrefs(
+                                sortMethod = currentMethod,
+                                showFoldersFirst = currentFoldersFirst,
+                                reverseSorting = currentReverse,
+                                applyForThisFileOnly = true
                             )
+                            prefs.setSortingPrefsFor(tab.activeFolder, newPrefs)
                         } else {
                             prefs.deleteSortingPrefsFor(tab.activeFolder)
                         }
-                        tab.openFolder(tab.activeFolder, rememberListState = false)
+                        tab.applySortingChange(previousPrefs)
                     },
                     leadingIcon = {
                         Icon(imageVector = Icons.Rounded.FolderSpecial, contentDescription = null)
@@ -1087,15 +1105,373 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
     } // end TooltipBox
 
     if (showOptionsDialog) {
+        val prefsBeforeDialog = remember(showOptionsDialog) { tab.sortingPrefs }
         FileSortingMenuDialog(
             show = true,
             tab = tab,
             onDismissRequest = {
                 showOptionsDialog = false
-                loadFromPrefs()
-                tab.openFolder(tab.activeFolder, rememberListState = false)
+                tab.applySortingChange(prefsBeforeDialog)
             }
         )
+    }
+}
+
+@Composable
+fun FilesTabSubtitleIndicator(filesTab: FilesTab) {
+    val selectedCount = filesTab.selectedFilesCount.coerceAtLeast(filesTab.selectedFiles.size)
+    if (selectedCount > 0) {
+        val selectedFolders = filesTab.selectedFiles.values.count { it.isFolder }
+        val selectedFilesCount = filesTab.selectedFiles.values.count { !it.isFolder }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.alpha(0.9f)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Folder,
+                    contentDescription = null,
+                    modifier = Modifier.size(9.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "$selectedFolders",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.InsertDriveFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(9.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "$selectedFilesCount",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = "•",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                )
+                Text(
+                    text = filesTab.selectedFilesTotalSize.toFormattedSize() +
+                            if (filesTab.isCalculatingSelectedSize) "…" else "",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
+    } else if (filesTab.foldersCount == 0 && filesTab.filesCount == 0) {
+        Icon(
+            imageVector = Icons.Rounded.Block,
+            contentDescription = null,
+            modifier = Modifier.size(10.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
+    } else if (globalClass.preferencesManager.deepEmptyFolderCheck &&
+        filesTab.foldersCount > 0 && filesTab.filesCount == 0 &&
+        filesTab.activeFolder is LocalFileHolder &&
+        com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FolderHierarchyChecker.isFolderEmptyWithin((filesTab.activeFolder as LocalFileHolder).file)
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.RadioButtonUnchecked,
+            contentDescription = null,
+            modifier = Modifier.size(10.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.alpha(0.7f)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Folder,
+                    contentDescription = null,
+                    modifier = Modifier.size(9.dp)
+                )
+                Text(
+                    text = "${filesTab.foldersCount}",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.InsertDriveFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(9.dp)
+                )
+                Text(
+                    text = "${filesTab.filesCount}",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun InlineLandscapeTabBar(
+    tabLayoutState: LazyListState,
+    tabs: List<Tab>,
+    selectedTabIndex: Int,
+    onReorder: (Int, Int) -> Unit,
+    onAddNewTab: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val selectedTabBackgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+    val unselectedTabBackgroundColor =
+        MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
+    val draggedTabBackgroundColor = MaterialTheme.colorScheme.primary
+    val draggedTabTextColor = MaterialTheme.colorScheme.surfaceContainerLowest
+    val tabShape = RoundedCornerShape(8.dp)
+
+    val mainActivityManager = globalClass.mainActivityManager
+    var from by remember { mutableIntStateOf(-1) }
+    var to by remember { mutableIntStateOf(-1) }
+    var draggedItem by remember { mutableIntStateOf(-1) }
+    val list = remember { mutableStateListOf<Int>() }
+    var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
+
+    val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
+        if (draggedItem > -1) {
+            if (from < 0) from = old.index
+            to = new.index
+            list.add(new.index, list.removeAt(old.index))
+        }
+    }
+
+    LaunchedEffect(draggedItem) {
+        if (draggedItem < 0 && from > -1 && to > -1) {
+            onReorder(from, to)
+            from = -1
+            to = -1
+        }
+    }
+
+    LaunchedEffect(tabs) {
+        if (list.size == tabs.size) {
+            tabs.forEachIndexed { idx, tab ->
+                if (list[idx] != tab.id) {
+                    list[idx] = tab.id
+                }
+            }
+        } else {
+            list.clear()
+            list.addAll(tabs.map { it.id })
+        }
+    }
+
+    Row(
+        modifier = modifier.height(34.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = onAddNewTab,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "New Tab",
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        LazyRow(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .heightIn(max = 32.dp),
+            state = tabLayoutState,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            itemsIndexed(list, key = { _, item -> item }) { index, id ->
+                tabs.find { it.id == id }?.let { tab ->
+                    ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
+                        if (isDragged && draggedItem != id) {
+                            draggedItem = id
+                        } else if (!isDragged && draggedItem == id) {
+                            draggedItem = -1
+                        }
+
+                        val isSelected = selectedTabIndex == index
+                        val isCopyHereDestination = (tab as? FilesTab)?.copyHereTargetFolder != null
+
+                        val backgroundColorAnim = animateColorAsState(
+                            targetValue =
+                                if (isDragged) {
+                                    draggedTabBackgroundColor
+                                } else if (isCopyHereDestination) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isSelected) 0.9f else 0.55f)
+                                } else if (isSelected) {
+                                    selectedTabBackgroundColor
+                                } else {
+                                    unselectedTabBackgroundColor
+                                },
+                            label = "landscapeTabBg"
+                        )
+
+                        val textColorAnim = animateColorAsState(
+                            targetValue =
+                                if (isDragged) {
+                                    draggedTabTextColor
+                                } else if (isCopyHereDestination) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    Color.Unspecified
+                                },
+                            label = "landscapeTabText"
+                        )
+
+                        val alphaAnim = animateFloatAsState(
+                            targetValue = if ((isSelected || isCopyHereDestination) && draggedItem == -1) 1f else 0.55f,
+                            label = "landscapeTabAlpha"
+                        )
+
+                        var showTabHeaderMenu by remember(tab.id) {
+                            mutableStateOf(false)
+                        }
+                        var lastClickTime by remember(tab.id) {
+                            mutableLongStateOf(0L)
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 76.dp)
+                                .fillMaxHeight()
+                                .padding(end = 4.dp)
+                                .background(
+                                    color = backgroundColorAnim.value,
+                                    shape = tabShape
+                                )
+                                .clip(tabShape)
+                                .combinedClickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    onClick = {
+                                        val currentTime = android.os.SystemClock.uptimeMillis()
+                                        if (currentTime - lastClickTime < 300L) {
+                                            lastClickTime = 0L
+                                            showTabHeaderMenu = false
+                                            if (!tab.isPinned) {
+                                                if (tabs.size > 1) {
+                                                    mainActivityManager.removeTabAt(index)
+                                                } else if (tab !is HomeTab) {
+                                                    mainActivityManager.replaceCurrentTabWith(HomeTab())
+                                                }
+                                            }
+                                        } else {
+                                            lastClickTime = currentTime
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index)
+                                            } else {
+                                                showTabHeaderMenu = true
+                                            }
+                                        }
+                                    },
+                                    onLongClick = {
+                                        showTabHeaderMenu = true
+                                    }
+                                )
+                                .padding(horizontal = 12.dp)
+                                .longPressDraggableHandle()
+                                .then(
+                                    if (!globalClass.preferencesManager.disableNavigationGestures && !tab.isPinned) {
+                                        Modifier.detectVerticalSwipe(
+                                            onSwipeDown = {
+                                                mainActivityManager.removeTabAt(index)
+                                            },
+                                            onSwipeUp = {
+                                                mainActivityManager.removeTabAt(index)
+                                            }
+                                        )
+                                    } else Modifier
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (tab.isPinned) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PushPin,
+                                    contentDescription = "Pinned tab",
+                                    modifier = Modifier
+                                        .size(13.dp)
+                                        .padding(end = 2.dp)
+                                        .alpha(alphaAnim.value),
+                                    tint = if (isDragged) draggedTabTextColor else MaterialTheme.colorScheme.primary
+                                )
+                                Space(2.dp)
+                            }
+                            if (isCopyHereDestination) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MoveToInbox,
+                                    contentDescription = "Copy here destination",
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .alpha(alphaAnim.value),
+                                    tint = if (isDragged) draggedTabTextColor else MaterialTheme.colorScheme.primary
+                                )
+                                Space(3.dp)
+                            }
+                            Text(
+                                modifier = Modifier.alpha(alphaAnim.value),
+                                text = tab.header,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (isSelected || isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
+                                color = textColorAnim.value
+                            )
+                            if (showTabHeaderMenu) {
+                                OptionsMenu(
+                                    tab = tab,
+                                    index = index,
+                                    onDismiss = { showTabHeaderMenu = false },
+                                    onShowClosedTabsHistory = { showClosedTabsHistoryDialog = true }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showClosedTabsHistoryDialog) {
+        ClosedTabsHistoryDialog(onDismiss = { showClosedTabsHistoryDialog = false })
     }
 }
 
@@ -1118,10 +1494,14 @@ fun InlineToolbarBreadcrumb(
     }
 
     val animationScope = rememberCoroutineScope()
+    val highlightedIndex = tab.currentPathSegments.indexOfFirst {
+        tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
+    }
 
-    LaunchedEffect(key1 = tab.highlightedPathSegment) {
-        val index =
-            tab.currentPathSegments.getIndexIf { uniquePath == tab.highlightedPathSegment.uniquePath }
+    LaunchedEffect(key1 = tab.highlightedPathSegment, key2 = tab.currentPathSegments.size) {
+        val index = tab.currentPathSegments.indexOfFirst {
+            tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
+        }
         animationScope.launch {
             tab.currentPathSegmentsListState.scrollToItem(max(index, 0))
         }
@@ -1189,9 +1569,11 @@ fun InlineToolbarBreadcrumb(
             state = tab.currentPathSegmentsListState,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(tab.currentPathSegments, key = { _, it -> it.uid }) { _, item ->
-                val isHighlighted = item.uniquePath == tab.highlightedPathSegment.uniquePath
-                val isCurrentFolder = item.uniquePath == tab.activeFolder.uniquePath
+            itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
+                val isHighlighted = index == highlightedIndex ||
+                        (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
+                val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
+                val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
                 val isDropTarget = !isCurrentFolder
                 val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
                 val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
@@ -1204,7 +1586,9 @@ fun InlineToolbarBreadcrumb(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        modifier = Modifier.size(12.dp),
+                        modifier = Modifier
+                            .size(12.dp)
+                            .alpha(if (isHistorySegment) 0.35f else 1f),
                         imageVector = Icons.Rounded.PlayArrow,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
@@ -1233,17 +1617,36 @@ fun InlineToolbarBreadcrumb(
                                 .clip(CircleShape)
                                 .combinedClickable(
                                     onClick = {
-                                        tab.openFolder(
-                                            item = item,
-                                            rememberSelectedFiles = true,
-                                        )
+                                        tab.scope.launch {
+                                            if (tab.isBreadcrumbSegmentValid(item)) {
+                                                tab.openFolderImpl(
+                                                    item = item,
+                                                    rememberSelectedFiles = true,
+                                                )
+                                            } else {
+                                                tab.pruneInvalidBreadcrumbSegments()
+                                                tab.reloadFiles()
+                                            }
+                                        }
+                                    },
+                                    onDoubleClick = {
+                                        if (item.canAddNewContent) {
+                                            tab.toggleCopyHereMode(item)
+                                        }
                                     },
                                     onLongClick = {
                                         item.uniquePath.copyToClipboard()
                                         showMsg(R.string.path_copied_to_clipboard)
                                     }
                                 )
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .alpha(
+                                    when {
+                                        isHighlighted -> 1f
+                                        isHistorySegment -> 0.45f
+                                        else -> 0.85f
+                                    }
+                                ),
                             text = item.displayName
                                 .orIf(stringResource(id = R.string.internal_storage)) {
                                     item.uniquePath == Environment.getExternalStorageDirectory().absolutePath

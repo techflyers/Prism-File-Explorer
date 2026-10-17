@@ -8,6 +8,7 @@ import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Nightlight
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tab
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UnfoldLess
@@ -82,6 +83,19 @@ fun AppearanceContainer() {
             icon = Icons.Rounded.FolderOpen,
             switchState = prefs.showPathBar,
             onSwitchChange = { prefs.showPathBar = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Hide Home tab search bar",
+            supportingText = "Hide the search bar on the Home tab (keeps the search icon visible)",
+            icon = Icons.Rounded.Search,
+            switchState = prefs.hideHomeSearchBar,
+            onSwitchChange = { prefs.hideHomeSearchBar = it }
         )
 
         HorizontalDivider(
@@ -249,11 +263,24 @@ fun AppearanceContainer() {
         )
 
         PreferenceItem(
-            label = "Auto-hide toolbars on scroll",
-            supportingText = "Toolbar and tab bar hide when scrolling down, reappear on scroll up",
+            label = "Auto-hide toolbars on scroll (Portrait)",
+            supportingText = "Toolbar and tab bar hide when scrolling down in portrait, reappear on scroll up",
             icon = Icons.Rounded.UnfoldLess,
             switchState = prefs.autoHideToolbars,
             onSwitchChange = { prefs.autoHideToolbars = it }
+        )
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            thickness = 3.dp
+        )
+
+        PreferenceItem(
+            label = "Auto-hide toolbars on scroll (Landscape)",
+            supportingText = "Toolbar and tab bar hide when scrolling down in landscape, reappear on scroll up",
+            icon = Icons.Rounded.UnfoldLess,
+            switchState = prefs.autoHideToolbarsLandscape,
+            onSwitchChange = { prefs.autoHideToolbarsLandscape = it }
         )
 
         HorizontalDivider(

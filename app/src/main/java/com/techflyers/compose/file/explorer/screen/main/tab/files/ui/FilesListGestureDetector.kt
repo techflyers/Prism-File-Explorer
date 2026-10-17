@@ -44,11 +44,11 @@ fun Modifier.unifiedFileGestureDetector(
 
     return this
         .onGloballyPositioned { listCoordinates = it }
-        .pointerInput(tab.activeFolder.uniquePath, tab.activeFolderContent.size) {
+        .pointerInput(tab.activeFolder.uniquePath, tab.contentSnapshot.size, tab.selectedTypeFilters) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 val initialIndex = findItemIndexAt(down.position, size) ?: return@awaitEachGesture
-                val initialItem = tab.activeFolderContent.getOrNull(initialIndex) ?: return@awaitEachGesture
+                val initialItem = tab.contentSnapshot.getOrNull(initialIndex) ?: return@awaitEachGesture
                 val wasAlreadySelected = tab.selectedFiles.containsKey(initialItem.uniquePath)
 
                 // Standard long-press timeout (300ms) to ensure quick taps pass through to Modifier.clickable
@@ -246,7 +246,7 @@ private fun updateRangeSelection(
     val currentGestureRangePaths = mutableSetOf<String>()
 
     for (i in minIdx..maxIdx) {
-        val item = tab.activeFolderContent.getOrNull(i) ?: continue
+        val item = tab.contentSnapshot.getOrNull(i) ?: continue
         currentGestureRangePaths.add(item.uniquePath)
         tab.selectedFiles[item.uniquePath] = item
     }

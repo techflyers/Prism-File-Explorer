@@ -29,6 +29,12 @@ class VaultTab : Tab() {
         requestHomeToolbarUpdate()
     }
 
+    override fun onTabStopped() {
+        isPinVerified = false
+        activePassword = ""
+        super.onTabStopped()
+    }
+
     override suspend fun getTitle() = "Private Wallet"
     override suspend fun getSubtitle() = if (isPinVerified) "Secure Sandbox" else "Locked"
 }

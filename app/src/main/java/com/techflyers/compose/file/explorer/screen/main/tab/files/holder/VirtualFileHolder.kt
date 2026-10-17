@@ -5,6 +5,7 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ContentCount
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileListCategory
+import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getAllFiles
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getApkFiles
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getArchiveFiles
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getAudioFiles
@@ -44,6 +45,7 @@ class VirtualFileHolder(
         SEARCH -> globalClass.getString(R.string.search)
         DUPLICATES -> customTitle ?: "Duplicates"
         APK -> globalClass.getString(R.string.apk_and_bundles)
+        ALL_FILES -> "All Files"
         else -> globalClass.getString(R.string.unknown)
     }
 
@@ -61,6 +63,10 @@ class VirtualFileHolder(
 
     override suspend fun getParent() = null
 
+    fun isUnlimitedMode(): Boolean {
+        return type == ALL_FILES || (type == RECENT && globalClass.preferencesManager.recentFilesLimit == -1)
+    }
+
     override suspend fun listSortedContent(): ArrayList<out ContentHolder> {
         if (type == SEARCH || type == BOOKMARKS || type == DUPLICATES) {
             return super.listSortedContent()
@@ -72,9 +78,7 @@ class VirtualFileHolder(
             content.removeIf { it.isHidden() }
         }
 
-        // MediaStore already applies SQL ORDER BY for name, date, and size.
-        // Since category views only contain files, folders-first has no effect;
-        // skipping second in-memory sort prevents expensive O(n log n) passes.
+        // StorageProvider already applies sorting for name, date, and size.
         if (sortingPrefs.sortMethod in listOf(
                 com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_NAME,
                 com.techflyers.compose.file.explorer.screen.main.tab.files.misc.SortingMethod.SORT_BY_DATE,
@@ -91,6 +95,13 @@ class VirtualFileHolder(
         currentOffset = 0
         hasMoreContent = true
 
+        val configuredRecentLimit = globalClass.preferencesManager.recentFilesLimit
+        val initialLimit = if (type == RECENT && configuredRecentLimit > 0) {
+            minOf(PAGE_SIZE, configuredRecentLimit)
+        } else {
+            PAGE_SIZE
+        }
+
         val rawItems = when (type) {
             BOOKMARKS -> getBookmarks()
             AUDIO -> getAudioFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
@@ -98,7 +109,8 @@ class VirtualFileHolder(
             IMAGE -> getImageFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
             ARCHIVE -> getArchiveFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
             DOCUMENT -> getDocumentFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
-            RECENT -> getRecentFiles(limit = PAGE_SIZE, offset = 0)
+            RECENT -> getRecentFiles(sortingPrefs = sortingPrefs, limit = initialLimit, offset = 0)
+            ALL_FILES -> getAllFiles(sortingPrefs = sortingPrefs, limit = PAGE_SIZE, offset = 0)
             SEARCH -> getSearchResult()
             DUPLICATES -> ArrayList(customItems ?: emptyList())
             APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
@@ -106,7 +118,7 @@ class VirtualFileHolder(
         }
 
         if (type != BOOKMARKS && type != SEARCH && type != DUPLICATES) {
-            if (rawItems.size < PAGE_SIZE) {
+            if (rawItems.size < initialLimit || (type == RECENT && configuredRecentLimit in 1..rawItems.size)) {
                 hasMoreContent = false
             }
             currentOffset = rawItems.size
@@ -127,20 +139,33 @@ class VirtualFileHolder(
     }
 
     suspend fun loadNextPage(): List<ContentHolder> {
-        if (!hasMoreContent || currentOffset >= MAX_PAGED_CAP) return emptyList()
+        val maxCap = when {
+            type == ALL_FILES -> Int.MAX_VALUE
+            type == RECENT -> {
+                val limitPref = globalClass.preferencesManager.recentFilesLimit
+                if (limitPref == -1) Int.MAX_VALUE else limitPref
+            }
+            else -> MAX_PAGED_CAP
+        }
+        if (!hasMoreContent || currentOffset >= maxCap) {
+            hasMoreContent = false
+            return emptyList()
+        }
+        val pageSize = minOf(PAGE_SIZE, (maxCap - currentOffset).coerceAtLeast(1))
         val sortingPrefs = globalClass.preferencesManager.getSortingPrefsFor(this)
         val nextPage = when (type) {
-            AUDIO -> getAudioFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
-            VIDEO -> getVideoFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
-            IMAGE -> getImageFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
-            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
-            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
-            RECENT -> getRecentFiles(limit = PAGE_SIZE, offset = currentOffset)
-            APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = currentOffset)
+            AUDIO -> getAudioFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
+            VIDEO -> getVideoFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
+            IMAGE -> getImageFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
+            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
+            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
+            RECENT -> getRecentFiles(sortingPrefs = sortingPrefs, limit = pageSize, offset = currentOffset)
+            ALL_FILES -> getAllFiles(sortingPrefs = sortingPrefs, limit = pageSize, offset = currentOffset)
+            APK -> getApkFiles(sortingPrefs, limit = pageSize, offset = currentOffset)
             else -> arrayListOf()
         }
 
-        if (nextPage.size < PAGE_SIZE || currentOffset + nextPage.size >= MAX_PAGED_CAP) {
+        if (nextPage.size < pageSize || currentOffset + nextPage.size >= maxCap) {
             hasMoreContent = false
         }
         currentOffset += nextPage.size
@@ -197,7 +222,7 @@ class VirtualFileHolder(
     override suspend fun getContentCount() = ContentCount(files = fileCount)
 
     companion object {
-        const val PAGE_SIZE = 200
+        const val PAGE_SIZE = 250
         const val MAX_PAGED_CAP = 5000
         const val BOOKMARKS = 0
         const val AUDIO = 1
@@ -209,5 +234,6 @@ class VirtualFileHolder(
         const val SEARCH = 7
         const val DUPLICATES = 8
         const val APK = 9
+        const val ALL_FILES = 10
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.rounded.ShortText
 import androidx.compose.material.icons.automirrored.rounded.WrapText
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.HideSource
 import androidx.compose.material.icons.rounded.Numbers
@@ -47,7 +48,6 @@ fun FileListContainer() {
     val prefs = globalClass.preferencesManager
 
     var showEndCharsDialog by remember { mutableStateOf(false) }
-    var showMaxLinesDialog by remember { mutableStateOf(false) }
 
     if (showEndCharsDialog) {
         var portraitInput by remember { mutableStateOf(prefs.filenameEndCharsCount.toString()) }
@@ -113,47 +113,6 @@ fun FileListContainer() {
         )
     }
 
-    if (showMaxLinesDialog) {
-        var linesInput by remember { mutableStateOf(prefs.filenameMaxLines.toString()) }
-        AlertDialog(
-            onDismissRequest = { showMaxLinesDialog = false },
-            title = { Text(stringResource(R.string.filename_wrap_lines)) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.filename_wrap_lines_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-                    OutlinedTextField(
-                        value = linesInput,
-                        onValueChange = { linesInput = it.filter { c -> c.isDigit() }.take(1) },
-                        label = { Text(stringResource(R.string.lines)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = stringResource(R.string.filename_wrap_lines_range),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    prefs.filenameMaxLines = linesInput.toIntOrNull()?.coerceIn(1, 5) ?: 1
-                    showMaxLinesDialog = false
-                }) { Text(stringResource(R.string.save)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showMaxLinesDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-        )
-    }
-
     Container(title = stringResource(R.string.file_list)) {
         PreferenceItem(
             label = stringResource(R.string.file_list_size),
@@ -202,6 +161,18 @@ fun FileListContainer() {
             onSwitchChange = { prefs.showFolderContentCount = it }
         )
 
+        if (prefs.disableTabBar) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+
+            PreferenceItem(
+                label = stringResource(R.string.show_directory_type_filter_ribbon),
+                supportingText = stringResource(R.string.show_directory_type_filter_ribbon_desc),
+                icon = Icons.Rounded.FilterList,
+                switchState = prefs.showDirectoryTypeFilterRibbon,
+                onSwitchChange = { prefs.showDirectoryTypeFilterRibbon = it }
+            )
+        }
+
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
 
         PreferenceItem(
@@ -241,19 +212,6 @@ fun FileListContainer() {
             supportingText = endCharsText,
             icon = Icons.AutoMirrored.Rounded.ShortText,
             onClick = { showEndCharsDialog = true }
-        )
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
-
-        PreferenceItem(
-            label = stringResource(R.string.filename_wrap_lines),
-            supportingText = if (prefs.filenameMaxLines <= 1) {
-                stringResource(R.string.filename_wrap_lines_off)
-            } else {
-                stringResource(R.string.filename_wrap_lines_n, prefs.filenameMaxLines)
-            },
-            icon = Icons.AutoMirrored.Rounded.WrapText,
-            onClick = { showMaxLinesDialog = true }
         )
 
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
@@ -299,6 +257,16 @@ fun FileListContainer() {
             icon = Icons.Rounded.Search,
             switchState = prefs.deepScanCategories,
             onSwitchChange = { prefs.deepScanCategories = it }
+        )
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+
+        PreferenceItem(
+            label = "Only refresh sort icon on navigation",
+            supportingText = "Update the sort icon and reuse cached folder listings when navigating back and forth between folders instead of forcing a full folder reload",
+            icon = Icons.Rounded.FilterList,
+            switchState = prefs.onlyRefreshSortIconOnNavigation,
+            onSwitchChange = { prefs.onlyRefreshSortIconOnNavigation = it }
         )
     }
 }

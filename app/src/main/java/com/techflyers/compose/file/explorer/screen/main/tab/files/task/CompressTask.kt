@@ -242,10 +242,14 @@ class CompressTask(
                 return
             }
             logger.logError(e)
+            val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                targetFile = File(destPath),
+                throwable = e
+            )
             markAsFailed(
                 globalClass.resources.getString(
                     R.string.task_summary_failed,
-                    e.message ?: emptyString
+                    reason
                 )
             )
             return
