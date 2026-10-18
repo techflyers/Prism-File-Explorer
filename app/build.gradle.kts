@@ -17,8 +17,8 @@ android {
         applicationId = "com.techflyers.compose.file.explorer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "2.4"
+        versionCode = 17
+        versionName = "2.5"
     }
 
     dependenciesInfo {
