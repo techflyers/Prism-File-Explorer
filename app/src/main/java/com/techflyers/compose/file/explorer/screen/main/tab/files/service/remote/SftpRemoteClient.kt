@@ -53,16 +53,66 @@ class SftpRemoteClient(
         ensureBouncyCastle()
         val client = SSHClient()
         client.addHostKeyVerifier(PromiscuousVerifier())
-        client.connectTimeout = 15000
-        client.timeout = 15000
+        client.connectTimeout = conn.effectiveConnectTimeoutSec * 1000
+        client.timeout = conn.effectiveReadTimeoutSec * 1000
+
+        if (conn.effectiveSftpCompression) {
+            try {
+                client.useCompression()
+            } catch (_: Exception) {}
+        }
 
         client.connect(conn.host, conn.port)
+
+        if (conn.effectiveKeepAliveSec > 0) {
+            try {
+                client.connection.keepAlive.keepAliveInterval = conn.effectiveKeepAliveSec
+            } catch (_: Exception) {}
+        }
+
         val user = if (conn.username.isEmpty()) "root" else conn.username
-        client.authPassword(user, conn.password)
+        val authMethod = conn.effectiveAuthMethod
+        val keyPath = conn.effectivePrivateKeyPath.trim()
+        val passphrase = conn.effectivePrivateKeyPassphrase
+
+        when (authMethod) {
+            "PRIVATE_KEY" -> {
+                if (keyPath.isEmpty() || !File(keyPath).exists()) {
+                    try { client.disconnect() } catch (_: Exception) {}
+                    throw Exception("Private key file not found at: $keyPath")
+                }
+                val keyProvider = if (passphrase.isNotEmpty()) {
+                    client.loadKeys(keyPath, passphrase)
+                } else {
+                    client.loadKeys(keyPath)
+                }
+                client.authPublickey(user, keyProvider)
+            }
+            "PASSWORD_AND_KEY" -> {
+                var authed = false
+                if (keyPath.isNotEmpty() && File(keyPath).exists()) {
+                    try {
+                        val keyProvider = if (passphrase.isNotEmpty()) {
+                            client.loadKeys(keyPath, passphrase)
+                        } else {
+                            client.loadKeys(keyPath)
+                        }
+                        client.authPublickey(user, keyProvider)
+                        authed = client.isAuthenticated
+                    } catch (_: Exception) {}
+                }
+                if (!authed) {
+                    client.authPassword(user, conn.password)
+                }
+            }
+            else -> {
+                client.authPassword(user, conn.password)
+            }
+        }
 
         if (!client.isAuthenticated) {
             try { client.disconnect() } catch (_: Exception) {}
-            throw Exception("SFTP authentication failed for user '$user'")
+            throw Exception("SFTP authentication failed for user '$user' (${authMethod})")
         }
 
         ssh = client

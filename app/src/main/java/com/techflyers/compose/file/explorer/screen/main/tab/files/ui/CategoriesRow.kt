@@ -1,5 +1,6 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -19,7 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
@@ -52,14 +52,12 @@ fun CategoriesRow(tab: FilesTab) {
                         dragAccum < -threshold && selectedIndex < tab.categories.size -> {
                             val next = selectedIndex + 1
                             selectedIndex = next
-                            tab.selectedCategory = if (next == 0) null else tab.categories.getOrNull(next - 1)
-                            tab.reloadFiles()
+                            tab.switchSubCategoryToIndex(next, direction = 1)
                         }
                         dragAccum > threshold && selectedIndex > 0 -> {
                             val prev = selectedIndex - 1
                             selectedIndex = prev
-                            tab.selectedCategory = if (prev == 0) null else tab.categories.getOrNull(prev - 1)
-                            tab.reloadFiles()
+                            tab.switchSubCategoryToIndex(prev, direction = -1)
                         }
                     }
                     dragAccum = 0
@@ -73,9 +71,11 @@ fun CategoriesRow(tab: FilesTab) {
         Tab(
             selected = selectedIndex == 0,
             onClick = {
-                selectedIndex = 0
-                tab.selectedCategory = null
-                tab.reloadFiles()
+                if (selectedIndex != 0) {
+                    val dir = -1
+                    selectedIndex = 0
+                    tab.switchSubCategoryToIndex(0, direction = dir)
+                }
             },
             text = {
                 Row(
@@ -92,16 +92,19 @@ fun CategoriesRow(tab: FilesTab) {
                 }
             }
         )
-        tab.categories.forEach {
+        tab.categories.forEachIndexed { idx, it ->
+            val catIdx = idx + 1
             val sourceInfo = remember(it.data) {
                 (it.data as? File)?.let { file -> SourceFolderResolver.resolve(file) }
             }
             Tab(
-                selected = selectedIndex == tab.categories.indexOf(it) + 1,
+                selected = selectedIndex == catIdx,
                 onClick = {
-                    selectedIndex = tab.categories.indexOf(it) + 1
-                    tab.selectedCategory = it
-                    tab.reloadFiles()
+                    if (selectedIndex != catIdx) {
+                        val dir = if (catIdx > selectedIndex) 1 else -1
+                        selectedIndex = catIdx
+                        tab.switchSubCategoryToIndex(catIdx, direction = dir)
+                    }
                 },
                 text = {
                     Row(

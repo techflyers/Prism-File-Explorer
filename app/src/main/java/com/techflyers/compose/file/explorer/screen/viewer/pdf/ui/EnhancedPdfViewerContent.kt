@@ -213,8 +213,19 @@ fun EnhancedPdfViewerContent(
     var pendingStamp by remember { mutableStateOf<PendingStamp?>(null) }
     var isTransformScrollLocked by remember { mutableStateOf(true) }
 
+    // Scroll & Zoom lock states
+    var isHorizontalScrollLocked by remember { mutableStateOf(false) }
+    var isVerticalScrollLocked by remember { mutableStateOf(false) }
+    var isZoomLocked by remember { mutableStateOf(false) }
+
     LaunchedEffect(pendingStamp, isTransformScrollLocked, isAnnotating) {
         pdfFragment?.isScrollLocked = if (pendingStamp != null) isTransformScrollLocked else isAnnotating
+    }
+
+    LaunchedEffect(isHorizontalScrollLocked, isVerticalScrollLocked, isZoomLocked, pdfFragment) {
+        pdfFragment?.isHorizontalScrollLocked = isHorizontalScrollLocked
+        pdfFragment?.isVerticalScrollLocked = isVerticalScrollLocked
+        pdfFragment?.isZoomLocked = isZoomLocked
     }
 
     suspend fun getOrCreateWorkingFile(): File = withContext(Dispatchers.IO) {
@@ -661,6 +672,9 @@ fun EnhancedPdfViewerContent(
             onUpdate = { fragment ->
                 pdfFragment = fragment
                 fragment.isScrollLocked = if (pendingStamp != null) isTransformScrollLocked else isAnnotating
+                fragment.isHorizontalScrollLocked = isHorizontalScrollLocked
+                fragment.isVerticalScrollLocked = isVerticalScrollLocked
+                fragment.isZoomLocked = isZoomLocked
 
                 if (!documentLoaded) {
                     fragment.documentUri = currentWorkingUri
@@ -721,6 +735,36 @@ fun EnhancedPdfViewerContent(
             isBookmarked = isBookmarked,
             visible = showToolbars && !isAnnotating,
             hasUnsavedChanges = hasUnsavedChanges,
+            isHorizontalScrollLocked = isHorizontalScrollLocked,
+            isVerticalScrollLocked = isVerticalScrollLocked,
+            isZoomLocked = isZoomLocked,
+            onToggleHorizontalScrollLock = {
+                isHorizontalScrollLocked = !isHorizontalScrollLocked
+                Toast.makeText(
+                    context,
+                    if (isHorizontalScrollLocked) "Horizontal scrolling locked" else "Horizontal scrolling unlocked",
+                    Toast.LENGTH_SHORT
+                ).show()
+                interactionCount++
+            },
+            onToggleVerticalScrollLock = {
+                isVerticalScrollLocked = !isVerticalScrollLocked
+                Toast.makeText(
+                    context,
+                    if (isVerticalScrollLocked) "Vertical scrolling locked" else "Vertical scrolling unlocked",
+                    Toast.LENGTH_SHORT
+                ).show()
+                interactionCount++
+            },
+            onToggleZoomLock = {
+                isZoomLocked = !isZoomLocked
+                Toast.makeText(
+                    context,
+                    if (isZoomLocked) "Zoom locked" else "Zoom unlocked",
+                    Toast.LENGTH_SHORT
+                ).show()
+                interactionCount++
+            },
             onBack = {
                 handleBack()
             },

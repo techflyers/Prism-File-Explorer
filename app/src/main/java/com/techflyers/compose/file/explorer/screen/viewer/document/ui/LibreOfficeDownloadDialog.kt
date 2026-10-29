@@ -1,7 +1,6 @@
 package com.techflyers.compose.file.explorer.screen.viewer.document.ui
 
 import android.text.format.Formatter
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,9 +20,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
@@ -42,7 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -87,7 +82,6 @@ fun LibreOfficeDownloadDialog(
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -139,7 +133,6 @@ fun LibreOfficeDownloadDialog(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Body based on engine state
                 when (engineState) {
                     is OfficeEngineState.Downloading -> {
                         val doneStr = Formatter.formatFileSize(context, engineState.downloaded)
@@ -186,12 +179,25 @@ fun LibreOfficeDownloadDialog(
 
                             Spacer(Modifier.height(4.dp))
 
-                            OutlinedButton(
-                                onClick = onCancelDownload,
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Cancel Download")
+                                OutlinedButton(
+                                    onClick = onCancelDownload,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Cancel / Reset")
+                                }
+
+                                Button(
+                                    onClick = onUseFallbackClick,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Use Built-in")
+                                }
                             }
                         }
                     }
@@ -210,6 +216,13 @@ fun LibreOfficeDownloadDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            OutlinedButton(
+                                onClick = onUseFallbackClick,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Use Built-in Viewer Instead")
+                            }
                         }
                     }
 
@@ -307,7 +320,6 @@ fun LibreOfficeDownloadDialog(
                     }
 
                     else -> {
-                        // NotInstalled: Ask on demand
                         Column(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.fillMaxWidth()

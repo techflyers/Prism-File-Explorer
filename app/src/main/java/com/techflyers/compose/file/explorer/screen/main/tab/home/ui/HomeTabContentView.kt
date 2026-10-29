@@ -144,7 +144,7 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         scope.launch {
             withContext(Dispatchers.IO) {
                 val d1 = async { tab.refreshRecentFilesSuspend(forceInvalidate = true) }
-                val d2 = async { tab.getPinnedFiles() }
+                val d2 = async { tab.loadPinnedFiles() }
                 val d3 = async { mainActivityManager.updateStorageDevices() }
                 d1.await()
                 d2.await()
@@ -156,35 +156,34 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
     }
 
     LaunchedEffect(tab.id) {
+        val config = withContext(Dispatchers.IO) {
+            try {
+                Gson().fromJson(
+                    globalClass.preferencesManager.homeTabLayout,
+                    HomeLayout::class.java
+                )
+            } catch (e: Exception) {
+                logger.logError(e)
+                getDefaultHomeLayout()
+            }.getSections().filter { it.isEnabled }.sortedBy { it.order }
+        }
+        enabledSections.clear()
+        enabledSections.addAll(config)
+
         withContext(Dispatchers.IO) {
-            async {
-                tab.fetchRecentFiles()
-            }
-            async {
-                tab.getPinnedFiles()
-            }
-            async {
+            val d1 = async { tab.fetchRecentFiles() }
+            val d2 = async { tab.loadPinnedFiles() }
+            val d3 = async { mainActivityManager.updateStorageDevices() }
+            d1.await()
+            d2.await()
+            d3.await()
+        }
+        // Auto-update storage stats periodically only while Home tab is the active tab
+        while (isActive) {
+            delay(15_000)
+            if (mainActivityManager.getActiveTab() === tab) {
                 mainActivityManager.updateStorageDevices()
             }
-            async {
-                val config = try {
-                    Gson().fromJson(
-                        globalClass.preferencesManager.homeTabLayout,
-                        HomeLayout::class.java
-                    )
-                } catch (e: Exception) {
-                    logger.logError(e)
-                    getDefaultHomeLayout()
-                }.getSections().filter { it.isEnabled }.sortedBy { it.order }
-
-                enabledSections.clear()
-                enabledSections.addAll(config)
-            }
-        }
-        // Auto-update storage stats periodically while Home tab is active
-        while (isActive) {
-            delay(3000)
-            mainActivityManager.updateStorageDevices()
         }
     }
 
@@ -227,11 +226,13 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
         }
     }
 
-    SearchDialog(
-        show = tab.showSearchDialog,
-        tab = tab.internalStorageSearchTab,
-        onDismissRequest = { tab.showSearchDialog = false }
-    )
+    if (tab.showSearchDialog) {
+        SearchDialog(
+            show = true,
+            tab = tab.getOrCreateSearchTab(),
+            onDismissRequest = { tab.showSearchDialog = false }
+        )
+    }
 
     val homeScroll = tab.scrollState
     val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
@@ -272,7 +273,11 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Search Internal Storage",
+                        text = if (preferencesManager.searchExternalStorageFromHome) {
+                            "Search Internal & External Storage"
+                        } else {
+                            "Search Internal Storage"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
@@ -585,7 +590,9 @@ private fun RecentFilesSection(
     tab: HomeTab,
     mainActivityManager: MainActivityManager
 ) {
+    if (globalClass.preferencesManager.recentFilesLimit == 0) return
     val context = LocalContext.current
+    val isUpdatingInBackground = (tab.isLoadingRecentFiles || StorageProvider.isIndexingRecentFiles) && tab.recentFiles.isNotEmpty()
 
     // Recent files header + subtle refresh progress indicator
     Column(
@@ -594,12 +601,25 @@ private fun RecentFilesSection(
             .padding(horizontal = 12.dp)
             .padding(top = 12.dp)
     ) {
-        Text(
-            text = stringResource(R.string.recent_files),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        )
-        AnimatedVisibility(visible = tab.isLoadingRecentFiles && tab.recentFiles.isNotEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = stringResource(R.string.recent_files),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+            AnimatedVisibility(visible = isUpdatingInBackground) {
+                Text(
+                    text = "Updating in background…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                )
+            }
+        }
+        AnimatedVisibility(visible = isUpdatingInBackground) {
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()

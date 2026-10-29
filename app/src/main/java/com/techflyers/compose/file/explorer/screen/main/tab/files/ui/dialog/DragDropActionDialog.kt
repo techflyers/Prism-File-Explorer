@@ -93,3 +93,156 @@ fun DragDropActionDialog(tab: FilesTab) {
         }
     )
 }
+
+@Composable
+fun CopyHereConfirmationDialog(tab: FilesTab) {
+    val transfer = tab.pendingCopyHereTransfer ?: return
+    val targetName = transfer.targetFolder.displayName
+    val itemSummary = if (transfer.items.size == 1) {
+        "\"${transfer.items.first().displayName}\""
+    } else {
+        "${transfer.items.size} items"
+    }
+
+    val titleText = when (transfer.deleteSourceFiles) {
+        true -> "Move to $targetName?"
+        false -> "Copy to $targetName?"
+        null -> stringResource(R.string.move_or_copy_title)
+    }
+
+    val bodyText = when (transfer.deleteSourceFiles) {
+        true -> "Are you sure you want to move $itemSummary to \"$targetName\"?"
+        false -> "Are you sure you want to copy $itemSummary to \"$targetName\"?"
+        null -> if (transfer.items.size == 1) {
+            stringResource(
+                R.string.move_or_copy_message_single,
+                transfer.items.first().displayName,
+                targetName
+            )
+        } else {
+            stringResource(
+                R.string.move_or_copy_message,
+                transfer.items.size,
+                targetName
+            )
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { tab.pendingCopyHereTransfer = null },
+        title = {
+            Text(
+                text = titleText,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                text = bodyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        confirmButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                when (transfer.deleteSourceFiles) {
+                    false -> {
+                        TextButton(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = true),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.move))
+                        }
+                        Button(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = false),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.copy))
+                        }
+                    }
+                    true -> {
+                        TextButton(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = false),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.copy))
+                        }
+                        Button(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = true),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.move))
+                        }
+                    }
+                    null -> {
+                        TextButton(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = false),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.copy))
+                        }
+                        Button(
+                            onClick = {
+                                globalClass.taskManager.addTaskAndRun(
+                                    CopyTask(transfer.items, deleteSourceFiles = true),
+                                    CopyTaskParameters(transfer.targetFolder)
+                                )
+                                transfer.onConfirmed?.invoke()
+                                tab.unselectAllFiles()
+                                tab.pendingCopyHereTransfer = null
+                            }
+                        ) {
+                            Text(stringResource(R.string.move))
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { tab.pendingCopyHereTransfer = null }
+            ) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}

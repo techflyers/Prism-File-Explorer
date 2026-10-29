@@ -7,14 +7,17 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,7 +74,13 @@ class DocumentViewerActivity : ViewerActivity() {
                                     fileName = state.fileName,
                                     message = state.loadingMessage,
                                     progress = state.progress,
-                                    onCancel = { finish() }
+                                    onCancel = { finish() },
+                                    onUseBuiltInViewer = if (state.isOfficeDocument) {
+                                        { viewModel.switchToBuiltInViewer() }
+                                    } else null,
+                                    onResetEngine = if (state.isOfficeDocument) {
+                                        { viewModel.resetEngineAndPrompt() }
+                                    } else null
                                 )
                             }
                             hasError && !hasPdf -> {
@@ -96,8 +105,13 @@ class DocumentViewerActivity : ViewerActivity() {
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Spacer(Modifier.height(24.dp))
-                                        Button(onClick = { viewModel.loadDocument(instance.uri, preferLibreOffice = false) }) {
-                                            Text("Retry with Built-in Engine")
+                                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            OutlinedButton(onClick = { viewModel.resetEngineAndPrompt() }) {
+                                                Text("Reset Engine")
+                                            }
+                                            Button(onClick = { viewModel.switchToBuiltInViewer() }) {
+                                                Text("Use Built-in Engine")
+                                            }
                                         }
                                     }
                                 }
@@ -122,8 +136,7 @@ class DocumentViewerActivity : ViewerActivity() {
                             viewModel.onDownloadEngineConfirmed()
                         },
                         onCancelDownload = {
-                            installer.cancel()
-                            viewModel.setShowOfficeDownloadPrompt(false)
+                            viewModel.resetEngineAndPrompt()
                         },
                         onUseFallbackClick = {
                             viewModel.onDismissDownloadPromptAndUseFallback()

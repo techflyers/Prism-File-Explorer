@@ -90,19 +90,32 @@ fun Float.dp() = (this / globalClass.resources.displayMetrics.density).dp
 fun Modifier.detectVerticalSwipe(
     onSwipeUp: () -> Unit = { },
     onSwipeDown: () -> Unit = { },
-    threshold: Int = 50
+    threshold: Int = 85
 ) = this.pointerInput(onSwipeUp, onSwipeDown, threshold) {
     var handled = false
+    var accumulatedDrag = 0f
     detectVerticalDragGestures(
-        onDragEnd = { handled = false },
-        onDragCancel = { handled = false },
+        onDragStart = {
+            handled = false
+            accumulatedDrag = 0f
+        },
+        onDragEnd = {
+            handled = false
+            accumulatedDrag = 0f
+        },
+        onDragCancel = {
+            handled = false
+            accumulatedDrag = 0f
+        },
         onVerticalDrag = { change, dragAmount ->
-            if (!handled) {
-                if (dragAmount < -threshold) {
+            // Ignore extreme single-frame jumps caused by batched touch events after a frame stall
+            if (!handled && kotlin.math.abs(dragAmount) < threshold * 2.2f) {
+                accumulatedDrag += dragAmount
+                if (accumulatedDrag < -threshold) {
                     onSwipeUp()
                     change.consume()
                     handled = true
-                } else if (dragAmount > threshold) {
+                } else if (accumulatedDrag > threshold) {
                     onSwipeDown()
                     change.consume()
                     handled = true

@@ -3,6 +3,7 @@ package com.techflyers.compose.file.explorer.screen.terminal
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -27,6 +28,16 @@ object TerminalLauncher {
     const val TERMUX_RUN_COMMAND_SERVICE = "com.termux.app.RunCommandService"
     const val TERMUX_RUN_COMMAND_ACTION = "com.termux.RUN_COMMAND"
     const val TERMUX_PERMISSION = "com.termux.permission.RUN_COMMAND"
+    const val TERMUX_PERMISSION_REQUEST_CODE = 1001
+
+    @Volatile
+    private var pendingTermuxPath: String? = null
+
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 
     fun isPackageInstalled(context: Context, packageName: String): Boolean {
         return try {
@@ -74,6 +85,38 @@ object TerminalLauncher {
         }
     }
 
+    fun onTermuxPermissionResult(context: Context, granted: Boolean) {
+        val path = pendingTermuxPath
+        pendingTermuxPath = null
+        if (granted) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.termux_permission_granted_toast),
+                Toast.LENGTH_SHORT
+            ).show()
+            if (!path.isNullOrEmpty()) {
+                openTermux(context, path)
+            }
+        } else if (!path.isNullOrEmpty()) {
+            val targetFile = File(path)
+            val targetDir = if (targetFile.isFile) targetFile.parent ?: path else path
+            val escapedDir = targetDir.replace("'", "'\\''")
+            val cdCmd = "cd '$escapedDir'"
+            cdCmd.copyToClipboard()
+            Toast.makeText(
+                context,
+                context.getString(R.string.termux_permission_copy_notice),
+                Toast.LENGTH_LONG
+            ).show()
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(TERMUX_PACKAGE)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (launchIntent != null) {
+                context.startActivity(launchIntent)
+            }
+        }
+    }
+
     fun openTerminal(context: Context, path: String) {
         val prefs = globalClass.preferencesManager
         when (prefs.terminalApp) {
@@ -103,6 +146,51 @@ object TerminalLauncher {
             }
         }
         context.startActivity(intent)
+    }
+
+    private fun buildTermuxRunCommandIntent(packageName: String, targetDir: String, escapedDir: String): Intent {
+        val shellCmd = buildString {
+            append("export PWD='$escapedDir'; cd '$escapedDir' 2>/dev/null; ")
+            append("if [ -x /data/data/$packageName/files/home/.termux/shell ]; then ")
+            append("exec /data/data/$packageName/files/home/.termux/shell -l; ")
+            append("elif [ -n \"\$SHELL\" ] && [ -x \"\$SHELL\" ]; then ")
+            append("exec \"\$SHELL\" -l; ")
+            append("elif [ -x /data/data/$packageName/files/usr/bin/bash ]; then ")
+            append("exec /data/data/$packageName/files/usr/bin/bash -l; ")
+            append("elif [ -x /data/data/$packageName/files/usr/bin/login ]; then ")
+            append("exec /data/data/$packageName/files/usr/bin/login; ")
+            append("else exec sh; fi")
+        }
+        return Intent().apply {
+            component = ComponentName(packageName, "$packageName.app.RunCommandService")
+            action = "$packageName.RUN_COMMAND"
+            putExtra("$packageName.RUN_COMMAND_PATH", "/data/data/$packageName/files/usr/bin/bash")
+            putExtra("$packageName.RUN_COMMAND_ARGUMENTS", arrayOf("-c", shellCmd))
+            putExtra("$packageName.RUN_COMMAND_WORKDIR", targetDir)
+            putExtra("$packageName.RUN_COMMAND_BACKGROUND", false)
+            putExtra("$packageName.RUN_COMMAND_SESSION_ACTION", "0")
+            putExtra("$packageName.execute.session_action", "0")
+        }
+    }
+
+    private fun tryStartRunCommandService(context: Context, intent: Intent): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "startForegroundService failed, attempting startService: ${e.message}")
+            try {
+                context.startService(intent)
+                true
+            } catch (e2: Exception) {
+                Log.w(TAG, "startService failed: ${e2.message}")
+                false
+            }
+        }
     }
 
     fun openTermux(context: Context, path: String) {
@@ -139,12 +227,19 @@ object TerminalLauncher {
         }
 
         if (!hasPerm) {
-            // Request permission via system prompt if context is an Activity
-            if (context is Activity) {
-                ActivityCompat.requestPermissions(context, arrayOf(TERMUX_PERMISSION), 1001)
+            val activity = context.findActivity()
+            if (activity != null) {
+                // Request runtime permission first and wait for user response in BaseActivity.onRequestPermissionsResult
+                pendingTermuxPath = path
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(TERMUX_PERMISSION),
+                    TERMUX_PERMISSION_REQUEST_CODE
+                )
+                return
             }
 
-            // Fallback: copy command to clipboard and launch Termux with instructions
+            // Fallback only when no Activity context is available
             cdCmd.copyToClipboard()
             Toast.makeText(
                 context,
@@ -161,49 +256,10 @@ object TerminalLauncher {
             return
         }
 
-        // Termux RUN_COMMAND intent:
-        // Execute bash to change directory and then seamlessly launch Termux's login shell.
-        // NOTE: We deliberately do NOT put com.termux.RUN_COMMAND_WORKDIR!
-        // Termux enforces a strict directory whitelist for EXTRA_WORKDIR and fails on external
-        // storage or SD cards without a trailing slash. By doing `cd` inside the command itself,
-        // it reliably works for any directory path.
-        val runCommandIntent = Intent().apply {
-            component = ComponentName(TERMUX_PACKAGE, TERMUX_RUN_COMMAND_SERVICE)
-            action = TERMUX_RUN_COMMAND_ACTION
-            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-            putExtra(
-                "com.termux.RUN_COMMAND_ARGUMENTS",
-                arrayOf(
-                    "-c",
-                    "cd '$escapedDir' 2>/dev/null; [ -x /data/data/com.termux/files/usr/bin/login ] && exec /data/data/com.termux/files/usr/bin/login || exec bash -l"
-                )
-            )
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
-            putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
-            putExtra("com.termux.execute.session_action", "0")
-        }
-
-        var serviceStarted = false
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(runCommandIntent)
-            } else {
-                context.startService(runCommandIntent)
-            }
-            serviceStarted = true
-        } catch (e: Exception) {
-            Log.w(TAG, "startForegroundService failed, attempting startService: ${e.message}")
-            try {
-                context.startService(runCommandIntent)
-                serviceStarted = true
-            } catch (e2: Exception) {
-                Log.e(TAG, "Failed to send RUN_COMMAND to Termux: ${e2.message}")
-            }
-        }
+        val runCommandIntent = buildTermuxRunCommandIntent(TERMUX_PACKAGE, targetDir, escapedDir)
+        val serviceStarted = tryStartRunCommandService(context, runCommandIntent)
 
         if (serviceStarted) {
-            // Give RunCommandService ~200ms to register the new terminal session before bringing
-            // TermuxActivity to the foreground, preventing race conditions on Android 10+.
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
                     val launchIntent = context.packageManager.getLaunchIntentForPackage(TERMUX_PACKAGE)?.apply {
@@ -217,20 +273,37 @@ object TerminalLauncher {
                 }
             }, 200)
         } else {
-            // If service start failed, fall back to copying cd command to clipboard
-            cdCmd.copyToClipboard()
-            Toast.makeText(
-                context,
-                context.getString(R.string.termux_permission_copy_notice),
-                Toast.LENGTH_LONG
-            ).show()
-
+            // On Android 12+, starting RunCommandService while Termux is in the background can throw
+            // BackgroundServiceStartNotAllowedException. Bring TermuxActivity to the foreground FIRST,
+            // then dispatch RUN_COMMAND once Termux's process is in the foreground state.
             val launchIntent = context.packageManager.getLaunchIntentForPackage(TERMUX_PACKAGE)?.apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             if (launchIntent != null) {
-                context.startActivity(launchIntent)
+                try {
+                    context.startActivity(launchIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to launch Termux activity: ${e.message}")
+                }
             }
+
+            val mainHandler = Handler(Looper.getMainLooper())
+            mainHandler.postDelayed({
+                val retryOk = tryStartRunCommandService(context.applicationContext, runCommandIntent)
+                if (!retryOk) {
+                    mainHandler.postDelayed({
+                        val secondRetryOk = tryStartRunCommandService(context.applicationContext, runCommandIntent)
+                        if (!secondRetryOk) {
+                            cdCmd.copyToClipboard()
+                            Toast.makeText(
+                                context.applicationContext,
+                                context.getString(R.string.termux_permission_copy_notice),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }, 450)
+                }
+            }, 350)
         }
     }
 
@@ -257,7 +330,6 @@ object TerminalLauncher {
             return
         }
 
-        // Handle Jackpal Android Terminal Emulator: directly execute script
         if (packageName == "jackpal.androidterm") {
             try {
                 val termIntent = Intent("jackpal.androidterm.RUN_SCRIPT").apply {
@@ -272,39 +344,9 @@ object TerminalLauncher {
             }
         }
 
-        // Handle Termux or forks (e.g., com.termux, com.termux.nix)
         if (packageName.contains("termux", ignoreCase = true)) {
-            val runIntent = Intent().apply {
-                component = ComponentName(packageName, "$packageName.app.RunCommandService")
-                action = "$packageName.RUN_COMMAND"
-                putExtra("$packageName.RUN_COMMAND_PATH", "/data/data/$packageName/files/usr/bin/bash")
-                putExtra(
-                    "$packageName.RUN_COMMAND_ARGUMENTS",
-                    arrayOf(
-                        "-c",
-                        "cd '$escapedDir' 2>/dev/null; [ -x /data/data/$packageName/files/usr/bin/login ] && exec /data/data/$packageName/files/usr/bin/login || exec bash -l"
-                    )
-                )
-                putExtra("$packageName.RUN_COMMAND_BACKGROUND", false)
-                putExtra("$packageName.RUN_COMMAND_SESSION_ACTION", "0")
-                putExtra("$packageName.execute.session_action", "0")
-            }
-            var started = false
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(runIntent)
-                } else {
-                    context.startService(runIntent)
-                }
-                started = true
-            } catch (e: Exception) {
-                try {
-                    context.startService(runIntent)
-                    started = true
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Failed to send RUN_COMMAND to $packageName: ${e2.message}")
-                }
-            }
+            val runIntent = buildTermuxRunCommandIntent(packageName, targetDir, escapedDir)
+            val started = tryStartRunCommandService(context, runIntent)
             if (started) {
                 Handler(Looper.getMainLooper()).postDelayed({
                     val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
@@ -315,10 +357,27 @@ object TerminalLauncher {
                     }
                 }, 200)
                 return
+            } else {
+                val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                if (launchIntent != null) {
+                    runCatching { context.startActivity(launchIntent) }
+                }
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!tryStartRunCommandService(context.applicationContext, runIntent)) {
+                        command.copyToClipboard()
+                        Toast.makeText(
+                            context.applicationContext,
+                            context.getString(R.string.termux_permission_copy_notice),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }, 400)
+                return
             }
         }
 
-        // Fallback for other custom terminal apps: copy command to clipboard and launch
         command.copyToClipboard()
         Toast.makeText(
             context,

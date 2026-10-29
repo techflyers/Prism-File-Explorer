@@ -76,7 +76,10 @@ class LocalFileHolder(
     private var fileCount = 0
     private var timestamp = cachedLastModified ?: -1L
 
-    override val displayName: String = cachedName ?: file.name
+    override val displayName: String =
+        (cachedName ?: file.name).ifEmpty {
+            if (file.absolutePath == "/") globalClass.getString(R.string.root_dir) else file.absolutePath
+        }
 
     var details = emptyString
 
@@ -119,7 +122,15 @@ class LocalFileHolder(
         } else if (isSymbolicLink && isSymbolicLinkBroken) {
             false
         } else {
-            file.isDirectory
+            file.isDirectory || file.absolutePath == "/"
+        }
+    }
+
+    override fun isFile(): Boolean {
+        return if (cachedIsDir != null) {
+            !cachedIsDir
+        } else {
+            file.isFile
         }
     }
 
@@ -764,6 +775,7 @@ class LocalFileHolder(
         }
         details = emptyString
         resetCachedTimestamp()
+        com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.syncTempFileIfNeeded(globalClass, file)
         com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(file)
     }
 

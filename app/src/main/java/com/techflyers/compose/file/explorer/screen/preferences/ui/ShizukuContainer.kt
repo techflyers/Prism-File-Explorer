@@ -15,12 +15,12 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,22 +45,25 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.Shizuk
 @Composable
 fun ShizukuContainer() {
     val context = LocalContext.current
-    var showDownloadDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    var showInfoDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var showInfoDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         ShizukuManager.checkStatus()
         ShizukuManager.probeRoot()
     }
 
-    Container(title = "Privileged Access") {
+    Container(
+        title = "Privileged Access",
+        icon = Icons.Rounded.AdminPanelSettings
+    ) {
         val managerName = if (ShizukuManager.isShizukuInstalled) ShizukuManager.detectedManagerName else "Shizuku / Shevery"
 
         // Status overview
         val statusText = when (ShizukuManager.accessMode) {
-            ShizukuManager.AccessMode.SHIZUKU -> "Active via ${ShizukuManager.detectedManagerName}"
-            ShizukuManager.AccessMode.ROOT -> "Active via Root (su)"
-            ShizukuManager.AccessMode.NONE -> "Not configured"
+            ShizukuManager.AccessMode.SHIZUKU -> "Active via ${ShizukuManager.detectedManagerName} (browse restricted /Android/data and /Android/obb)"
+            ShizukuManager.AccessMode.ROOT -> "Active via Root (su) with full system directory access"
+            ShizukuManager.AccessMode.NONE -> "Not configured — restricted system directories are hidden by Android"
         }
         val statusIcon = when (ShizukuManager.accessMode) {
             ShizukuManager.AccessMode.NONE -> Icons.Rounded.Lock
@@ -73,17 +76,14 @@ fun ShizukuContainer() {
             icon = statusIcon,
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 1.dp
-        )
+        PreferenceDivider()
 
         // Shizuku / Shevery / Fork section
         val shizukuSupportingText = when {
             ShizukuManager.isShizukuGranted -> "Connected and granted (${ShizukuManager.detectedManagerName})"
             ShizukuManager.isBinderAlive -> "Service is running — tap to grant permission"
             ShizukuManager.isShizukuInstalled -> "${ShizukuManager.detectedManagerName} is installed — tap to open and start service"
-            else -> "Not installed — tap to choose and download"
+            else -> "Not installed — tap to choose and download Shizuku or Shevery"
         }
 
         PreferenceItem(
@@ -110,9 +110,9 @@ fun ShizukuContainer() {
                 }
             },
             trailingContent = {
-                androidx.compose.material3.IconButton(onClick = { showInfoDialog = true }) {
-                    androidx.compose.material3.Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Rounded.Info,
+                IconButton(onClick = { showInfoDialog = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
                         contentDescription = "About Shizuku and Shevery",
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -121,26 +121,21 @@ fun ShizukuContainer() {
         )
 
         if (ShizukuManager.isShizukuGranted || ShizukuManager.isRootAvailable) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 1.dp
-            )
+            PreferenceDivider()
 
-            // Access mode selector
             val modeLabel = when {
                 ShizukuManager.isShizukuGranted && ShizukuManager.isRootAvailable ->
-                    "Both ${ShizukuManager.detectedManagerName} and Root available — tap to switch"
-                ShizukuManager.isShizukuGranted -> "Using ${ShizukuManager.detectedManagerName}"
-                else -> "Using Root (su)"
+                    "Both ${ShizukuManager.detectedManagerName} and Root available — tap to cycle active backend"
+                ShizukuManager.isShizukuGranted -> "Using ${ShizukuManager.detectedManagerName} wireless debugging backend"
+                else -> "Using Root (su) superuser backend"
             }
 
             PreferenceItem(
-                label = "Access mode",
+                label = "Switch privileged access mode",
                 supportingText = modeLabel,
-                icon = Icons.Rounded.AdminPanelSettings,
+                icon = Icons.Rounded.SwapHoriz,
                 onClick = {
                     val rootOk = ShizukuManager.probeRoot()
-                    // Cycle through available modes
                     val next = when (ShizukuManager.accessMode) {
                         ShizukuManager.AccessMode.NONE ->
                             if (ShizukuManager.isShizukuGranted) ShizukuManager.AccessMode.SHIZUKU
@@ -156,22 +151,21 @@ fun ShizukuContainer() {
             )
         }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 1.dp
-        )
+        val searchQuery = LocalPreferenceSearchQuery.current.trim()
+        if (searchQuery.isEmpty() || matchesPreferenceQuery(searchQuery, "Privileged access", "Android/data", "Shizuku", "Root")) {
+            PreferenceDivider()
 
-        // Info note
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Text(
-                text = "ℹ️  Privileged access lets Prism browse restricted folders like /Android/data and /data/data that are normally hidden from file managers.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "ℹ️  Privileged access lets Prism browse restricted folders like /Android/data and /data/data that are normally hidden from file managers.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 
@@ -285,7 +279,6 @@ fun ShizukuContainer() {
                         style = MaterialTheme.typography.bodyMedium
                     )
 
-                    // Option 1: Shevery
                     OutlinedCard(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
@@ -327,7 +320,6 @@ fun ShizukuContainer() {
                         }
                     }
 
-                    // Option 2: Shizuku
                     OutlinedCard(
                         modifier = Modifier.fillMaxWidth()
                     ) {

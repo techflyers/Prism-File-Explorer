@@ -304,6 +304,12 @@ class SpreadsheetViewModel : ViewModel() {
                                 }
                             }
                         }
+                        st.sourceFilePath?.let { path ->
+                            com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.syncTempFileIfNeeded(context, File(path))
+                        }
+                        st.sourceUri?.path?.let { path ->
+                            com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.syncTempFileIfNeeded(context, File(path))
+                        }
                         SaveResult.Saved
                     } else if (target == null) SaveResult.NeedsSaveAs else SaveResult.Failed("Couldn't save to that location.")
                 } catch (e: Throwable) {

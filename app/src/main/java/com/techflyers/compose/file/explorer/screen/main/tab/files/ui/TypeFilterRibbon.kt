@@ -4,74 +4,89 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Done
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
+import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.CompactFilterChip
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.CompactFilterCustomizeButton
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FilterConfigManager
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FilterScope
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FilterCustomizationDialog
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TypeFilterRibbon(tab: FilesTab) {
     if (tab.activeFolder is VirtualFileHolder) return
-    if (!globalClass.preferencesManager.showDirectoryTypeFilterRibbon) return
+    val prefs = globalClass.preferencesManager
+    if (!prefs.showDirectoryTypeFilterRibbon) return
     if (tab.isLoading && tab.activeFolderContent.isEmpty()) return
 
-    val options = listOf(
-        null to "All",
-        "image" to "Images",
-        "video" to "Videos",
-        "audio" to "Audio",
-        "document" to "Docs",
-        "archive" to "Archives"
-    )
+    var showCustomizeDialog by remember { mutableStateOf(false) }
+    val configuredFilters = remember(prefs.generalFiltersConfigJson, prefs.filterConfigVersion) {
+        FilterConfigManager.getGeneralFilters().filter { it.isEnabled }
+    }
+
+    if (showCustomizeDialog) {
+        FilterCustomizationDialog(
+            initialScope = FilterScope.GENERAL,
+            onDismiss = { showCustomizeDialog = false },
+            onUpdated = {
+                tab.updateContentSnapshot()
+            }
+        )
+    }
+
+    val selectedFilters = tab.selectedTypeFilters
 
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 4.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(vertical = 3.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val selectedFilters = tab.selectedTypeFilters
-        items(options, key = { it.first ?: "all" }) { (key, label) ->
-            val selected = if (key == null) selectedFilters.isEmpty() else key in selectedFilters
-            FilterChip(
+        item(key = "all") {
+            CompactFilterChip(
+                label = stringResource(R.string.all),
+                selected = selectedFilters.isEmpty(),
+                onClick = {
+                    tab.selectedTypeFilters = emptySet()
+                    tab.updateContentSnapshot()
+                },
+                onLongClick = { showCustomizeDialog = true }
+            )
+        }
+        items(configuredFilters, key = { it.id }) { filterItem ->
+            val selected = filterItem.id in selectedFilters
+            CompactFilterChip(
+                label = filterItem.name,
                 selected = selected,
                 onClick = {
-                    tab.selectedTypeFilters = if (key == null) {
-                        emptySet()
-                    } else if (key in selectedFilters) {
-                        selectedFilters - key
+                    tab.selectedTypeFilters = if (selected) {
+                        selectedFilters - filterItem.id
                     } else {
-                        selectedFilters + key
+                        selectedFilters + filterItem.id
                     }
                     tab.updateContentSnapshot()
                 },
-                label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-                leadingIcon = if (selected) {
-                    { Icon(Icons.Rounded.Done, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                } else null,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                shape = RoundedCornerShape(8.dp)
+                onLongClick = { showCustomizeDialog = true }
+            )
+        }
+        item(key = "customize_general_filters") {
+            CompactFilterCustomizeButton(
+                onClick = { showCustomizeDialog = true }
             )
         }
     }

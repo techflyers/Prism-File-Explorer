@@ -1,5 +1,7 @@
 package com.techflyers.compose.file.explorer.screen.preferences.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,10 +13,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -40,10 +45,6 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.CheckCircle
 import com.techflyers.compose.file.explorer.screen.preferences.constant.TerminalAppPreference
 import com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher
 import com.techflyers.compose.file.explorer.screen.terminal.isTerminalInstalled
@@ -74,14 +75,32 @@ fun TerminalContainer() {
         mutableStateOf(TerminalLauncher.hasTermuxPermission(context))
     }
 
+    val termuxPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasTermuxPermission = granted || TerminalLauncher.hasTermuxPermission(context)
+        if (hasTermuxPermission) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.termux_permission_granted_toast),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            TerminalLauncher.openAppSettings(context)
+        }
+    }
+
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         hasTermuxPermission = TerminalLauncher.hasTermuxPermission(context)
     }
 
-    Container(title = stringResource(R.string.terminal)) {
+    Container(
+        title = stringResource(R.string.terminal),
+        icon = Icons.Rounded.Terminal
+    ) {
         PreferenceItem(
             label = stringResource(R.string.terminal_app),
-            supportingText = terminalAppChoices[currentTerminalApp],
+            supportingText = "Preferred terminal environment: ${terminalAppChoices[currentTerminalApp]}",
             icon = Icons.Rounded.Terminal,
             onClick = {
                 prefs.singleChoiceDialog.show(
@@ -91,16 +110,24 @@ fun TerminalContainer() {
                     selectedChoice = currentTerminalApp,
                     onSelect = {
                         prefs.terminalApp = it
+                        if (it == TerminalAppPreference.TERMUX.ordinal &&
+                            isTermuxInstalled &&
+                            !TerminalLauncher.hasTermuxPermission(context)
+                        ) {
+                            if (TerminalLauncher.tryGrantPermissionViaShizuku(context)) {
+                                hasTermuxPermission = true
+                            } else {
+                                runCatching { termuxPermissionLauncher.launch(TerminalLauncher.TERMUX_PERMISSION) }
+                            }
+                        }
                     }
                 )
             }
         )
 
         if (prefs.terminalApp == TerminalAppPreference.TERMUX.ordinal) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
+            PreferenceDivider()
+
             PreferenceItem(
                 label = stringResource(R.string.termux_integration),
                 supportingText = if (isTermuxInstalled) {
@@ -135,10 +162,8 @@ fun TerminalContainer() {
             )
 
             if (isTermuxInstalled) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    thickness = 3.dp
-                )
+                PreferenceDivider()
+
                 PreferenceItem(
                     label = stringResource(R.string.termux_permission_status),
                     supportingText = if (hasTermuxPermission) {
@@ -146,7 +171,7 @@ fun TerminalContainer() {
                     } else {
                         stringResource(R.string.termux_permission_not_granted)
                     },
-                    icon = if (hasTermuxPermission) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                    icon = Icons.Rounded.Security,
                     onClick = {
                         if (!hasTermuxPermission) {
                             if (TerminalLauncher.tryGrantPermissionViaShizuku(context)) {
@@ -157,7 +182,11 @@ fun TerminalContainer() {
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                             } else {
-                                TerminalLauncher.openAppSettings(context)
+                                try {
+                                    termuxPermissionLauncher.launch(TerminalLauncher.TERMUX_PERMISSION)
+                                } catch (_: Exception) {
+                                    TerminalLauncher.openAppSettings(context)
+                                }
                             }
                         } else {
                             showTermuxInfoDialog = true
@@ -168,33 +197,26 @@ fun TerminalContainer() {
         }
 
         if (prefs.terminalApp == TerminalAppPreference.CUSTOM.ordinal) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
+            PreferenceDivider()
+
             PreferenceItem(
                 label = stringResource(R.string.custom_terminal_package),
-                supportingText = prefs.customTerminalPackage.ifBlank { "com.termux" },
+                supportingText = "Target Android package name: ${prefs.customTerminalPackage.ifBlank { "com.termux" }}",
                 icon = Icons.Rounded.Apps,
                 onClick = { showCustomPackageDialog = true }
             )
 
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
+            PreferenceDivider()
+
             PreferenceItem(
                 label = stringResource(R.string.custom_terminal_command),
-                supportingText = prefs.customTerminalCommand.ifBlank { "cd {dir}" },
-                icon = Icons.Rounded.Code,
+                supportingText = "Startup shell command template: ${prefs.customTerminalCommand.ifBlank { "cd {dir}" }}",
+                icon = Icons.Rounded.PlayArrow,
                 onClick = { showCustomCommandDialog = true }
             )
         }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.terminal_status),
@@ -203,13 +225,10 @@ fun TerminalContainer() {
             } else {
                 stringResource(R.string.terminal_not_installed)
             },
-            icon = Icons.Rounded.Terminal
+            icon = Icons.Rounded.Dns
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.custom_code_runners),
@@ -218,10 +237,7 @@ fun TerminalContainer() {
             onClick = { showCodeRunners = true }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.uninstall_terminal),

@@ -4,7 +4,9 @@ import org.apache.commons.net.ftp.FTP
 import org.apache.commons.net.ftp.FTPClient
 import org.apache.commons.net.ftp.FTPFile
 import org.apache.commons.net.ftp.FTPReply
+import org.apache.commons.net.ftp.FTPSClient
 import org.apache.commons.net.io.CopyStreamAdapter
+import org.apache.commons.net.util.TrustManagerUtils
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -17,14 +19,35 @@ class FtpRemoteClient(
 ) : RemoteClient {
     private var ftp: FTPClient? = null
 
+    private val asciiExtensions = setOf(
+        "txt", "md", "csv", "json", "xml", "html", "htm", "css", "js", "ts",
+        "py", "kt", "java", "c", "cpp", "h", "sh", "bat", "ini", "conf", "yaml", "yml", "log", "srt", "vtt"
+    )
+
     @Synchronized
     override fun connect() {
         disconnect()
-        val client = FTPClient()
-        client.connectTimeout = 15000
-        client.defaultTimeout = 15000
-        client.dataTimeout = java.time.Duration.ofMillis(15000)
-        client.controlEncoding = "UTF-8"
+        val securityMode = conn.effectiveFtpSecurityMode
+        val client: FTPClient = when (securityMode) {
+            "FTPS_IMPLICIT" -> FTPSClient(true).apply {
+                if (!conn.effectiveVerifySslCert) {
+                    trustManager = TrustManagerUtils.getAcceptAllTrustManager()
+                }
+            }
+            "FTPS_EXPLICIT" -> FTPSClient(false).apply {
+                if (!conn.effectiveVerifySslCert) {
+                    trustManager = TrustManagerUtils.getAcceptAllTrustManager()
+                }
+            }
+            else -> FTPClient()
+        }
+
+        val connectTimeoutMs = conn.effectiveConnectTimeoutSec * 1000
+        val readTimeoutMs = conn.effectiveReadTimeoutSec * 1000
+        client.connectTimeout = connectTimeoutMs
+        client.defaultTimeout = readTimeoutMs
+        client.dataTimeout = java.time.Duration.ofMillis(readTimeoutMs.toLong())
+        client.controlEncoding = conn.effectiveEncoding
         client.bufferSize = 64 * 1024
 
         client.connect(conn.host, conn.port)
@@ -34,23 +57,59 @@ class FtpRemoteClient(
             throw Exception("FTP server refused connection. Reply code: $reply (${client.replyString.trim()})")
         }
 
-        val user = if (conn.username.isEmpty()) "anonymous" else conn.username
-        val pass = if (conn.password.isEmpty()) "anonymous@" else conn.password
+        val isAnonymous = conn.effectiveAuthMethod == "ANONYMOUS"
+        val user = if (isAnonymous || conn.username.isEmpty()) "anonymous" else conn.username
+        val pass = if (isAnonymous || conn.password.isEmpty()) "anonymous@" else conn.password
         if (!client.login(user, pass)) {
             try { client.disconnect() } catch (_: Exception) {}
             throw Exception("FTP login failed for user '$user'. Reply: ${client.replyString.trim()}")
         }
 
-        client.enterLocalPassiveMode()
-        client.setFileType(FTP.BINARY_FILE_TYPE)
-        try {
-            client.controlKeepAliveTimeout = 300L
-        } catch (_: Throwable) {}
-        try {
-            client.sendCommand("OPTS UTF8", "ON")
-        } catch (_: Exception) {}
+        if (client is FTPSClient) {
+            try {
+                client.execPBSZ(0)
+                client.execPROT("P")
+            } catch (_: Exception) {}
+        }
+
+        if (conn.effectiveFtpConnectionMode == "ACTIVE") {
+            client.enterLocalActiveMode()
+        } else {
+            client.enterLocalPassiveMode()
+        }
+
+        applyTransferModeForPath(client, null)
+
+        val keepAliveSec = conn.effectiveKeepAliveSec
+        if (keepAliveSec > 0) {
+            try {
+                client.controlKeepAliveTimeout = keepAliveSec.toLong()
+                client.controlKeepAliveReplyTimeout = 5000
+            } catch (_: Throwable) {}
+        }
+
+        if (conn.effectiveEncoding.equals("UTF-8", ignoreCase = true)) {
+            try {
+                client.sendCommand("OPTS UTF8", "ON")
+            } catch (_: Exception) {}
+        }
 
         ftp = client
+    }
+
+    private fun applyTransferModeForPath(client: FTPClient, filePath: String?) {
+        val mode = conn.effectiveTransferMode
+        val fileType = when (mode) {
+            "ASCII" -> FTP.ASCII_FILE_TYPE
+            "AUTO" -> {
+                val ext = filePath?.substringAfterLast('.', "")?.lowercase() ?: ""
+                if (ext in asciiExtensions) FTP.ASCII_FILE_TYPE else FTP.BINARY_FILE_TYPE
+            }
+            else -> FTP.BINARY_FILE_TYPE
+        }
+        try {
+            client.setFileType(fileType)
+        } catch (_: Exception) {}
     }
 
     @Synchronized
@@ -69,6 +128,14 @@ class FtpRemoteClient(
         val client = ftp
         if (client == null || !client.isConnected) {
             connect()
+        } else if (conn.effectiveKeepAliveSec > 0) {
+            try {
+                if (!client.sendNoOp()) {
+                    connect()
+                }
+            } catch (_: Exception) {
+                connect()
+            }
         }
         return ftp ?: throw Exception("FTP client not connected")
     }
@@ -148,6 +215,7 @@ class FtpRemoteClient(
 
     override fun downloadFile(remotePath: String, localPath: String, onProgress: (Double) -> Unit) {
         val client = getClient()
+        applyTransferModeForPath(client, remotePath)
         val localFile = File(localPath)
         localFile.parentFile?.mkdirs()
         if (localFile.exists()) {
@@ -199,6 +267,7 @@ class FtpRemoteClient(
 
     override fun uploadFile(localPath: String, remotePath: String, onProgress: (Double) -> Unit) {
         val client = getClient()
+        applyTransferModeForPath(client, localPath)
         val localFile = File(localPath)
         if (!localFile.exists()) throw FileNotFoundException("Local file not found: $localPath")
         val totalSize = localFile.length()
@@ -243,6 +312,7 @@ class FtpRemoteClient(
 
     override fun createFile(path: String) {
         val client = getClient()
+        applyTransferModeForPath(client, path)
         val parent = RemotePaths.parent(path)
         if (parent != null && parent.isNotEmpty() && parent != "/") {
             ensureDirectory(parent)

@@ -14,8 +14,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.techflyers.compose.file.explorer.common.fromJson
+import com.techflyers.compose.file.explorer.common.toJson
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+
+private data class PersistedCopyTask(
+    val sourcePaths: List<String>,
+    val deleteSourceFiles: Boolean,
+    val customTargetNames: Map<String, String> = emptyMap()
+)
 
 class TaskManager {
     private val taskScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -40,6 +51,64 @@ class TaskManager {
     var runningTaskDialogInfo = RunningTaskDialogInfo()
     val taskInterceptor = TaskConflict()
 
+    init {
+        taskScope.launch {
+            restorePersistedPendingCopyTasks()
+        }
+    }
+
+    private suspend fun restorePersistedPendingCopyTasks() {
+        try {
+            val raw = globalClass.preferencesManager.pendingCopyTasksJson
+            if (raw.isEmpty()) return
+            val persistedList = fromJson<List<PersistedCopyTask>>(raw) ?: return
+            val restoredTasks = mutableListOf<CopyTask>()
+            for (entry in persistedList) {
+                val holders = entry.sourcePaths
+                    .map { File(it) }
+                    .filter { it.exists() }
+                    .map { LocalFileHolder(it) }
+                if (holders.isNotEmpty()) {
+                    val copyTask = CopyTask(holders, entry.deleteSourceFiles).apply {
+                        customTargetNames.putAll(entry.customTargetNames)
+                    }
+                    restoredTasks.add(copyTask)
+                }
+            }
+            if (restoredTasks.isNotEmpty()) {
+                for (task in restoredTasks) {
+                    allTasks[task.id] = task
+                    pendingTasks.add(task)
+                }
+                withContext(Dispatchers.Main) {
+                    pendingTasksVersion++
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun savePendingCopyTasksSnapshot() {
+        taskScope.launch {
+            try {
+                val snapshot = synchronized(pendingTasks) {
+                    pendingTasks.filterIsInstance<CopyTask>().mapNotNull { copyTask ->
+                        val localPaths = copyTask.sourceFiles.filterIsInstance<LocalFileHolder>().map { it.uniquePath }
+                        if (localPaths.isNotEmpty()) {
+                            PersistedCopyTask(
+                                sourcePaths = localPaths,
+                                deleteSourceFiles = copyTask.deleteSourceFiles,
+                                customTargetNames = HashMap(copyTask.customTargetNames)
+                            )
+                        } else null
+                    }
+                }
+                globalClass.preferencesManager.pendingCopyTasksJson = if (snapshot.isEmpty()) "" else snapshot.toJson()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun addTask(
         task: Task,
         notifyUser: Boolean = true
@@ -47,6 +116,7 @@ class TaskManager {
         allTasks[task.id] = task
         pendingTasks.add(task)
         pendingTasksVersion++
+        savePendingCopyTasksSnapshot()
         if (notifyUser) {
             taskAddedBannerMessage = globalClass.resources.getString(R.string.new_task_has_been_added)
             hasUnconsumedTaskBanner = true
@@ -66,6 +136,7 @@ class TaskManager {
         val removed = pendingTasks.removeIf { it.id == id }
         if (removed) {
             pendingTasksVersion++
+            savePendingCopyTasksSnapshot()
         }
         runningTasks.removeIf { it.id == id }
         pausedTasks.removeIf { it.id == id }
@@ -88,6 +159,7 @@ class TaskManager {
         }
         if (changed) {
             pendingTasksVersion++
+            savePendingCopyTasksSnapshot()
         }
         onFinished?.invoke()
     }
@@ -149,6 +221,7 @@ class TaskManager {
         val removed = pendingTasks.removeIf { it.id == task.id }
         if (removed) {
             pendingTasksVersion++
+            savePendingCopyTasksSnapshot()
         }
         pausedTasks.removeIf { it.id == task.id }
         failedTasks.removeIf { it.id == task.id }

@@ -23,13 +23,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 
 @Composable
 fun DragDropFloatingPill(tab: FilesTab) {
-    val session = tab.dragDropSession ?: return
+    val session = tab.dragDropSession
+        ?: globalClass.mainActivityManager.activeDragSourceTab?.dragDropSession
+        ?: return
     val count = session.items.size
     val firstItem = session.items.firstOrNull()
+    val targetName = session.hoveredTargetHolder?.displayName
 
     val localOffset = tab.contentViewCoordinates?.let { coords ->
         if (coords.isAttached) {
@@ -70,12 +74,13 @@ fun DragDropFloatingPill(tab: FilesTab) {
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
+                val baseLabel = if (count == 1 && firstItem != null) {
+                    firstItem.displayName
+                } else {
+                    "$count items"
+                }
                 Text(
-                    text = if (count == 1 && firstItem != null) {
-                        firstItem.displayName
-                    } else {
-                        "$count items"
-                    },
+                    text = if (!targetName.isNullOrEmpty()) "$baseLabel → $targetName" else baseLabel,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                     maxLines = 1,

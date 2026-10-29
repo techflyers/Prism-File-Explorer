@@ -57,44 +57,46 @@ fun FileSortingMenuDialog(
 ) {
     if (show) {
         val prefs = globalClass.preferencesManager
-        val specificOptions = prefs.getSortingPrefsFor(tab.activeFolder)
+        val initialOptions = remember(show, tab.activeFolder.uniquePath) {
+            prefs.getSortingPrefsFor(tab.activeFolder)
+        }
 
         var applyForThisFileOnly by remember(show, tab.activeFolder.uniquePath) {
-            mutableStateOf(specificOptions.applyForThisFileOnly)
+            mutableStateOf(initialOptions.applyForThisFileOnly)
         }
         var sortingMethod by remember(show, tab.activeFolder.uniquePath) {
-            mutableIntStateOf(specificOptions.sortMethod)
+            mutableIntStateOf(initialOptions.sortMethod)
         }
         var showFoldersFirst by remember(show, tab.activeFolder.uniquePath) {
-            mutableStateOf(specificOptions.showFoldersFirst)
+            mutableStateOf(initialOptions.showFoldersFirst)
         }
         var reverseOrder by remember(show, tab.activeFolder.uniquePath) {
-            mutableStateOf(specificOptions.reverseSorting)
+            mutableStateOf(initialOptions.reverseSorting)
         }
 
-        fun updateForThisFolder() {
-            prefs.setSortingPrefsFor(
-                content = tab.activeFolder,
-                prefs = FileSortingPrefs(
-                    sortMethod = sortingMethod,
-                    showFoldersFirst = showFoldersFirst,
-                    reverseSorting = reverseOrder,
-                    applyForThisFileOnly = true
+        fun persistSortingSelection() {
+            if (applyForThisFileOnly) {
+                prefs.setSortingPrefsFor(
+                    content = tab.activeFolder,
+                    prefs = FileSortingPrefs(
+                        sortMethod = sortingMethod,
+                        showFoldersFirst = showFoldersFirst,
+                        reverseSorting = reverseOrder,
+                        applyForThisFileOnly = true
+                    )
                 )
-            )
+            } else {
+                prefs.deleteSortingPrefsFor(tab.activeFolder)
+                prefs.showFoldersFirst = showFoldersFirst
+                prefs.reverse = reverseOrder
+                prefs.defaultSortMethod = sortingMethod
+            }
         }
 
         BottomSheetDialog(
             onDismissRequest = {
-                if (applyForThisFileOnly) {
-                    updateForThisFolder()
-                } else {
-                    prefs.deleteSortingPrefsFor(tab.activeFolder)
-                    prefs.showFoldersFirst = showFoldersFirst
-                    prefs.reverse = reverseOrder
-                    prefs.defaultSortMethod = sortingMethod
-                }
-                tab.updateSortingConfig()
+                persistSortingSelection()
+                tab.applySortingChange(initialOptions, forceRefresh = true)
                 onDismissRequest()
             }
         ) {
@@ -140,7 +142,10 @@ fun FileSortingMenuDialog(
                         icon = Icons.Rounded.FolderSpecial,
                         title = stringResource(R.string.apply_to_this_folder_only),
                         checked = applyForThisFileOnly,
-                        onCheckedChange = { applyForThisFileOnly = it }
+                        onCheckedChange = {
+                            applyForThisFileOnly = it
+                            persistSortingSelection()
+                        }
                     )
                 }
 
@@ -176,6 +181,7 @@ fun FileSortingMenuDialog(
                                 } else {
                                     sortingMethod = SortingMethod.SORT_BY_NAME
                                 }
+                                persistSortingSelection()
                             }
                         )
 
@@ -194,6 +200,7 @@ fun FileSortingMenuDialog(
                                 } else {
                                     sortingMethod = SortingMethod.SORT_BY_DATE
                                 }
+                                persistSortingSelection()
                             }
                         )
 
@@ -212,6 +219,7 @@ fun FileSortingMenuDialog(
                                 } else {
                                     sortingMethod = SortingMethod.SORT_BY_SIZE
                                 }
+                                persistSortingSelection()
                             }
                         )
 
@@ -230,6 +238,7 @@ fun FileSortingMenuDialog(
                                 } else {
                                     sortingMethod = SortingMethod.SORT_BY_TYPE
                                 }
+                                persistSortingSelection()
                             }
                         )
 
@@ -244,6 +253,7 @@ fun FileSortingMenuDialog(
                             selected = sortingMethod == SortingMethod.SORT_BY_SHUFFLED,
                             onClick = {
                                 sortingMethod = SortingMethod.SORT_BY_SHUFFLED
+                                persistSortingSelection()
                             }
                         )
                     }
@@ -271,7 +281,10 @@ fun FileSortingMenuDialog(
                             icon = Icons.Rounded.Folder,
                             title = stringResource(R.string.folders_first),
                             checked = showFoldersFirst,
-                            onCheckedChange = { showFoldersFirst = it }
+                            onCheckedChange = {
+                                showFoldersFirst = it
+                                persistSortingSelection()
+                            }
                         )
 
                         HorizontalDivider(
@@ -283,7 +296,10 @@ fun FileSortingMenuDialog(
                             icon = if (reverseOrder) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward,
                             title = stringResource(R.string.reverse),
                             checked = reverseOrder,
-                            onCheckedChange = { reverseOrder = it }
+                            onCheckedChange = {
+                                reverseOrder = it
+                                persistSortingSelection()
+                            }
                         )
                     }
                 }

@@ -2,7 +2,6 @@ package com.techflyers.compose.file.explorer.screen.viewer.document.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -30,18 +29,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Feed
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.ViewCarousel
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,12 +54,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 @Composable
@@ -68,6 +66,8 @@ fun OfficeConversionProgressScreen(
     message: String = "Converting document to high-fidelity PDF…",
     progress: Float? = null,
     onCancel: () -> Unit,
+    onUseBuiltInViewer: (() -> Unit)? = null,
+    onResetEngine: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val ext = fileName.substringAfterLast('.', "").lowercase()
@@ -78,7 +78,6 @@ fun OfficeConversionProgressScreen(
         else -> Triple(MaterialTheme.colorScheme.primary, Icons.Rounded.Feed, "Document")
     }
 
-    // Breathing pulse animations
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 0.95f,
@@ -119,7 +118,6 @@ fun OfficeConversionProgressScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Back / Cancel button in top bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -143,7 +141,6 @@ fun OfficeConversionProgressScreen(
             )
         }
 
-        // Main Center Content
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -151,7 +148,6 @@ fun OfficeConversionProgressScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Glowing pulsing halo behind document badge
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.size(140.dp)
@@ -200,7 +196,6 @@ fun OfficeConversionProgressScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // File Name
             Text(
                 text = fileName,
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
@@ -212,7 +207,6 @@ fun OfficeConversionProgressScreen(
 
             Spacer(Modifier.height(6.dp))
 
-            // Type Badge
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = docColor.copy(alpha = 0.12f)
@@ -227,7 +221,6 @@ fun OfficeConversionProgressScreen(
 
             Spacer(Modifier.height(32.dp))
 
-            // Fluid Progress Bar (Determinate if progress != null, Indeterminate otherwise)
             if (progress != null) {
                 LinearProgressIndicator(
                     progress = { progress.coerceIn(0f, 1f) },
@@ -251,7 +244,6 @@ fun OfficeConversionProgressScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Status message and percentage
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
@@ -259,9 +251,38 @@ fun OfficeConversionProgressScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(Modifier.height(36.dp))
+            if (onUseBuiltInViewer != null || onResetEngine != null) {
+                Spacer(Modifier.height(20.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (onUseBuiltInViewer != null) {
+                        OutlinedButton(
+                            onClick = onUseBuiltInViewer,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Use Built-in Viewer Instead")
+                        }
+                    }
+                    if (onResetEngine != null) {
+                        TextButton(onClick = onResetEngine) {
+                            Icon(
+                                imageVector = Icons.Rounded.RestartAlt,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Reset / Cancel Engine Download")
+                        }
+                    }
+                }
+            }
 
-            // Rotating tips card
+            Spacer(Modifier.height(24.dp))
+
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),

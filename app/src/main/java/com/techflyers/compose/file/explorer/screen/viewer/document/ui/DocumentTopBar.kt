@@ -48,11 +48,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.rounded.CheckBox
+import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.ViewCarousel
+import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +75,12 @@ fun DocumentTopBar(
     isBookmarked: Boolean,
     visible: Boolean,
     hasUnsavedChanges: Boolean = false,
+    isHorizontalScrollLocked: Boolean = false,
+    isVerticalScrollLocked: Boolean = false,
+    isZoomLocked: Boolean = false,
+    onToggleHorizontalScrollLock: (() -> Unit)? = null,
+    onToggleVerticalScrollLock: (() -> Unit)? = null,
+    onToggleZoomLock: (() -> Unit)? = null,
     onBack: () -> Unit,
     onSearchClick: () -> Unit,
     onBookmarkToggle: () -> Unit,
@@ -178,6 +190,37 @@ fun DocumentTopBar(
                                             softWrap = false,
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                         )
+                                    }
+                                }
+                                if (isHorizontalScrollLocked || isVerticalScrollLocked || isZoomLocked) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Lock,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.size(10.dp)
+                                            )
+                                            val lockText = buildList {
+                                                if (isHorizontalScrollLocked) add("H")
+                                                if (isVerticalScrollLocked) add("V")
+                                                if (isZoomLocked) add("Z")
+                                            }.joinToString("+")
+                                            Text(
+                                                text = lockText,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -348,6 +391,57 @@ fun DocumentTopBar(
                                     onAddImageClick()
                                 }
                             )
+                        }
+                        if (onToggleHorizontalScrollLock != null || onToggleVerticalScrollLock != null || onToggleZoomLock != null) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            if (onToggleHorizontalScrollLock != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Lock Horizontal Scrolling") },
+                                    leadingIcon = { Icon(Icons.Rounded.SwapHoriz, null) },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = if (isHorizontalScrollLocked) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                                            contentDescription = null,
+                                            tint = if (isHorizontalScrollLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = {
+                                        onToggleHorizontalScrollLock()
+                                    }
+                                )
+                            }
+                            if (onToggleVerticalScrollLock != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Lock Vertical Scrolling") },
+                                    leadingIcon = { Icon(Icons.Rounded.SwapVert, null) },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = if (isVerticalScrollLocked) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                                            contentDescription = null,
+                                            tint = if (isVerticalScrollLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = {
+                                        onToggleVerticalScrollLock()
+                                    }
+                                )
+                            }
+                            if (onToggleZoomLock != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Lock Zoom") },
+                                    leadingIcon = { Icon(Icons.Rounded.ZoomOutMap, null) },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = if (isZoomLocked) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                                            contentDescription = null,
+                                            tint = if (isZoomLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = {
+                                        onToggleZoomLock()
+                                    }
+                                )
+                            }
                         }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         DropdownMenuItem(

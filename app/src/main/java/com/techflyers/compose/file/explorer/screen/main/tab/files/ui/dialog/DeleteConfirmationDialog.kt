@@ -9,10 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.DataUsage
-import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -145,7 +146,6 @@ fun DeleteConfirmationDialog(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // Snapshot target files before any state changes
                         val filesToProcess = targetFiles.toList()
                         onDismissRequest()
 
@@ -163,7 +163,6 @@ fun DeleteConfirmationDialog(
                                 ) { newDir ->
                                     tab.scope.launch {
                                         if (newDir != null) {
-                                            // Save metadata.json with original paths for restore (streamed on IO)
                                             saveRecycleBinMetadata(newDir, filesToProcess)
                                             if (customFiles == null) {
                                                 tab.unselectAllFiles()
@@ -213,7 +212,7 @@ fun DeleteConfirmationDialog(
 
                     Space(size = 12.dp)
 
-                    // Detailed summary of folders, files, and total size selected for deletion
+                    // Clear summary distinguishing Selected vs Recursive (total) items
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -222,7 +221,7 @@ fun DeleteConfirmationDialog(
                                 shape = RoundedCornerShape(8.dp)
                             )
                             .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (targetFiles.size == 1) {
                             Text(
@@ -233,62 +232,55 @@ fun DeleteConfirmationDialog(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                        } else {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                        }
+
+                        val selectedFoldersWord = if (directFoldersCount == 1) "folder" else "folders"
+                        val selectedFilesWord = if (directFilesCount == 1) "file" else "files"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircleOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                             Text(
-                                text = "${targetFiles.size} items selected ($directFoldersCount folders, $directFilesCount files)",
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = "Selected: $directFoldersCount $selectedFoldersWord, $directFilesCount $selectedFilesWord",
+                                style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
+                        val totalFoldersWord = if (totalFoldersCount == 1L) "folder" else "folders"
+                        val totalFilesWord = if (totalFilesCount == 1L) "file" else "files"
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Folder,
+                                imageVector = Icons.Rounded.AccountTree,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
-                            val folderDetails = if (totalFoldersCount > directFoldersCount) {
-                                "$directFoldersCount selected ($totalFoldersCount total including subfolders)"
-                            } else {
-                                "$totalFoldersCount"
-                            }
                             Text(
-                                text = "Folders: $folderDetails",
+                                text = "Recursive: $totalFoldersCount $totalFoldersWord, $totalFilesCount $totalFilesWord (total)" +
+                                        if (isCalculatingStats) " …" else "",
                                 style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.InsertDriveFile,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            val fileDetails = if (totalFilesCount > directFilesCount && directFoldersCount > 0) {
-                                "$directFilesCount direct ($totalFilesCount total including folder contents)"
-                            } else {
-                                "$totalFilesCount"
-                            }
-                            Text(
-                                text = "Files: $fileDetails",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.DataUsage,
@@ -346,11 +338,6 @@ fun DeleteConfirmationDialog(
     }
 }
 
-/**
- * Saves a metadata.json file in the recycle bin folder that records the original
- * paths of deleted files, enabling restore to their original locations.
- * Uses buffered streaming on Dispatchers.IO to prevent OutOfMemoryError and ANRs on large batches.
- */
 private suspend fun saveRecycleBinMetadata(recycleBinFolder: ContentHolder, files: List<ContentHolder>) {
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {

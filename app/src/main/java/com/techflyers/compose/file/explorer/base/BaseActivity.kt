@@ -115,6 +115,9 @@ abstract class BaseActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == permissionRequestCode) {
             onPermissionGranted()
+        } else if (requestCode == com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher.TERMUX_PERMISSION_REQUEST_CODE) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher.onTermuxPermissionResult(this, granted)
         }
     }
 

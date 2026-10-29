@@ -9,7 +9,10 @@ import androidx.compose.runtime.setValue
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionModel
+import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
 import kotlinx.coroutines.*
 import java.io.File
 
@@ -30,9 +33,13 @@ class VaultTab : Tab() {
     }
 
     override fun onTabStopped() {
+        super.onTabStopped()
+    }
+
+    override fun onTabRemoved() {
         isPinVerified = false
         activePassword = ""
-        super.onTabStopped()
+        super.onTabRemoved()
     }
 
     override suspend fun getTitle() = "Private Wallet"
@@ -57,12 +64,56 @@ class FtpServerTab : Tab() {
     override suspend fun getSubtitle() = "Local File Server"
 }
 
-class WebSharingTab : Tab() {
+class WebSharingTab(
+    val initialDirectoryPath: String? = null
+) : Tab() {
     override val id = globalClass.generateUid()
     override val header = "Web Share"
 
+    var targetDirectoryPath: String by mutableStateOf(
+        resolveInitialDirectoryPath(initialDirectoryPath)
+    )
+
+    companion object {
+        fun resolveInitialDirectoryPath(explicitPath: String? = null): String {
+            if (!explicitPath.isNullOrBlank()) {
+                val explicitFile = File(explicitPath)
+                if (explicitFile.exists()) {
+                    return if (explicitFile.isDirectory) explicitFile.absolutePath
+                    else explicitFile.parentFile?.absolutePath ?: explicitFile.absolutePath
+                }
+            }
+            val activeTab = runCatching { globalClass.mainActivityManager.getActiveTab() }.getOrNull()
+            val filesTab = (activeTab as? FilesTab)
+                ?: (activeTab?.parentTab as? FilesTab)
+                ?: runCatching {
+                    globalClass.mainActivityManager.state.value.tabs
+                        .filterIsInstance<FilesTab>()
+                        .lastOrNull { it.activeFolder is LocalFileHolder }
+                }.getOrNull()
+
+            val localHolder = filesTab?.activeFolder as? LocalFileHolder
+            if (localHolder != null && localHolder.file.exists()) {
+                return if (localHolder.file.isDirectory) {
+                    localHolder.file.absolutePath
+                } else {
+                    localHolder.file.parentFile?.absolutePath
+                        ?: Environment.getExternalStorageDirectory().absolutePath
+                }
+            }
+            return Environment.getExternalStorageDirectory().absolutePath
+        }
+    }
+
     override fun onTabStarted() {
         super.onTabStarted()
+        if (initialDirectoryPath == null) {
+            val parentFilesTab = parentTab as? FilesTab
+            val local = parentFilesTab?.activeFolder as? LocalFileHolder
+            if (local != null && local.file.exists() && local.file.isDirectory) {
+                targetDirectoryPath = local.file.absolutePath
+            }
+        }
         requestHomeToolbarUpdate()
     }
 
@@ -72,12 +123,14 @@ class WebSharingTab : Tab() {
     }
 
     override suspend fun getTitle() = "Web Sharing"
-    override suspend fun getSubtitle() = "Share over Wi-Fi/Internet"
+    override suspend fun getSubtitle() = File(targetDirectoryPath).name.ifEmpty { "Share over Wi-Fi/Internet" }
 }
 
-class NetworkConnectionWizardTab : Tab() {
+class NetworkConnectionWizardTab(
+    val editingConnection: NetworkConnectionModel? = null
+) : Tab() {
     override val id = globalClass.generateUid()
-    override val header = "Add Connection"
+    override val header = if (editingConnection != null) "Edit Connection" else "Add Connection"
 
     override fun onTabStarted() {
         super.onTabStarted()
@@ -89,13 +142,22 @@ class NetworkConnectionWizardTab : Tab() {
         requestHomeToolbarUpdate()
     }
 
-    override suspend fun getTitle() = "Add Connection"
-    override suspend fun getSubtitle() = "Remote server connection wizard"
+    override suspend fun getTitle() = if (editingConnection != null) {
+        "Edit: ${editingConnection.name}"
+    } else {
+        "Add Connection"
+    }
+    override suspend fun getSubtitle() = if (editingConnection != null) {
+        "${editingConnection.type} • ${editingConnection.host}:${editingConnection.port}"
+    } else {
+        "FTP, SFTP, SMB, WebDAV"
+    }
 }
 
-class RemoteExplorerTab(val connection: NetworkConnectionModel) : Tab() {
+class RemoteExplorerTab(var connection: NetworkConnectionModel) : Tab() {
     override val id = globalClass.generateUid()
-    override val header = connection.name
+    override val header: String
+        get() = connection.name
 
     override fun onTabStarted() {
         super.onTabStarted()
@@ -104,6 +166,9 @@ class RemoteExplorerTab(val connection: NetworkConnectionModel) : Tab() {
 
     override fun onTabResumed() {
         super.onTabResumed()
+        NetworkConnectionsService.getConnectionById(globalClass, connection.id)?.let { updated ->
+            connection = updated
+        }
         requestHomeToolbarUpdate()
     }
 
@@ -228,4 +293,3 @@ class DuplicateFinderTab : Tab() {
     override suspend fun getTitle() = "Duplicate Finder"
     override suspend fun getSubtitle() = "Find & Clean Duplicate Files"
 }
-

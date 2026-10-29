@@ -19,22 +19,37 @@ class LanRemoteClient(
 
     private fun getContext(): CIFSContext {
         cifsContext?.let { return it }
+        val connTimeoutMs = (conn.effectiveConnectTimeoutSec * 1000).toString()
+        val readTimeoutMs = (conn.effectiveReadTimeoutSec * 1000).toString()
+        val enableSmb2 = conn.effectiveSmbEnableSmb2
+
         val prop = Properties().apply {
-            setProperty("jcifs.smb.client.enableSMB2", "true")
+            setProperty("jcifs.smb.client.enableSMB2", enableSmb2.toString())
             setProperty("jcifs.smb.client.disableSMB1", "false")
-            setProperty("jcifs.smb.client.responseTimeout", "10000")
-            setProperty("jcifs.smb.client.soTimeout", "10000")
-            setProperty("jcifs.smb.client.connTimeout", "8000")
+            setProperty("jcifs.smb.client.responseTimeout", readTimeoutMs)
+            setProperty("jcifs.smb.client.soTimeout", readTimeoutMs)
+            setProperty("jcifs.smb.client.connTimeout", connTimeoutMs)
+            if (conn.effectiveKeepAliveSec > 0) {
+                setProperty("jcifs.smb.client.sessionTimeout", (conn.effectiveKeepAliveSec * 1000).toString())
+            }
         }
         val base = BaseContext(PropertyConfiguration(prop))
-        val auth = if (conn.username.isNotBlank()) {
-            val domain = if (conn.username.contains("\\")) conn.username.substringBefore("\\") else null
-            val user = if (conn.username.contains("\\")) conn.username.substringAfter("\\") else conn.username
-            NtlmPasswordAuthenticator(domain, user, conn.password)
-        } else {
-            NtlmPasswordAuthenticator()
+        val authMethod = conn.effectiveAuthMethod
+        val ctx = when {
+            authMethod == "ANONYMOUS" -> base.withAnonymousCredentials()
+            authMethod == "GUEST" -> base.withGuestCrendentials()
+            conn.username.isNotBlank() -> {
+                val explicitDomain = conn.effectiveSmbDomain.trim()
+                val domain = when {
+                    explicitDomain.isNotEmpty() -> explicitDomain
+                    conn.username.contains("\\") -> conn.username.substringBefore("\\")
+                    else -> null
+                }
+                val user = if (conn.username.contains("\\")) conn.username.substringAfter("\\") else conn.username
+                base.withCredentials(NtlmPasswordAuthenticator(domain, user, conn.password))
+            }
+            else -> base.withCredentials(NtlmPasswordAuthenticator())
         }
-        val ctx = base.withCredentials(auth)
         cifsContext = ctx
         return ctx
     }

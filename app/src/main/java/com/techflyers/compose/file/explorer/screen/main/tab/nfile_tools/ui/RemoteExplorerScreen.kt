@@ -139,6 +139,17 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                IconButton(
+                    onClick = {
+                        com.techflyers.compose.file.explorer.App.Companion.globalClass.mainActivityManager.openToolInNewTab(
+                            com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab(
+                                editingConnection = conn
+                            )
+                        )
+                    }
+                ) {
+                    Icon(Icons.Rounded.Edit, contentDescription = "Edit Connection Settings")
+                }
                 IconButton(onClick = { reloadTrigger++ }) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                 }
@@ -174,8 +185,23 @@ fun RemoteExplorerScreen(tab: RemoteExplorerTab) {
                             color = MaterialTheme.colorScheme.error
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { reloadTrigger++ }) {
-                            Text("Retry")
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(onClick = { reloadTrigger++ }) {
+                                Text("Retry")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    com.techflyers.compose.file.explorer.App.Companion.globalClass.mainActivityManager.openToolInNewTab(
+                                        com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.NetworkConnectionWizardTab(
+                                            editingConnection = conn
+                                        )
+                                    )
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Edit Settings")
+                            }
                         }
                     }
                 }

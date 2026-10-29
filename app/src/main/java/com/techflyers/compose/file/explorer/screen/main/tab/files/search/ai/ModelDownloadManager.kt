@@ -3,15 +3,16 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.search.ai
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import kotlinx.coroutines.Dispatchers
@@ -66,32 +68,20 @@ object ModelDownloadManager {
         .readTimeout(300, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * Get the directory where models are stored.
-     */
     fun getModelDir(context: Context): File {
         return File(context.filesDir, "fileai")
     }
 
-    /**
-     * Get the path to the ONNX model file.
-     */
     fun getModelPath(context: Context): String {
         val variant = globalClass.preferencesManager.aiModelVariant
         val fileName = if (variant == "quantized") "model_quantized.onnx" else "model.onnx"
         return File(getModelDir(context), fileName).absolutePath
     }
 
-    /**
-     * Get the path to the tokenizer.json file.
-     */
     fun getTokenizerPath(context: Context): String {
         return File(getModelDir(context), "tokenizer.json").absolutePath
     }
 
-    /**
-     * Check if the model is already downloaded.
-     */
     fun isModelDownloaded(context: Context): Boolean {
         if (!globalClass.preferencesManager.aiModelDownloaded) return false
         val modelPath = getModelPath(context)
@@ -99,17 +89,11 @@ object ModelDownloadManager {
         return File(modelPath).exists() && File(tokenizerPath).exists()
     }
 
-    /**
-     * Request model download. Shows choice dialog if not yet downloaded.
-     */
     fun requestModelDownload(onReady: () -> Unit) {
         onModelReady = onReady
         showModelChoiceDialog = true
     }
 
-    /**
-     * Start downloading the chosen model variant.
-     */
     suspend fun downloadModel(context: Context, variant: String) {
         isDownloading = true
         downloadProgress = 0f
@@ -122,7 +106,6 @@ object ModelDownloadManager {
             val modelUrl = if (variant == "quantized") QUANTIZED_MODEL_URL else FULL_MODEL_URL
             val modelFileName = if (variant == "quantized") "model_quantized.onnx" else "model.onnx"
 
-            // Download model
             downloadStatus = "Downloading model…"
             downloadFile(
                 url = modelUrl,
@@ -132,7 +115,6 @@ object ModelDownloadManager {
                 }
             )
 
-            // Download tokenizer
             downloadStatus = "Downloading tokenizer…"
             downloadProgress = 0.9f
             downloadFile(
@@ -143,14 +125,12 @@ object ModelDownloadManager {
                 }
             )
 
-            // Mark as downloaded
             globalClass.preferencesManager.aiModelVariant = variant
             globalClass.preferencesManager.aiModelDownloaded = true
 
             downloadProgress = 1.0f
             downloadStatus = "Done!"
 
-            // Notify caller
             onModelReady?.invoke()
             onModelReady = null
 
@@ -201,6 +181,8 @@ object ModelDownloadManager {
 
 /**
  * Dialog that lets the user choose between quantized and full model.
+ * Fixed button layout so Download Quantized, Download Full, and Cancel are clearly separated
+ * in their own rows and never overlap.
  */
 @Composable
 fun ModelChoiceDialog(
@@ -218,7 +200,9 @@ fun ModelChoiceDialog(
         },
         title = { Text("Download AI Search Model") },
         text = {
-            Column {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(
                     "Semantic search uses the all-MiniLM-L6-V2 ONNX model " +
                             "to understand file content by meaning, not just keywords.",
@@ -227,7 +211,8 @@ fun ModelChoiceDialog(
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "Choose a model variant:",
-                    style = MaterialTheme.typography.titleSmall
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -235,18 +220,14 @@ fun ModelChoiceDialog(
                             "• Full (~90 MB) — Best accuracy, larger download",
                     style = MaterialTheme.typography.bodySmall
                 )
-            }
-        },
-        confirmButton = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+                Spacer(Modifier.height(20.dp))
                 Button(
                     onClick = { onChoose("quantized") },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Download Quantized (~23 MB)")
                 }
+                Spacer(Modifier.height(10.dp))
                 OutlinedButton(
                     onClick = { onChoose("full") },
                     modifier = Modifier.fillMaxWidth()
@@ -255,9 +236,19 @@ fun ModelChoiceDialog(
                 }
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        confirmButton = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+        dismissButton = null
     )
 }
 
@@ -297,9 +288,9 @@ fun ModelDownloadProgressDialog(
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = {
+        confirmButton = {
             OutlinedButton(onClick = onCancel) { Text("Cancel") }
-        }
+        },
+        dismissButton = null
     )
 }

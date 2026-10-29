@@ -12,6 +12,7 @@ abstract class Tab {
     var isCreated = false
     var parentTab: Tab? = null
     var isPinned by mutableStateOf(false)
+    var slotId: Int = globalClass.generateUid()
 
     abstract val id: Int
     abstract val header: String

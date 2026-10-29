@@ -233,6 +233,34 @@ fun StartupTabsSettingsScreen(
                                 }
                             }
 
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "'+' Button Position in Tab Bar",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val plusOnLeft = globalClass.preferencesManager.tabBarPlusButtonOnLeft
+                                FilterChip(
+                                    selected = !plusOnLeft,
+                                    onClick = { globalClass.preferencesManager.tabBarPlusButtonOnLeft = false },
+                                    label = { Text("Right (Default)", style = MaterialTheme.typography.labelSmall) }
+                                )
+                                FilterChip(
+                                    selected = plusOnLeft,
+                                    onClick = { globalClass.preferencesManager.tabBarPlusButtonOnLeft = true },
+                                    label = { Text("Left", style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+
                             AnimatedVisibility(visible = plusButtonOverride == PlusButtonOverride.CUSTOM_FOLDER) {
                                 Column(modifier = Modifier.padding(top = 12.dp)) {
                                     HorizontalDivider(

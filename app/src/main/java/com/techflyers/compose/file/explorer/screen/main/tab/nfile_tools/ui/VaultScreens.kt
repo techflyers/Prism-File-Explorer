@@ -60,6 +60,7 @@ fun VaultTabContentView(tab: VaultTab) {
             VaultUnlockScreen(
                 onSuccess = { pin ->
                     tab.activePassword = pin
+                    VaultService.lastActivePassword = pin
                     tab.isPinVerified = true
                 }
             )
@@ -156,6 +157,13 @@ fun VaultSetupScreen(onPinCreated: (String) -> Unit) {
                 } else {
                     if (pin2.isNotEmpty()) pin2 = pin2.dropLast(1)
                 }
+            },
+            onClear = {
+                if (step == 1) {
+                    pin1 = ""
+                } else {
+                    pin2 = ""
+                }
             }
         )
     }
@@ -233,6 +241,11 @@ fun VaultUnlockScreen(onSuccess: (String) -> Unit) {
             },
             onBackspace = {
                 if (pin.isNotEmpty()) pin = pin.dropLast(1)
+            },
+            onClear = {
+                pin = ""
+                isError = false
+                message = "Enter your 4-digit PIN to access vault"
             }
         )
     }
@@ -241,7 +254,8 @@ fun VaultUnlockScreen(onSuccess: (String) -> Unit) {
 @Composable
 fun PinKeypad(
     onKeyPress: (String) -> Unit,
-    onBackspace: () -> Unit
+    onBackspace: () -> Unit,
+    onClear: () -> Unit = {}
 ) {
     val keys = listOf(
         "1", "2", "3",
@@ -268,9 +282,7 @@ fun PinKeypad(
                     )
                     .clickable {
                         when (key) {
-                            "C" -> {
-                                // backspace callback is handles differently
-                            }
+                            "C" -> onClear()
                             "⌫" -> onBackspace()
                             else -> onKeyPress(key)
                         }
@@ -299,6 +311,15 @@ fun VaultExplorerScreen(tab: VaultTab) {
     var isBusy by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
+
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                VaultService.syncAllModifiedTempFiles(context)
+            }
+            records = VaultService.loadRecords(context)
+        }
+    }
 
     Scaffold(
         floatingActionButton = {

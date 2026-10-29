@@ -36,31 +36,41 @@ import com.techflyers.compose.file.explorer.screen.main.tab.home.holder.RecentFi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class HomeTab : Tab() {
     override val id = globalClass.generateUid()
-    val scope = CoroutineScope(Dispatchers.IO)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recentFilesJob: Job? = null
     override val header = globalClass.getString(R.string.home_tab_header)
     val recentFiles = mutableStateListOf<RecentFile>()
     var isLoadingRecentFiles by mutableStateOf(true)
-    val pinnedFiles = arrayListOf<LocalFileHolder>()
+    val pinnedFiles = mutableStateListOf<LocalFileHolder>()
     val scrollState = ScrollState(0)
 
     var showCustomizeHomeTabDialog by mutableStateOf(false)
     var showCustomizeCategoriesDialog by mutableStateOf(false)
     var showSearchDialog by mutableStateOf(false)
-    val internalStorageSearchTab by lazy {
-        FilesTab(StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder)
+    private var cachedSearchTab: FilesTab? = null
+
+    fun getOrCreateSearchTab(): FilesTab {
+        return cachedSearchTab ?: FilesTab(
+            StorageProvider.getPrimaryInternalStorage(globalClass).contentHolder
+        ).apply {
+            isHomeSearchTab = true
+            cachedSearchTab = this
+        }
     }
 
     override fun onTabStarted() {
         super.onTabStarted()
         requestHomeToolbarUpdate()
         globalClass.mainActivityManager.refreshStorageDevices()
+        fetchRecentFiles()
     }
 
     override fun onTabResumed() {
@@ -74,11 +84,24 @@ class HomeTab : Tab() {
 
     override suspend fun getTitle() = globalClass.getString(R.string.home_tab_title)
 
-    fun getPinnedFiles() {
-        pinnedFiles.clear()
-        pinnedFiles.addAll(
+    suspend fun loadPinnedFiles() {
+        val holders = withContext(Dispatchers.IO) {
             globalClass.preferencesManager.pinnedFiles.map { LocalFileHolder(File(it)) }
-        )
+        }
+        withContext(Dispatchers.Main) {
+            if (pinnedFiles.size != holders.size ||
+                pinnedFiles.indices.any { idx -> pinnedFiles[idx].uniquePath != holders[idx].uniquePath }
+            ) {
+                pinnedFiles.clear()
+                pinnedFiles.addAll(holders)
+            }
+        }
+    }
+
+    fun getPinnedFiles() {
+        scope.launch {
+            loadPinnedFiles()
+        }
     }
 
     fun isRecentDisabledOnHome(): Boolean {
@@ -86,8 +109,26 @@ class HomeTab : Tab() {
         return prefs.disableRecentOnHomeTab && (prefs.showRecentInSidebar || prefs.showRecentInCategories)
     }
 
+    private fun applyRecentFilesOnMain(files: List<RecentFile>) {
+        val isSame = recentFiles.size == files.size &&
+                recentFiles.indices.all { i ->
+                    recentFiles[i].path == files[i].path &&
+                            recentFiles[i].lastModified == files[i].lastModified
+                }
+        if (!isSame) {
+            recentFiles.clear()
+            recentFiles.addAll(files)
+        }
+        isLoadingRecentFiles = false
+    }
+
     fun fetchRecentFiles() {
         if (isRecentDisabledOnHome()) {
+            isLoadingRecentFiles = false
+            return
+        }
+        if (globalClass.preferencesManager.recentFilesLimit == 0) {
+            recentFiles.clear()
             isLoadingRecentFiles = false
             return
         }
@@ -98,15 +139,13 @@ class HomeTab : Tab() {
             try {
                 val files = getRecentFiles()
                 if (isActive) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                        recentFiles.clear()
-                        recentFiles.addAll(files)
-                        isLoadingRecentFiles = false
+                    withContext(Dispatchers.Main) {
+                        applyRecentFilesOnMain(files)
                     }
                 }
             } finally {
                 if (isActive) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         isLoadingRecentFiles = false
                     }
                 }
@@ -121,6 +160,12 @@ class HomeTab : Tab() {
             isLoadingRecentFiles = false
             return
         }
+        if (globalClass.preferencesManager.recentFilesLimit == 0) {
+            recentFilesJob?.cancel()
+            recentFiles.clear()
+            isLoadingRecentFiles = false
+            return
+        }
         if (forceInvalidate) {
             StorageProvider.invalidateRecentFilesCache()
         }
@@ -130,15 +175,13 @@ class HomeTab : Tab() {
             try {
                 val files = getRecentFiles()
                 if (isActive) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                        recentFiles.clear()
-                        recentFiles.addAll(files)
-                        isLoadingRecentFiles = false
+                    withContext(Dispatchers.Main) {
+                        applyRecentFilesOnMain(files)
                     }
                 }
             } finally {
                 if (isActive) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         isLoadingRecentFiles = false
                     }
                 }
@@ -149,7 +192,15 @@ class HomeTab : Tab() {
     suspend fun refreshRecentFilesSuspend(forceInvalidate: Boolean = true) {
         if (isRecentDisabledOnHome()) {
             recentFilesJob?.cancel()
-            kotlinx.coroutines.withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
+                recentFiles.clear()
+                isLoadingRecentFiles = false
+            }
+            return
+        }
+        if (globalClass.preferencesManager.recentFilesLimit == 0) {
+            recentFilesJob?.cancel()
+            withContext(Dispatchers.Main) {
                 recentFiles.clear()
                 isLoadingRecentFiles = false
             }
@@ -159,21 +210,19 @@ class HomeTab : Tab() {
             StorageProvider.invalidateRecentFilesCache()
         }
         recentFilesJob?.cancel()
-        kotlinx.coroutines.withContext(Dispatchers.Main) {
+        withContext(Dispatchers.Main) {
             isLoadingRecentFiles = true
         }
         val job = scope.launch {
             try {
                 val files = getRecentFiles()
                 if (isActive) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                        recentFiles.clear()
-                        recentFiles.addAll(files)
-                        isLoadingRecentFiles = false
+                    withContext(Dispatchers.Main) {
+                        applyRecentFilesOnMain(files)
                     }
                 }
             } finally {
-                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     isLoadingRecentFiles = false
                 }
             }
@@ -299,6 +348,7 @@ class HomeTab : Tab() {
 
     private fun getRecentFiles(): ArrayList<RecentFile> {
         val configuredLimit = globalClass.preferencesManager.recentFilesLimit
+        if (configuredLimit == 0) return arrayListOf()
         val carouselLimit = if (configuredLimit in 1..30) configuredLimit else 30
         return arrayListOf<RecentFile>().apply {
             addAll(

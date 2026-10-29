@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddTask
@@ -26,13 +25,11 @@ import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.SortByAlpha
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SelectionRibbonSettingsDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -277,16 +274,17 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                                             .firstOrNull { it.copyHereTargetFolder != null }
                                             ?.copyHereTargetFolder
                                     if (copyHereTarget != null) {
-                                        globalClass.taskManager.addTaskAndRun(
-                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = true),
-                                            CopyTaskParameters(copyHereTarget)
+                                        tab.requestCopyHereTransfer(
+                                            items = tab.selectedFiles.values.toList(),
+                                            targetFolder = copyHereTarget,
+                                            deleteSourceFiles = true
                                         )
                                     } else {
                                         globalClass.taskManager.addTask(
                                             CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = true)
                                         )
+                                        tab.unselectAllFiles()
                                     }
-                                    tab.unselectAllFiles()
                                 }
                             ) {
                                 Icon(
@@ -305,16 +303,17 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                                             .firstOrNull { it.copyHereTargetFolder != null }
                                             ?.copyHereTargetFolder
                                     if (copyHereTarget != null) {
-                                        globalClass.taskManager.addTaskAndRun(
-                                            CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false),
-                                            CopyTaskParameters(copyHereTarget)
+                                        tab.requestCopyHereTransfer(
+                                            items = tab.selectedFiles.values.toList(),
+                                            targetFolder = copyHereTarget,
+                                            deleteSourceFiles = false
                                         )
                                     } else {
                                         globalClass.taskManager.addTask(
                                             CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false)
                                         )
+                                        tab.unselectAllFiles()
                                     }
-                                    tab.unselectAllFiles()
                                 }
                             ) {
                                 Icon(
@@ -501,13 +500,6 @@ fun BottomOptionsBar(tab: FilesTab, forceLandscapeOverride: Boolean = false) {
                     tab.toggleFileOptionsMenu(tab.selectedFiles.values.first())
                 }
             } else {
-                val sortIcon = remember(tab.sortingPrefs.sortMethod, tab.sortingPrefs.reverseSorting) {
-                    getSortIcon(tab.sortingPrefs.sortMethod, tab.sortingPrefs.reverseSorting)
-                }
-                BottomOptionsBarButton(sortIcon, stringResource(R.string.sort)) {
-                    tab.toggleSortingMenu(true)
-                }
-
                 BottomOptionsBarButton(Icons.Rounded.Bookmark, stringResource(R.string.bookmarks)) {
                     tab.toggleBookmarksDialog(true)
                 }

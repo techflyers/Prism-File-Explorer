@@ -112,7 +112,7 @@ class VirtualFileHolder(
             RECENT -> getRecentFiles(sortingPrefs = sortingPrefs, limit = initialLimit, offset = 0)
             ALL_FILES -> getAllFiles(sortingPrefs = sortingPrefs, limit = PAGE_SIZE, offset = 0)
             SEARCH -> getSearchResult()
-            DUPLICATES -> ArrayList(customItems ?: emptyList())
+            DUPLICATES -> ArrayList((customItems ?: emptyList()).filter { runBlocking { it.isValid() } })
             APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
             else -> arrayListOf()
         }

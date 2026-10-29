@@ -33,9 +33,12 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.StorageDe
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
 import com.techflyers.compose.file.explorer.screen.main.tab.home.holder.RecentFile
 import java.io.File
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 
 object StorageProvider {
-    suspend fun getStorageDevices(context: Context): List<StorageDevice> {
+    suspend fun getStorageDevices(context: Context): List<StorageDevice> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val storageDevices = mutableListOf<StorageDevice>()
 
         storageDevices.add(getPrimaryInternalStorage(context))
@@ -47,21 +50,24 @@ object StorageProvider {
                 continue
             }
 
-            val statFs = StatFs(externalDir.absolutePath)
-            val totalSize = statFs.totalBytes
-            val availableSize = statFs.availableBytes
-            val usedSize = totalSize - availableSize
-            val storageLabel = label.ifEmpty { "${externalDir.name}" }
+            try {
+                val statFs = StatFs(externalDir.absolutePath)
+                val totalSize = statFs.totalBytes
+                val availableSize = statFs.availableBytes
+                val usedSize = totalSize - availableSize
+                val storageLabel = label.ifEmpty { "${externalDir.name}" }
 
-            storageDevices.add(
-                StorageDevice(
-                    LocalFileHolder(externalDir),
-                    storageLabel,
-                    totalSize,
-                    usedSize,
-                    EXTERNAL_STORAGE
+                storageDevices.add(
+                    StorageDevice(
+                        LocalFileHolder(externalDir),
+                        storageLabel,
+                        totalSize,
+                        usedSize,
+                        EXTERNAL_STORAGE
+                    )
                 )
-            )
+            } catch (_: Exception) {
+            }
         }
 
         if (!globalClass.preferencesManager.hideRootStorage) {
@@ -80,7 +86,7 @@ object StorageProvider {
             )
         }
 
-        return storageDevices
+        storageDevices
     }
 
     fun getRoot(context: Context): StorageDevice {
@@ -137,7 +143,7 @@ object StorageProvider {
         return list
     }
 
-    private fun getExternalStorageDirectories(context: Context): List<Pair<String, File>> {
+    fun getExternalStorageDirectories(context: Context): List<Pair<String, File>> {
         val storageList = mutableListOf<Pair<String, File>>()
         val addedPaths = mutableSetOf<String>()
         val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
@@ -589,8 +595,44 @@ object StorageProvider {
     @Volatile
     private var lastMutationCounter: Long = 0L
     private const val RECENT_CACHE_TTL_MS = 20_000L
+    private const val INDEX_REFRESH_INTERVAL_MS = 45_000L
+    private const val INDEX_FILE_NAME = "extensive_recent_files_index_v1.bin"
+    private const val INDEX_MAGIC = 0x50524649 // "PRFI"
 
     private val recentlyMutatedFiles = ConcurrentHashMap<String, Long>()
+
+    private data class IndexedFileRecord(
+        val path: String,
+        val name: String,
+        val size: Long,
+        val lastModifiedMs: Long
+    )
+
+    private data class IndexedDirRecord(
+        val dirPath: String,
+        val dirMtime: Long,
+        val files: List<IndexedFileRecord>,
+        val subDirs: List<String>
+    )
+
+    private val dirIndexMap = ConcurrentHashMap<String, IndexedDirRecord>()
+    private val indexedFilesByPath = ConcurrentHashMap<String, IndexedFileRecord>()
+    @Volatile
+    private var sortedIndexedRecords: List<IndexedFileRecord> = emptyList()
+    @Volatile
+    private var persistentIndexLoaded = false
+    @Volatile
+    private var lastIndexBuildTimestamp = 0L
+    private val indexLoadLock = Any()
+    private val isIndexJobRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val indexScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    var isIndexingRecentFiles by androidx.compose.runtime.mutableStateOf(false)
+        private set
+    var indexedRecentFilesCount by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+    var lastIndexCompletedTimeMs by androidx.compose.runtime.mutableLongStateOf(0L)
+        private set
 
     private val tempDbSuffixes = listOf(
         ".tmp", ".temp", ".bak", ".log",
@@ -603,6 +645,12 @@ object StorageProvider {
         "lost+found", ".thumbnails", ".Trash", ".trashed", ".recycle", "recyclebin"
     )
 
+    private fun rebuildSortedIndexedRecords() {
+        val snapshot = ArrayList(indexedFilesByPath.values)
+        snapshot.sortWith { a, b -> b.lastModifiedMs.compareTo(a.lastModifiedMs) }
+        sortedIndexedRecords = snapshot
+    }
+
     fun invalidateRecentFilesCache() {
         cachedAllDeviceTimestamp = 0L
         lastMutationCounter++
@@ -610,15 +658,33 @@ object StorageProvider {
 
     fun notifyFileMutated(file: File) {
         try {
+            val now = System.currentTimeMillis()
             if (file.exists() && file.isFile) {
-                recentlyMutatedFiles[file.absolutePath] = System.currentTimeMillis()
+                val path = file.absolutePath
+                val mtime = maxOf(file.lastModified(), now)
+                recentlyMutatedFiles[path] = mtime
+                indexedFilesByPath[path] = IndexedFileRecord(path, file.name, file.length(), mtime)
+                file.parentFile?.absolutePath?.let { dirIndexMap.remove(it) }
             } else if (file.exists() && file.isDirectory) {
+                dirIndexMap.remove(file.absolutePath)
+                file.parentFile?.absolutePath?.let { dirIndexMap.remove(it) }
                 file.walkTopDown().maxDepth(4).forEach { child ->
                     if (child.isFile) {
-                        recentlyMutatedFiles[child.absolutePath] = System.currentTimeMillis()
+                        val path = child.absolutePath
+                        val mtime = maxOf(child.lastModified(), now)
+                        recentlyMutatedFiles[path] = mtime
+                        indexedFilesByPath[path] = IndexedFileRecord(path, child.name, child.length(), mtime)
+                    } else if (child.isDirectory) {
+                        dirIndexMap.remove(child.absolutePath)
                     }
                 }
+            } else if (!file.exists()) {
+                val path = file.absolutePath
+                recentlyMutatedFiles.remove(path)
+                indexedFilesByPath.remove(path)
+                file.parentFile?.absolutePath?.let { dirIndexMap.remove(it) }
             }
+            indexedRecentFilesCount = indexedFilesByPath.size
             invalidateRecentFilesCache()
             MediaScannerConnection.scanFile(
                 globalClass,
@@ -627,6 +693,282 @@ object StorageProvider {
                 null
             )
         } catch (_: Exception) {}
+    }
+
+    private fun ensurePersistentIndexLoaded() {
+        if (persistentIndexLoaded) return
+        synchronized(indexLoadLock) {
+            if (persistentIndexLoaded) return
+            persistentIndexLoaded = true
+            val indexFile = File(globalClass.cacheDir, INDEX_FILE_NAME)
+            if (!indexFile.exists()) return
+            try {
+                java.io.DataInputStream(java.io.BufferedInputStream(java.io.FileInputStream(indexFile))).use { inp ->
+                    val magic = inp.readInt()
+                    if (magic != INDEX_MAGIC) return
+                    val savedTimestamp = inp.readLong()
+                    val dirCount = inp.readInt()
+                    val loadedDirs = HashMap<String, IndexedDirRecord>(dirCount.coerceAtLeast(16))
+                    val loadedFiles = HashMap<String, IndexedFileRecord>(4096)
+                    for (i in 0 until dirCount) {
+                        val dirPath = inp.readUTF()
+                        val dirMtime = inp.readLong()
+                        val fileCount = inp.readInt()
+                        val files = ArrayList<IndexedFileRecord>(fileCount)
+                        for (j in 0 until fileCount) {
+                            val fPath = inp.readUTF()
+                            val fName = inp.readUTF()
+                            val fSize = inp.readLong()
+                            val fMtime = inp.readLong()
+                            val rec = IndexedFileRecord(fPath, fName, fSize, fMtime)
+                            files.add(rec)
+                            loadedFiles[fPath] = rec
+                        }
+                        val subDirCount = inp.readInt()
+                        val subDirs = ArrayList<String>(subDirCount)
+                        for (k in 0 until subDirCount) {
+                            subDirs.add(inp.readUTF())
+                        }
+                        loadedDirs[dirPath] = IndexedDirRecord(dirPath, dirMtime, files, subDirs)
+                    }
+                    dirIndexMap.putAll(loadedDirs)
+                    indexedFilesByPath.putAll(loadedFiles)
+                    rebuildSortedIndexedRecords()
+                    lastIndexBuildTimestamp = savedTimestamp
+                    lastIndexCompletedTimeMs = savedTimestamp
+                    indexedRecentFilesCount = indexedFilesByPath.size
+                }
+            } catch (_: Exception) {
+                dirIndexMap.clear()
+                indexedFilesByPath.clear()
+                sortedIndexedRecords = emptyList()
+            }
+        }
+    }
+
+    private fun savePersistentIndexToDisk() {
+        val indexFile = File(globalClass.cacheDir, INDEX_FILE_NAME)
+        val tempFile = File(globalClass.cacheDir, "$INDEX_FILE_NAME.tmp")
+        try {
+            val dirsSnapshot = ArrayList(dirIndexMap.values)
+            java.io.DataOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(tempFile))).use { out ->
+                out.writeInt(INDEX_MAGIC)
+                out.writeLong(lastIndexBuildTimestamp)
+                out.writeInt(dirsSnapshot.size)
+                for (dir in dirsSnapshot) {
+                    out.writeUTF(dir.dirPath)
+                    out.writeLong(dir.dirMtime)
+                    out.writeInt(dir.files.size)
+                    for (f in dir.files) {
+                        out.writeUTF(f.path)
+                        out.writeUTF(f.name)
+                        out.writeLong(f.size)
+                        out.writeLong(f.lastModifiedMs)
+                    }
+                    out.writeInt(dir.subDirs.size)
+                    for (sub in dir.subDirs) {
+                        out.writeUTF(sub)
+                    }
+                }
+                out.flush()
+            }
+            if (tempFile.exists()) {
+                tempFile.renameTo(indexFile)
+            }
+        } catch (_: Exception) {
+            runCatching { tempFile.delete() }
+        }
+    }
+
+    fun triggerRecentFilesIndexingIfNeeded(forceRebuild: Boolean = false, onFinished: (() -> Unit)? = null) {
+        val isExtensiveScan = !globalClass.preferencesManager.removeHiddenPathsFromRecentFiles
+        if (!isExtensiveScan) {
+            onFinished?.invoke()
+            return
+        }
+        if (!isIndexJobRunning.compareAndSet(false, true)) {
+            return
+        }
+        indexScope.launch {
+            try {
+                isIndexingRecentFiles = true
+                ensurePersistentIndexLoaded()
+                val changed = buildOrUpdateExtensiveIndex(forceFullRebuild = forceRebuild)
+                if (changed || forceRebuild) {
+                    invalidateRecentFilesCache()
+                }
+                if (onFinished != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        onFinished()
+                    }
+                } else if (changed || forceRebuild) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        globalClass.mainActivityManager.state.value.tabs
+                            .filterIsInstance<com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab>()
+                            .forEach { it.refreshRecentFiles(forceInvalidate = false) }
+                    }
+                }
+            } finally {
+                isIndexingRecentFiles = false
+                isIndexJobRunning.set(false)
+            }
+        }
+    }
+
+    private fun buildOrUpdateExtensiveIndex(forceFullRebuild: Boolean = false): Boolean {
+        ensurePersistentIndexLoaded()
+        val recycleBinPath = runCatching { globalClass.recycleBinDir.file.absolutePath }.getOrDefault("")
+
+        val roots = mutableListOf<File>()
+        val primaryRoot = Environment.getExternalStorageDirectory()
+        if (primaryRoot.exists()) roots.add(primaryRoot)
+        for ((_, extDir) in getExternalStorageDirectories(globalClass)) {
+            if (extDir.exists() && roots.none { it.absolutePath == extDir.absolutePath }) {
+                roots.add(extDir)
+            }
+        }
+
+        val updatedDirMap = HashMap<String, IndexedDirRecord>(dirIndexMap.size.coerceAtLeast(256))
+        val updatedFileMap = HashMap<String, IndexedFileRecord>(indexedFilesByPath.size.coerceAtLeast(4096))
+        var anyDirChanged = forceFullRebuild || dirIndexMap.isEmpty()
+        var lastCountUpdateMs = System.currentTimeMillis()
+
+        fun indexDir(dir: File, depth: Int) {
+            if (depth > 14) return
+            val dirPath = dir.absolutePath
+            val dirName = dir.name
+            if (dirName in skippedSystemDirNames) return
+            if (recycleBinPath.isNotEmpty() && dirPath.startsWith(recycleBinPath)) return
+
+            val currentDirMtime = dir.lastModified()
+            val cachedDir = if (!forceFullRebuild) dirIndexMap[dirPath] else null
+
+            if (cachedDir != null && currentDirMtime > 0L && cachedDir.dirMtime == currentDirMtime) {
+                updatedDirMap[dirPath] = cachedDir
+                for (f in cachedDir.files) {
+                    updatedFileMap[f.path] = f
+                }
+                for (subPath in cachedDir.subDirs) {
+                    val subDir = File(subPath)
+                    if (subDir.exists() && subDir.isDirectory) {
+                        indexDir(subDir, depth + 1)
+                    }
+                }
+                return
+            }
+
+            anyDirChanged = true
+            val children = dir.listFiles() ?: return
+            val directFiles = ArrayList<IndexedFileRecord>()
+            val subDirs = ArrayList<String>()
+
+            for (child in children) {
+                val childName = child.name
+                if (child.isDirectory) {
+                    if (childName !in skippedSystemDirNames) {
+                        val childPath = child.absolutePath
+                        subDirs.add(childPath)
+                        indexDir(child, depth + 1)
+                    }
+                } else if (child.isFile) {
+                    val childPath = child.absolutePath
+                    val rec = IndexedFileRecord(
+                        path = childPath,
+                        name = childName,
+                        size = child.length(),
+                        lastModifiedMs = child.lastModified()
+                    )
+                    directFiles.add(rec)
+                    updatedFileMap[childPath] = rec
+                }
+            }
+
+            updatedDirMap[dirPath] = IndexedDirRecord(
+                dirPath = dirPath,
+                dirMtime = currentDirMtime,
+                files = directFiles,
+                subDirs = subDirs
+            )
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastCountUpdateMs >= 350L) {
+                lastCountUpdateMs = nowMs
+                indexedRecentFilesCount = updatedFileMap.size
+            }
+        }
+
+        for (root in roots) {
+            try {
+                indexDir(root, 0)
+            } catch (_: Exception) {}
+        }
+
+        // Merge MediaStore.Files for creation/modification timestamp accuracy
+        try {
+            val uri: Uri = MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(
+                MediaStore.Files.FileColumns.DATA,
+                MediaStore.Files.FileColumns.DATE_MODIFIED,
+                MediaStore.Files.FileColumns.DATE_ADDED,
+                MediaStore.Files.FileColumns.DISPLAY_NAME,
+                MediaStore.Files.FileColumns.SIZE
+            )
+            globalClass.contentResolver.query(
+                uri,
+                projection,
+                null,
+                null,
+                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                val colPath = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                val colMod = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                val colAdd = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_ADDED)
+                val colName = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val colSize = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
+                var unindexedStatChecks = 0
+
+                while (cursor.moveToNext()) {
+                    val filePath = cursor.getString(colPath) ?: continue
+                    val existing = updatedFileMap[filePath]
+                    val modSec = cursor.getLong(colMod)
+                    val addSec = if (colAdd >= 0) cursor.getLong(colAdd) else 0L
+                    val bestMs = maxOf(modSec, addSec) * 1000L
+                    if (existing != null) {
+                        if (bestMs > existing.lastModifiedMs) {
+                            updatedFileMap[filePath] = existing.copy(lastModifiedMs = bestMs)
+                            anyDirChanged = true
+                        }
+                    } else if (unindexedStatChecks < 150) {
+                        unindexedStatChecks++
+                        val f = File(filePath)
+                        if (f.exists() && f.isFile) {
+                            val name = cursor.getString(colName) ?: f.name
+                            val size = if (colSize >= 0) cursor.getLong(colSize).takeIf { it > 0 } ?: f.length() else f.length()
+                            val timestampMs = maxOf(bestMs, f.lastModified())
+                            updatedFileMap[filePath] = IndexedFileRecord(filePath, name, size, timestampMs)
+                            anyDirChanged = true
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (updatedFileMap.size != indexedFilesByPath.size) {
+            anyDirChanged = true
+        }
+        dirIndexMap.clear()
+        dirIndexMap.putAll(updatedDirMap)
+        indexedFilesByPath.clear()
+        indexedFilesByPath.putAll(updatedFileMap)
+        if (anyDirChanged || sortedIndexedRecords.isEmpty()) {
+            rebuildSortedIndexedRecords()
+        }
+        lastIndexBuildTimestamp = System.currentTimeMillis()
+        lastIndexCompletedTimeMs = lastIndexBuildTimestamp
+        indexedRecentFilesCount = indexedFilesByPath.size
+        if (anyDirChanged) {
+            savePersistentIndexToDisk()
+        }
+        return anyDirChanged
     }
 
     private fun shouldIncludePath(
@@ -653,7 +995,92 @@ object StorageProvider {
         return true
     }
 
-    @Synchronized
+    /**
+     * Fast bounded scan that extracts only the top [maxCount] newest matching files from the
+     * pre-sorted index + in-app mutated files without allocating or sorting all 50,000+ device files.
+     */
+    private fun collectTopRecentFiles(maxCount: Int): ArrayList<RecentFile> {
+        if (maxCount <= 0) return arrayListOf()
+        val now = System.currentTimeMillis()
+        ensurePersistentIndexLoaded()
+
+        val records = sortedIndexedRecords
+        if (records.isEmpty()) {
+            // Never block UI/IO waiting for full filesystem walk; serve MediaStore immediately and index in background
+            triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
+            return getLegacyMediaStoreRecentFiles(recentHours = 24 * 14, limit = maxCount)
+        } else if (now - lastIndexBuildTimestamp > INDEX_REFRESH_INTERVAL_MS) {
+            triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
+        }
+
+        val prefs = globalClass.preferencesManager
+        val showHiddenFiles = prefs.showHiddenFiles
+        val excludeHiddenPaths = prefs.removeHiddenPathsFromRecentFiles
+        val hideTempAndDb = prefs.hideTempAndDbFilesFromRecentFiles
+        val excludedPaths = prefs.excludedPathsFromRecentFiles
+        val recycleBinPath = runCatching { globalClass.recycleBinDir.file.absolutePath }.getOrDefault("")
+
+        val resultMap = LinkedHashMap<String, RecentFile>(maxCount * 2)
+
+        // 1. Include recently mutated files first
+        val staleMutated = mutableListOf<String>()
+        for ((path, recordedTime) in recentlyMutatedFiles) {
+            val f = File(path)
+            if (f.exists() && f.isFile) {
+                val name = f.name
+                if (shouldIncludePath(path, name, showHiddenFiles, excludeHiddenPaths, hideTempAndDb, excludedPaths, recycleBinPath)) {
+                    val mtime = maxOf(f.lastModified(), recordedTime)
+                    val holder = LocalFileHolder(
+                        file = f,
+                        cachedName = name,
+                        cachedIsDir = false,
+                        cachedSize = f.length(),
+                        cachedLastModified = mtime
+                    )
+                    resultMap[path] = RecentFile(
+                        name = name,
+                        path = path,
+                        lastModified = mtime / 1000L,
+                        file = holder
+                    )
+                }
+            } else if (!f.exists()) {
+                staleMutated.add(path)
+                indexedFilesByPath.remove(path)
+            }
+        }
+        staleMutated.forEach { recentlyMutatedFiles.remove(it) }
+
+        // 2. Scan pre-sorted records until we have maxCount items from the index
+        var addedFromIndex = 0
+        for (rec in records) {
+            if (addedFromIndex >= maxCount) break
+            if (resultMap.containsKey(rec.path)) continue
+            if (!shouldIncludePath(rec.path, rec.name, showHiddenFiles, excludeHiddenPaths, hideTempAndDb, excludedPaths, recycleBinPath)) {
+                continue
+            }
+            val f = File(rec.path)
+            val holder = LocalFileHolder(
+                file = f,
+                cachedName = rec.name,
+                cachedIsDir = false,
+                cachedSize = rec.size,
+                cachedLastModified = rec.lastModifiedMs
+            )
+            resultMap[rec.path] = RecentFile(
+                name = rec.name,
+                path = rec.path,
+                lastModified = rec.lastModifiedMs / 1000L,
+                file = holder
+            )
+            addedFromIndex++
+        }
+
+        val list = ArrayList(resultMap.values)
+        list.sortWith { a, b -> b.lastModified.compareTo(a.lastModified) }
+        return if (list.size > maxCount) ArrayList(list.subList(0, maxCount)) else list
+    }
+
     private fun collectAllDeviceFilesSorted(): ArrayList<RecentFile> {
         val now = System.currentTimeMillis()
         val prefs = globalClass.preferencesManager
@@ -663,134 +1090,87 @@ object StorageProvider {
         val excludedPaths = prefs.excludedPathsFromRecentFiles
         val recycleBinPath = runCatching { globalClass.recycleBinDir.file.absolutePath }.getOrDefault("")
 
-        val cacheKey = "$showHiddenFiles:$excludeHiddenPaths:$hideTempAndDb:${excludedPaths.joinToString()}:$lastMutationCounter"
+        ensurePersistentIndexLoaded()
+
+        val cacheKey = "$showHiddenFiles:$excludeHiddenPaths:$hideTempAndDb:${excludedPaths.joinToString()}:$lastMutationCounter:$lastIndexCompletedTimeMs"
         val existingCache = cachedAllDeviceFiles
-        if (existingCache != null && cachedAllDeviceKey == cacheKey && (now - cachedAllDeviceTimestamp < RECENT_CACHE_TTL_MS)) {
+        if (existingCache != null && cachedAllDeviceKey == cacheKey) {
+            if (now - lastIndexBuildTimestamp > INDEX_REFRESH_INTERVAL_MS) {
+                triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
+            }
             return existingCache
         }
 
-        val fileMap = HashMap<String, RecentFile>(4096)
-
-        fun addOrUpdateFile(file: File, name: String, size: Long, timestampMs: Long) {
-            val path = file.absolutePath
-            if (!shouldIncludePath(path, name, showHiddenFiles, excludeHiddenPaths, hideTempAndDb, excludedPaths, recycleBinPath)) {
-                return
-            }
-            val existing = fileMap[path]
-            if (existing == null || timestampMs > existing.lastModified * 1000L) {
-                val holder = LocalFileHolder(
-                    file = file,
-                    cachedName = name,
-                    cachedIsDir = false,
-                    cachedSize = size,
-                    cachedLastModified = timestampMs
-                )
-                fileMap[path] = RecentFile(
-                    name = name,
-                    path = path,
-                    lastModified = timestampMs / 1000L,
-                    file = holder
-                )
-            }
+        val records = sortedIndexedRecords
+        if (records.isEmpty()) {
+            // Serve MediaStore immediately without blocking while full index builds in the background
+            triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
+            return getLegacyMediaStoreRecentFiles(recentHours = 24 * 30, limit = 500)
+        } else if (now - lastIndexBuildTimestamp > INDEX_REFRESH_INTERVAL_MS) {
+            triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
         }
 
-        // 1. Always include recently created/modified files tracked in-app
+        val sorted = ArrayList<RecentFile>(records.size.coerceAtLeast(256))
+        val mutatedOverrides = HashMap<String, RecentFile>()
+
         val staleMutated = mutableListOf<String>()
         for ((path, recordedTime) in recentlyMutatedFiles) {
             val f = File(path)
             if (f.exists() && f.isFile) {
-                val mtime = maxOf(f.lastModified(), recordedTime)
-                addOrUpdateFile(f, f.name, f.length(), mtime)
+                val name = f.name
+                if (shouldIncludePath(path, name, showHiddenFiles, excludeHiddenPaths, hideTempAndDb, excludedPaths, recycleBinPath)) {
+                    val mtime = maxOf(f.lastModified(), recordedTime)
+                    val holder = LocalFileHolder(
+                        file = f,
+                        cachedName = name,
+                        cachedIsDir = false,
+                        cachedSize = f.length(),
+                        cachedLastModified = mtime
+                    )
+                    mutatedOverrides[path] = RecentFile(
+                        name = name,
+                        path = path,
+                        lastModified = mtime / 1000L,
+                        file = holder
+                    )
+                }
             } else if (!f.exists()) {
                 staleMutated.add(path)
+                indexedFilesByPath.remove(path)
             }
         }
         staleMutated.forEach { recentlyMutatedFiles.remove(it) }
 
-        // 2. Walk storage roots directly on the filesystem so newly created files in Download
-        // or any internal/external directory are always found regardless of MediaStore lag.
-        val roots = mutableListOf<File>()
-        val primaryRoot = Environment.getExternalStorageDirectory()
-        if (primaryRoot.exists()) roots.add(primaryRoot)
-        for ((_, extDir) in getExternalStorageDirectories(globalClass)) {
-            if (extDir.exists() && roots.none { it.absolutePath == extDir.absolutePath }) {
-                roots.add(extDir)
-            }
+        if (mutatedOverrides.isNotEmpty()) {
+            sorted.addAll(mutatedOverrides.values)
         }
 
-        fun walkDir(dir: File, depth: Int) {
-            if (depth > 14) return
-            val dirPath = dir.absolutePath
-            val dirName = dir.name
-            if (dirName in skippedSystemDirNames) return
-            if (recycleBinPath.isNotEmpty() && dirPath.startsWith(recycleBinPath)) return
-            if ((excludeHiddenPaths || !showHiddenFiles) && dirName.startsWith(".")) return
-            if (hideTempAndDb && (dirPath.endsWith("/Android/data") || dirPath.endsWith("/Android/obb"))) return
-            for (excluded in excludedPaths) {
-                if (excluded.isNotEmpty() && dirPath.startsWith(excluded)) return
+        // `records` is already sorted from newest to oldest
+        for (rec in records) {
+            if (mutatedOverrides.containsKey(rec.path)) continue
+            if (!shouldIncludePath(rec.path, rec.name, showHiddenFiles, excludeHiddenPaths, hideTempAndDb, excludedPaths, recycleBinPath)) {
+                continue
             }
-
-            val children = dir.listFiles() ?: return
-            for (child in children) {
-                val childName = child.name
-                if ((excludeHiddenPaths || !showHiddenFiles) && childName.startsWith(".")) continue
-                if (child.isDirectory) {
-                    walkDir(child, depth + 1)
-                } else if (child.isFile) {
-                    val mtime = child.lastModified()
-                    addOrUpdateFile(child, childName, child.length(), mtime)
-                }
-            }
-        }
-
-        for (root in roots) {
-            try {
-                walkDir(root, 0)
-            } catch (_: Exception) {}
-        }
-
-        // 3. Merge MediaStore.Files (using max of DATE_ADDED and DATE_MODIFIED for creation date accuracy)
-        try {
-            val uri: Uri = MediaStore.Files.getContentUri("external")
-            val projection = arrayOf(
-                MediaStore.Files.FileColumns.DATA,
-                MediaStore.Files.FileColumns.DATE_MODIFIED,
-                MediaStore.Files.FileColumns.DATE_ADDED,
-                MediaStore.Files.FileColumns.DISPLAY_NAME,
-                MediaStore.Files.FileColumns.SIZE
+            val f = File(rec.path)
+            val holder = LocalFileHolder(
+                file = f,
+                cachedName = rec.name,
+                cachedIsDir = false,
+                cachedSize = rec.size,
+                cachedLastModified = rec.lastModifiedMs
             )
-            globalClass.contentResolver.query(
-                uri,
-                projection,
-                null,
-                null,
-                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-            )?.use { cursor ->
-                val colPath = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
-                val colMod = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
-                val colAdd = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_ADDED)
-                val colName = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-                val colSize = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
+            sorted.add(
+                RecentFile(
+                    name = rec.name,
+                    path = rec.path,
+                    lastModified = rec.lastModifiedMs / 1000L,
+                    file = holder
+                )
+            )
+        }
 
-                while (cursor.moveToNext()) {
-                    val filePath = cursor.getString(colPath) ?: continue
-                    val f = File(filePath)
-                    if (!f.exists() || f.isDirectory) continue
-                    val name = cursor.getString(colName) ?: f.name
-                    val modSec = cursor.getLong(colMod)
-                    val addSec = if (colAdd >= 0) cursor.getLong(colAdd) else 0L
-                    val bestSec = maxOf(modSec, addSec)
-                    val timestampMs = maxOf(bestSec * 1000L, f.lastModified())
-                    val size = if (colSize >= 0) cursor.getLong(colSize).takeIf { it > 0 } ?: f.length() else f.length()
-                    addOrUpdateFile(f, name, size, timestampMs)
-                }
-            }
-        } catch (_: Exception) {}
-
-        // Sort from newer to older
-        val sorted = ArrayList(fileMap.values)
-        sorted.sortWith { a, b ->
-            b.file.lastModified.compareTo(a.file.lastModified)
+        if (mutatedOverrides.isNotEmpty()) {
+            sorted.sortWith { a, b -> b.lastModified.compareTo(a.lastModified) }
         }
 
         cachedAllDeviceFiles = sorted
@@ -932,16 +1312,20 @@ object StorageProvider {
         recentHours: Int = -1,
         limit: Int = 100
     ): ArrayList<RecentFile> {
+        val configuredMax = globalClass.preferencesManager.recentFilesLimit
+        if (configuredMax == 0 || limit == 0) return arrayListOf()
         val isExtensiveScan = !globalClass.preferencesManager.removeHiddenPathsFromRecentFiles
         if (!isExtensiveScan) {
             return getLegacyMediaStoreRecentFiles(
                 recentHours = if (recentHours <= 0) 24 else recentHours,
-                limit = if (limit <= 0) 25 else limit
+                limit = if (limit < 0) 25 else limit
             )
         }
+        if (limit > 0) {
+            return collectTopRecentFiles(limit)
+        }
         val allSorted = collectAllDeviceFilesSorted()
-        val effectiveLimit = if (limit <= 0) allSorted.size else minOf(limit, allSorted.size)
-        return ArrayList(allSorted.subList(0, effectiveLimit))
+        return ArrayList(allSorted)
     }
 
     private fun applySorting(
@@ -976,25 +1360,37 @@ object StorageProvider {
         offset: Int = 0,
         sortingPrefs: FileSortingPrefs? = null
     ): ArrayList<LocalFileHolder> {
+        val configuredMax = globalClass.preferencesManager.recentFilesLimit
+        if (configuredMax == 0 || limit <= 0) return arrayListOf()
         val isExtensiveScan = !globalClass.preferencesManager.removeHiddenPathsFromRecentFiles
         if (!isExtensiveScan) {
+            val effectiveCap = if (configuredMax > 0) minOf(limit + offset, configuredMax) else (limit + offset)
             val legacy = getLegacyMediaStoreRecentFiles(
                 recentHours = if (recentHours <= 0) 48 else recentHours,
-                limit = limit + offset
+                limit = effectiveCap
             ).map { it.file }
             val sortedLegacy = applySorting(legacy, sortingPrefs)
             if (offset >= sortedLegacy.size) return arrayListOf()
             val end = minOf(offset + limit, sortedLegacy.size)
             return ArrayList(sortedLegacy.subList(offset, end))
         }
-        val allSorted = collectAllDeviceFilesSorted()
-        val configuredMax = globalClass.preferencesManager.recentFilesLimit
-        val capped = if (configuredMax > 0) {
-            allSorted.take(configuredMax)
-        } else {
-            allSorted
+        val isDefaultNewestSort = sortingPrefs == null ||
+                (sortingPrefs.sortMethod == SORT_BY_DATE && !sortingPrefs.reverseSorting)
+        if (configuredMax > 0) {
+            val capped = collectTopRecentFiles(configuredMax)
+            val holders = applySorting(capped.map { it.file }, sortingPrefs)
+            if (offset >= holders.size) return arrayListOf()
+            val end = minOf(offset + limit, holders.size)
+            return ArrayList(holders.subList(offset, end))
         }
-        val holders = applySorting(capped.map { it.file }, sortingPrefs)
+        if (isDefaultNewestSort && offset + limit <= 1000) {
+            val topSlice = collectTopRecentFiles(offset + limit)
+            if (offset >= topSlice.size) return arrayListOf()
+            val end = minOf(offset + limit, topSlice.size)
+            return ArrayList(topSlice.subList(offset, end).map { it.file })
+        }
+        val allSorted = collectAllDeviceFilesSorted()
+        val holders = applySorting(allSorted.map { it.file }, sortingPrefs)
         if (offset >= holders.size) return arrayListOf()
         val end = minOf(offset + limit, holders.size)
         return ArrayList(holders.subList(offset, end))

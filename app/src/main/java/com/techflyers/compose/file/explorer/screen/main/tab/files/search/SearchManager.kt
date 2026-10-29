@@ -29,7 +29,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.io.BufferedReader
+import java.io.File
 import java.io.FileReader
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.regex.Pattern
 
@@ -61,14 +63,29 @@ class SearchManager {
     private val editableExtensions = FileMimeType.editableFileType.toSet()
     private val codeExtensions = FileMimeType.codeFileType.toSet()
 
-    // Internal state for tracking search progress (not observed by UI)
+    // Fast in-memory directory index cache for reliable, high-performance repeat searches
+    private data class CachedDirEntries(
+        val dirMtime: Long,
+        val showHidden: Boolean,
+        val entries: List<ContentHolder>
+    )
+    private val dirEntryIndexCache = ConcurrentHashMap<String, CachedDirEntries>()
+    private val seenResultKeys = ConcurrentHashMap.newKeySet<String>()
+
     private var internalProgress = 0f
     private var internalCurrentFile = emptyString
-    private val uiUpdateInterval = 100L // Update UI every 100ms
+    private val uiUpdateInterval = 80L
 
-    // Batched results management
     private val pendingResults = ConcurrentLinkedQueue<SearchResult>()
-    private val resultsBatchSize = 20 // Add results in batches of 20
+    private val resultsBatchSize = 25
+
+    fun invalidateIndexCache(path: String? = null) {
+        if (path == null) {
+            dirEntryIndexCache.clear()
+        } else {
+            dirEntryIndexCache.remove(path)
+        }
+    }
 
     /**
      * Toggle AI search mode.
@@ -79,10 +96,8 @@ class SearchManager {
         aiSearchResults.clear()
 
         if (isAiMode) {
-            // Check if model is downloaded
             if (!ModelDownloadManager.isModelDownloaded(globalClass)) {
                 ModelDownloadManager.requestModelDownload {
-                    // Model is now ready, initialize engine
                     initializeAiEngine()
                     if (tab.activeFolder is LocalFileHolder) {
                         indexFolder(tab, (tab.activeFolder as LocalFileHolder).file.absolutePath)
@@ -132,6 +147,9 @@ class SearchManager {
                     }
                 )
                 indexedFolderPath = folderPath
+                if (searchQuery.isNotBlank()) {
+                    aiSearch(tab)
+                }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     logger.logError(e)
@@ -155,30 +173,31 @@ class SearchManager {
         aiSearchJob?.cancel()
         aiSearchJob = tab.scope.launch {
             isAiSearching = true
-            delay(300) // Debounce
+            delay(250)
 
             try {
                 val results = withContext(Dispatchers.IO) {
-                    searchEngine!!.search(searchQuery, fileIndex!!, topK = 20)
+                    searchEngine!!.search(searchQuery, fileIndex!!, topK = 30)
                 }
                 aiSearchResults.clear()
                 aiSearchResults.addAll(results)
 
-                // Populate UI search results
-                searchResults.clear()
-                results.forEach { aiRes ->
-                    val file = java.io.File(aiRes.filePath)
-                    if (file.exists()) {
-                        val holder = LocalFileHolder(file)
-                        if (searchOptions.matchesFilter(holder)) {
-                            searchResults.add(
-                                SearchResult(
-                                    file = holder,
-                                    matchType = SearchResult.MatchType.CONTENT,
-                                    lineNumber = 1,
-                                    matchedLine = "Semantic match score: ${(aiRes.score * 100).toInt()}%"
+                withContext(Dispatchers.Main) {
+                    searchResults.clear()
+                    results.forEach { aiRes ->
+                        val file = File(aiRes.filePath)
+                        if (file.exists()) {
+                            val holder = LocalFileHolder(file)
+                            if (searchOptions.matchesFilter(holder)) {
+                                searchResults.add(
+                                    SearchResult(
+                                        file = holder,
+                                        matchType = SearchResult.MatchType.CONTENT,
+                                        lineNumber = 1,
+                                        matchedLine = "Semantic match score: ${(aiRes.score * 100).toInt()}%"
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -198,7 +217,7 @@ class SearchManager {
             return
         }
 
-        if (searchQuery.isEmpty() && searchOptions.selectedFormats.isEmpty()) {
+        if (searchQuery.isEmpty() && !searchOptions.hasActiveFilters()) {
             clearResults()
             return
         }
@@ -207,13 +226,13 @@ class SearchManager {
         uiUpdateJob?.cancel()
         clearResults()
         pendingResults.clear()
+        seenResultKeys.clear()
         isSearching = true
         searchProgress = 0f
         internalProgress = 0f
         internalCurrentFile = emptyString
 
-        // Start UI update job
-        uiUpdateJob = tab.scope.launch {
+        uiUpdateJob = tab.scope.launch(Dispatchers.Main) {
             while (isSearching) {
                 delay(uiUpdateInterval)
                 updateUiState()
@@ -221,7 +240,7 @@ class SearchManager {
             }
         }
 
-        searchJob = tab.scope.launch {
+        searchJob = tab.scope.launch(Dispatchers.IO) {
             try {
                 val searchPattern = if (searchOptions.useRegex && searchQuery.isNotEmpty()) {
                     try {
@@ -230,32 +249,44 @@ class SearchManager {
                             if (searchOptions.ignoreCase) Pattern.CASE_INSENSITIVE else 0
                         )
                     } catch (_: Exception) {
-                        // Invalid regex, fall back to literal search
                         null
                     }
                 } else null
 
                 if (tab.activeFolder is VirtualFileHolder) {
-                    searchInList(tab.activeFolderContent, searchPattern)
+                    val snapshot = withContext(Dispatchers.Main) { tab.activeFolderContent.toList() }
+                    searchInList(snapshot, searchPattern)
                 } else {
                     internalProgress = -1f
                     searchInFolder(tab.activeFolder, searchPattern)
+                    if (tab.isHomeSearchTab && globalClass.preferencesManager.searchExternalStorageFromHome) {
+                        val primaryPath = tab.activeFolder.uniquePath
+                        for ((_, extDir) in com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.getExternalStorageDirectories(globalClass)) {
+                            if (!isSearching || getTotalResultsCount() >= searchOptions.maxResults) break
+                            if (extDir.exists() && extDir.absolutePath != primaryPath) {
+                                searchInFolder(LocalFileHolder(extDir), searchPattern)
+                            }
+                        }
+                    }
                 }
 
                 internalProgress = 1f
-                updateUiState() // Final update
-                flushPendingResults() // Flush any remaining results
+                withContext(Dispatchers.Main) {
+                    updateUiState()
+                    flushPendingResults()
+                }
             } catch (_: CancellationException) {
                 // Search was cancelled
             } catch (e: Exception) {
-                // Handle other errors
                 logger.logError(e)
                 globalClass.showMsg(globalClass.getString(R.string.something_went_wrong))
             } finally {
                 isSearching = false
                 uiUpdateJob?.cancel()
-                updateUiState() // Final cleanup
-                flushPendingResults() // Final flush
+                withContext(Dispatchers.Main) {
+                    updateUiState()
+                    flushPendingResults()
+                }
                 internalCurrentFile = emptyString
             }
         }
@@ -272,23 +303,16 @@ class SearchManager {
     }
 
     private fun addSearchResult(result: SearchResult) {
+        val key = "${result.file.uniquePath}|${result.matchType}|${result.lineNumber ?: 0}"
+        if (!seenResultKeys.add(key)) return
         pendingResults.add(result)
-
-        // If we've accumulated enough results, flush them immediately
-        if (pendingResults.size >= resultsBatchSize) {
-            flushPendingResults()
-        }
     }
 
     private fun flushPendingResults() {
         val resultsToAdd = mutableListOf<SearchResult>()
-
-        // Drain all pending results
         while (pendingResults.isNotEmpty()) {
             pendingResults.poll()?.let { resultsToAdd.add(it) }
         }
-
-        // Add them all at once to minimize recomposition
         if (resultsToAdd.isNotEmpty()) {
             searchResults.addAll(resultsToAdd)
         }
@@ -302,12 +326,13 @@ class SearchManager {
         isAiSearching = false
         searchProgress = 0f
         currentSearchingFile = emptyString
-        flushPendingResults() // Ensure any pending results are added
+        flushPendingResults()
     }
 
     fun clearResults() {
         searchResults.clear()
         pendingResults.clear()
+        seenResultKeys.clear()
         searchProgress = 0f
         currentSearchingFile = emptyString
         internalProgress = 0f
@@ -324,7 +349,7 @@ class SearchManager {
         content: List<ContentHolder>,
         searchPattern: Pattern?
     ) {
-        val totalItems = content.size
+        val totalItems = content.size.coerceAtLeast(1)
         content.forEachIndexed { index, item ->
             if (!isSearching) return
 
@@ -335,6 +360,32 @@ class SearchManager {
         }
     }
 
+    private suspend fun getIndexedFolderContent(folder: ContentHolder): List<ContentHolder> {
+        val showHidden = globalClass.preferencesManager.showHiddenFiles
+        if (folder is LocalFileHolder) {
+            val path = folder.uniquePath
+            val currentMtime = folder.file.lastModified()
+            val cached = dirEntryIndexCache[path]
+            if (cached != null && cached.dirMtime == currentMtime && cached.showHidden == showHidden) {
+                return cached.entries
+            }
+            val rawFiles = folder.file.listFiles() ?: emptyArray()
+            val entries = ArrayList<ContentHolder>(rawFiles.size)
+            for (f in rawFiles) {
+                if (showHidden || !f.name.startsWith(".")) {
+                    entries.add(LocalFileHolder(f))
+                }
+            }
+            dirEntryIndexCache[path] = CachedDirEntries(
+                dirMtime = currentMtime,
+                showHidden = showHidden,
+                entries = entries
+            )
+            return entries
+        }
+        return folder.listContent()
+    }
+
     private suspend fun searchInFolder(
         folder: ContentHolder,
         searchPattern: Pattern?
@@ -342,32 +393,43 @@ class SearchManager {
         if (!isSearching || !folder.isFolder) return
         try {
             var processedItems = 0
+            val visitedCanonicalDirs = HashSet<String>()
+            val skipSystemPaths = setOf("/proc", "/sys", "/dev")
 
             suspend fun processFolder(currentFolder: ContentHolder) {
                 if (!isSearching) return
+                if (currentFolder.uniquePath in skipSystemPaths) return
+
+                if (currentFolder is LocalFileHolder) {
+                    val canonical = runCatching { currentFolder.file.canonicalPath }.getOrNull()
+                        ?: currentFolder.uniquePath
+                    if (!visitedCanonicalDirs.add(canonical)) return
+                }
 
                 if (currentFolder.isFolder) {
                     try {
-                        val folderContent = currentFolder.listContent()
+                        val folderContent = getIndexedFolderContent(currentFolder)
+                        val subfolders = mutableListOf<ContentHolder>()
                         for (item in folderContent) {
                             if (!isSearching) return
 
                             updateInternalProgress(-1f, item.displayName)
                             processedItems++
 
+                            searchInItem(item, searchPattern)
                             if (item.isFolder) {
-                                searchInItem(item, searchPattern)
-                                processFolder(item)
-                            } else {
-                                searchInItem(item, searchPattern)
+                                subfolders.add(item)
                             }
 
                             if (getTotalResultsCount() >= searchOptions.maxResults) return
 
-                            // Only yield occasionally to prevent blocking
-                            if (processedItems % 50 == 0) {
+                            if (processedItems % 80 == 0) {
                                 yield()
                             }
+                        }
+                        for (sub in subfolders) {
+                            if (!isSearching || getTotalResultsCount() >= searchOptions.maxResults) return
+                            processFolder(sub)
                         }
                     } catch (_: Exception) {
                         // Skip folders that can't be accessed
@@ -391,9 +453,11 @@ class SearchManager {
     ) {
         if (!isSearching) return
 
+        val showHidden = globalClass.preferencesManager.showHiddenFiles
+        if (!showHidden && item.isHidden()) return
+
         if (!searchOptions.matchesFilter(item)) return
 
-        // Search by extension
         if (searchOptions.searchByExtension && searchQuery.isNotEmpty()) {
             val extension = item.extension
             if (extension.isNotEmpty() && matchesQuery(extension, searchPattern)) {
@@ -426,7 +490,6 @@ class SearchManager {
             }
         }
 
-        // Search in file content
         if (searchOptions.searchInFileContent && searchQuery.isNotEmpty() && item.isFile()) {
             if (isEditableFile(item)) {
                 searchInFileContent(item, searchPattern)
@@ -490,16 +553,13 @@ class SearchManager {
                                         file = file,
                                         matchType = SearchResult.MatchType.CONTENT,
                                         lineNumber = lineNumber,
-                                        matchedLine = currentLine.trim()
-                                            .take(100) // Limit line preview
+                                        matchedLine = currentLine.trim().take(100)
                                     )
                                 )
-
-                                return@withContext // Return immediately after finding first match
+                                return@withContext
                             }
                         }
 
-                        // Yield periodically to prevent blocking
                         if (lineNumber % 1000 == 0) {
                             yield()
                         }
@@ -521,7 +581,7 @@ class SearchManager {
     }
 
     private fun isEditableFile(file: ContentHolder): Boolean {
-        val extension = file.extension
+        val extension = file.extension.lowercase()
         return extension in editableExtensions || extension in codeExtensions
     }
 }

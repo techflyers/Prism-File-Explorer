@@ -97,6 +97,47 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
             }
         }
 
+    /** Lock horizontal panning/scrolling when true */
+    var isHorizontalScrollLocked: Boolean = false
+        set(value) {
+            field = value
+            if (value) {
+                lockedHorizontalScrollX = pdfViewRef?.scrollX
+            } else {
+                lockedHorizontalScrollX = null
+            }
+        }
+
+    /** Lock vertical scrolling when true */
+    var isVerticalScrollLocked: Boolean = false
+        set(value) {
+            field = value
+            if (value) {
+                lockedVerticalScrollY = pdfViewRef?.scrollY
+            } else {
+                lockedVerticalScrollY = null
+            }
+        }
+
+    /** Lock pinch-to-zoom and double-tap zoom when true */
+    var isZoomLocked: Boolean = false
+        set(value) {
+            field = value
+            if (value) {
+                lockedZoomValue = currentZoom
+            } else {
+                lockedZoomValue = null
+            }
+        }
+
+    private var lockedHorizontalScrollX: Int? = null
+    private var lockedVerticalScrollY: Int? = null
+    private var lockedZoomValue: Float? = null
+    private var touchDownX: Float = 0f
+    private var touchDownY: Float = 0f
+    private var lastSingleTapUpTimeMs: Long = 0L
+    private var isBlockingDoubleTapZoom: Boolean = false
+
     private var pdfViewRef: PdfView? = null
     private var overlayView: View? = null
     private var currentZoom: Float = 1f
@@ -246,13 +287,41 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
                 visiblePages: android.util.SparseArray<android.graphics.RectF>,
                 zoom: Float
             ) {
-                currentZoom = zoom
+                if (isZoomLocked) {
+                    val targetZoom = lockedZoomValue ?: currentZoom
+                    if (kotlin.math.abs(zoom - targetZoom) > 0.005f) {
+                        runCatching { pdfView.zoom = targetZoom }
+                    }
+                } else {
+                    currentZoom = zoom
+                }
+
+                if (isHorizontalScrollLocked) {
+                    val targetX = lockedHorizontalScrollX ?: horizontalOffset
+                    if (lockedHorizontalScrollX == null) lockedHorizontalScrollX = horizontalOffset
+                    if (pdfView.scrollX != targetX) {
+                        pdfView.scrollX = targetX
+                    }
+                }
+
+                if (isVerticalScrollLocked) {
+                    val targetY = lockedVerticalScrollY ?: verticalOffset
+                    if (lockedVerticalScrollY == null) lockedVerticalScrollY = verticalOffset
+                    if (pdfView.scrollY != targetY) {
+                        pdfView.scrollY = targetY
+                    }
+                }
+
                 overlayView?.postInvalidate()
 
                 // Ensure scrollbar is visible during scrolling and schedule auto-hide after scrolling stops
                 scrollHandler.removeCallbacks(hideScrollbarRunnable)
-                pdfView.fastScroller?.show { pdfView.postInvalidate() }
-                scrollHandler.postDelayed(hideScrollbarRunnable, 1500L)
+                if (!isVerticalScrollLocked && !isScrollLocked) {
+                    pdfView.fastScroller?.show { pdfView.postInvalidate() }
+                    scrollHandler.postDelayed(hideScrollbarRunnable, 1500L)
+                } else {
+                    pdfView.fastScroller?.hide()
+                }
 
                 if (visiblePages.size() > 0) {
                     val rectTop = visiblePages.valueAt(0)?.top ?: 0f
@@ -299,7 +368,9 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
                 onGestureStateChanged?.invoke(state)
                 if (state == PdfView.GESTURE_STATE_INTERACTING || state == PdfView.GESTURE_STATE_SETTLING) {
                     scrollHandler.removeCallbacks(hideScrollbarRunnable)
-                    pdfView.fastScroller?.show { pdfView.postInvalidate() }
+                    if (!isVerticalScrollLocked && !isScrollLocked) {
+                        pdfView.fastScroller?.show { pdfView.postInvalidate() }
+                    }
                 } else if (state == PdfView.GESTURE_STATE_IDLE) {
                     scrollHandler.removeCallbacks(hideScrollbarRunnable)
                     scrollHandler.postDelayed(hideScrollbarRunnable, 1200L)
@@ -351,14 +422,69 @@ class CustomPdfViewerFragment : PdfViewerFragment() {
             setIsLongpressEnabled(false) // Allow long-press to pass to PdfView for text selection
         }
 
+        val doubleTapTimeoutMs = android.view.ViewConfiguration.getDoubleTapTimeout().toLong()
+
         pdfView.setOnTouchListener { v, event ->
-            if (isScrollLocked) {
+            if (isScrollLocked || (isHorizontalScrollLocked && isVerticalScrollLocked && isZoomLocked)) {
                 v.parent?.requestDisallowInterceptTouchEvent(true)
+                gestureDetector.onTouchEvent(event)
                 return@setOnTouchListener true
             }
-            if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) {
-                lastTouchPoint = androidx.compose.ui.geometry.Offset(event.x, event.y)
+
+            if (isZoomLocked) {
+                if (event.pointerCount > 1 ||
+                    event.actionMasked == MotionEvent.ACTION_POINTER_DOWN ||
+                    event.actionMasked == MotionEvent.ACTION_POINTER_UP
+                ) {
+                    return@setOnTouchListener true
+                }
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - lastSingleTapUpTimeMs <= doubleTapTimeoutMs) {
+                            isBlockingDoubleTapZoom = true
+                            return@setOnTouchListener true
+                        }
+                        isBlockingDoubleTapZoom = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (isBlockingDoubleTapZoom) return@setOnTouchListener true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (isBlockingDoubleTapZoom) {
+                            isBlockingDoubleTapZoom = false
+                            return@setOnTouchListener true
+                        }
+                        lastSingleTapUpTimeMs = android.os.SystemClock.uptimeMillis()
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        isBlockingDoubleTapZoom = false
+                    }
+                }
             }
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchDownX = event.x
+                    touchDownY = event.y
+                    if (isHorizontalScrollLocked && lockedHorizontalScrollX == null) {
+                        lockedHorizontalScrollX = v.scrollX
+                    }
+                    if (isVerticalScrollLocked && lockedVerticalScrollY == null) {
+                        lockedVerticalScrollY = v.scrollY
+                    }
+                    lastTouchPoint = androidx.compose.ui.geometry.Offset(event.x, event.y)
+                }
+                MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                    lastTouchPoint = androidx.compose.ui.geometry.Offset(event.x, event.y)
+                    if (event.pointerCount == 1 && (isHorizontalScrollLocked || isVerticalScrollLocked)) {
+                        val lockedX = if (isHorizontalScrollLocked) touchDownX else event.x
+                        val lockedY = if (isVerticalScrollLocked) touchDownY else event.y
+                        event.setLocation(lockedX, lockedY)
+                    }
+                }
+            }
+
             gestureDetector.onTouchEvent(event)
             false // pass all touch events to child view for scrolling, zoom, text selection
         }

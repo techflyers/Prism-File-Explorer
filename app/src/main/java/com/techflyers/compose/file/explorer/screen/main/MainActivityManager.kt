@@ -1,6 +1,13 @@
 package com.techflyers.compose.file.explorer.screen.main
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
@@ -65,18 +72,64 @@ class MainActivityManager {
 
     fun setup() {
         refreshStorageDevices()
+        StorageProvider.triggerRecentFilesIndexingIfNeeded(forceRebuild = false)
     }
 
     private val closedTabsHistory = mutableListOf<ClosedTabEntry>()
     var lastHomeTab: HomeTab? = null
 
+    // Cross-tab drag-and-drop coordination
+    private val tabDropTargetCoords = java.util.concurrent.ConcurrentHashMap<Int, androidx.compose.ui.layout.LayoutCoordinates>()
+    var hoveredTabDropIndex by androidx.compose.runtime.mutableIntStateOf(-1)
+    var activeDragSourceTab by androidx.compose.runtime.mutableStateOf<FilesTab?>(null)
+
+    fun registerTabDropTarget(index: Int, coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
+        tabDropTargetCoords[index] = coordinates
+    }
+
+    fun unregisterTabDropTarget(index: Int) {
+        tabDropTargetCoords.remove(index)
+        if (hoveredTabDropIndex == index) hoveredTabDropIndex = -1
+    }
+
+    fun findTabDropTargetIndexAt(windowPosition: androidx.compose.ui.geometry.Offset): Int {
+        val currentTabs = _state.value.tabs
+        for ((idx, coords) in tabDropTargetCoords) {
+            if (idx in currentTabs.indices && coords.isAttached) {
+                val bounds = coords.boundsInWindow()
+                if (bounds.contains(windowPosition)) {
+                    val targetTab = currentTabs[idx]
+                    if (targetTab is FilesTab) {
+                        return idx
+                    }
+                }
+            }
+        }
+        return -1
+    }
+
+    fun findTabDropTargetFolderAt(windowPosition: androidx.compose.ui.geometry.Offset): com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder? {
+        val idx = findTabDropTargetIndexAt(windowPosition)
+        hoveredTabDropIndex = idx
+        if (idx < 0) return null
+        val targetTab = _state.value.tabs.getOrNull(idx) as? FilesTab ?: return null
+        return targetTab.activeFolder
+    }
+
     private fun createClosedTabEntry(tab: Tab, originalIndex: Int = -1): ClosedTabEntry {
         return when (tab) {
             is FilesTab -> {
                 val folder = tab.activeFolder
+                val subtitleText = if (folder is com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder &&
+                    folder.type == com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.DUPLICATES
+                ) {
+                    "${folder.customItems?.size ?: 0} files • Comparison / Duplicates"
+                } else {
+                    folder.displayName
+                }
                 ClosedTabEntry(
                     title = tab.header.ifEmpty { folder.displayName },
-                    subtitle = folder.displayName,
+                    subtitle = subtitleText,
                     originalIndex = originalIndex,
                     createTab = { FilesTab(source = folder) }
                 )
@@ -154,10 +207,61 @@ class MainActivityManager {
         }
     }
 
+    fun recordClosedComparison(
+        title: String,
+        subtitle: String,
+        selectionPaths: List<String>
+    ) {
+        val entry = ClosedTabEntry(
+            title = title,
+            subtitle = subtitle,
+            createTab = {
+                val firstFolder = selectionPaths.firstOrNull()?.let { File(it) }?.let {
+                    if (it.isDirectory) it else it.parentFile
+                } ?: File("/storage/emulated/0")
+                FilesTab(LocalFileHolder(firstFolder)).apply {
+                    showSavedComparisonDialog = true
+                }
+            },
+            onReopen = {
+                val currentActive = getActiveTab()
+                if (currentActive is FilesTab) {
+                    currentActive.showSavedComparisonDialog = true
+                } else {
+                    val existingFilesTabIndex = _state.value.tabs.indexOfFirst { it is FilesTab }
+                    if (existingFilesTabIndex >= 0) {
+                        selectTabAt(existingFilesTabIndex, true)
+                        (_state.value.tabs[existingFilesTabIndex] as? FilesTab)?.showSavedComparisonDialog = true
+                    } else {
+                        val firstFolder = selectionPaths.firstOrNull()?.let { File(it) }?.let {
+                            if (it.isDirectory) it else it.parentFile
+                        } ?: File("/storage/emulated/0")
+                        addTabAndSelect(
+                            FilesTab(LocalFileHolder(firstFolder)).apply {
+                                showSavedComparisonDialog = true
+                            }
+                        )
+                    }
+                }
+            }
+        )
+        synchronized(closedTabsHistory) {
+            closedTabsHistory.removeAll { it.onReopen != null && it.title == title }
+            closedTabsHistory.add(0, entry)
+            if (closedTabsHistory.size > 30) {
+                closedTabsHistory.removeAt(closedTabsHistory.lastIndex)
+            }
+        }
+    }
+
     fun reopenLastClosedTab(): Boolean {
         val entry = synchronized(closedTabsHistory) {
             if (closedTabsHistory.isEmpty()) return false
             closedTabsHistory.removeAt(0)
+        }
+        if (entry.onReopen != null) {
+            entry.onReopen.invoke()
+            return true
         }
         val restoredTab = entry.createTab()
         addTabAndSelect(restoredTab, entry.originalIndex)
@@ -167,6 +271,10 @@ class MainActivityManager {
     fun reopenClosedTab(entry: ClosedTabEntry) {
         synchronized(closedTabsHistory) {
             closedTabsHistory.remove(entry)
+        }
+        if (entry.onReopen != null) {
+            entry.onReopen.invoke()
+            return
         }
         val restoredTab = entry.createTab()
         addTabAndSelect(restoredTab, entry.originalIndex)
@@ -255,8 +363,6 @@ class MainActivityManager {
     }
 
     fun removeTabAt(index: Int) {
-        // There must be at least one tab
-        if (_state.value.tabs.size <= 1) return
         if (index !in _state.value.tabs.indices) return
 
         val tabToRemove = _state.value.tabs[index]
@@ -264,6 +370,16 @@ class MainActivityManager {
             showMsg("Unpin tab before closing")
             return
         }
+
+        // When only a single tab is open, record it and replace with HomeTab
+        if (_state.value.tabs.size <= 1) {
+            recordClosedTab(tabToRemove, index)
+            if (tabToRemove !is HomeTab) {
+                replaceCurrentTabWith(HomeTab())
+            }
+            return
+        }
+
         val currentSelectedIndex = _state.value.selectedTabIndex
 
         recordClosedTab(tabToRemove, index)
@@ -418,9 +534,13 @@ class MainActivityManager {
             tab.parentTab = currentActiveTab
         }
 
-        // Preserve pin status if replacing in-place
-        if (currentActiveTab?.isPinned == true) {
-            tab.isPinned = true
+        // Preserve slotId and pin status when replacing in-place so the tab bar and pager
+        // keep the exact same slot key without shifting or pushing edge tabs off-screen.
+        if (currentActiveTab != null) {
+            tab.slotId = currentActiveTab.slotId
+            if (currentActiveTab.isPinned) {
+                tab.isPinned = true
+            }
         }
 
         // Update the state
@@ -563,6 +683,7 @@ class MainActivityManager {
         if (parent != null) {
             val existingIndex = _state.value.tabs.indexOfFirst { it === parent || it.id == parent.id }
             if (existingIndex != -1 && existingIndex != selectedTabIndex) {
+                recordClosedTab(activeForParent, selectedTabIndex)
                 val target = _state.value.tabs[existingIndex]
                 activeForParent.onTabStopped()
                 activeForParent.onTabRemoved()
@@ -580,34 +701,21 @@ class MainActivityManager {
                 }
                 return false
             } else if (existingIndex == -1) {
+                recordClosedTab(activeForParent, selectedTabIndex)
                 replaceCurrentTabWith(parent, false)
                 return false
             }
             activeForParent.parentTab = null
         }
 
-        // Replace the active tab with the home tab (if turned on in settings)
+        // Replace the active tab with the home tab in-place (if turned on in settings)
         if (getActiveTab() !is HomeTab && !globalClass.preferencesManager.skipHomeWhenTabClosed) {
             isExitingViaBackPress = true
-            val existingHomeIndex = _state.value.tabs.indexOfFirst { it is HomeTab }
-            if (existingHomeIndex != -1 && existingHomeIndex != selectedTabIndex && _state.value.tabs.size > 1) {
-                val homeTarget = _state.value.tabs[existingHomeIndex]
-                activeForParent.onTabStopped()
-                activeForParent.onTabRemoved()
-                val newSelectedIndex = if (selectedTabIndex < existingHomeIndex) existingHomeIndex - 1 else existingHomeIndex
-                _state.update { state ->
-                    state.copy(
-                        tabs = state.tabs.filterIndexed { i, _ -> i != selectedTabIndex },
-                        selectedTabIndex = newSelectedIndex
-                    )
-                }
-                if (homeTarget.isCreated) homeTarget.onTabResumed() else homeTarget.onTabStarted()
-            } else {
-                val reusableHome = lastHomeTab?.takeIf { home ->
-                    _state.value.tabs.none { it === home || it.id == home.id }
-                } ?: HomeTab()
-                replaceCurrentTabWith(reusableHome)
-            }
+            recordClosedTab(activeForParent, selectedTabIndex)
+            val reusableHome = lastHomeTab?.takeIf { home ->
+                _state.value.tabs.none { it === home || it.id == home.id }
+            } ?: HomeTab()
+            replaceCurrentTabWith(reusableHome)
             return false
         }
 
@@ -680,17 +788,31 @@ class MainActivityManager {
     fun saveSession() {
         if (isExitingViaBackPress) return
 
-        val configuredStartupTabsObj: StartupTabs? = fromJson(globalClass.preferencesManager.startupTabs)
-        val configuredHasHome = configuredStartupTabsObj?.tabs?.any { it.type == StartupTabType.HOME } == true
-
         val startupTabs = arrayListOf<StartupTab>()
-        _state.value.tabs.forEach { tab ->
+        val currentState = _state.value
+        currentState.tabs.forEach { tab ->
             when (tab) {
                 is FilesTab -> {
+                    val folder = tab.activeFolder
+                    val fromHome = tab.parentTab is HomeTab
+                    val encodedExtra = when (folder) {
+                        is com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder -> {
+                            if (fromHome) {
+                                "virtual_from_home:${folder.type}"
+                            } else {
+                                "virtual:${folder.type}"
+                            }
+                        }
+                        else -> {
+                            val path = folder.uniquePath.ifEmpty { "/storage/emulated/0" }
+                            if (fromHome) "local_from_home:$path" else path
+                        }
+                    }
                     startupTabs.add(
                         StartupTab(
                             type = StartupTabType.FILES,
-                            extra = tab.activeFolder.uniquePath
+                            extra = encodedExtra,
+                            isPinned = tab.isPinned
                         )
                     )
                 }
@@ -698,44 +820,139 @@ class MainActivityManager {
                 is AppsTab -> {
                     startupTabs.add(
                         StartupTab(
-                            type = StartupTabType.APPS
+                            type = StartupTabType.APPS,
+                            isPinned = tab.isPinned
                         )
                     )
                 }
 
                 is HomeTab -> {
-                    if (configuredHasHome) {
-                        startupTabs.add(
-                            StartupTab(
-                                type = StartupTabType.HOME
-                            )
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.HOME,
+                            isPinned = tab.isPinned
                         )
-                    }
+                    )
+                }
+
+                is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab -> {
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.FILES,
+                            extra = "tool:vault",
+                            isPinned = tab.isPinned
+                        )
+                    )
+                }
+
+                is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab -> {
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.FILES,
+                            extra = "tool:ftp",
+                            isPinned = tab.isPinned
+                        )
+                    )
+                }
+
+                is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab -> {
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.FILES,
+                            extra = "tool:web_share",
+                            isPinned = tab.isPinned
+                        )
+                    )
+                }
+
+                is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab -> {
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.FILES,
+                            extra = "tool:storage_analysis",
+                            isPinned = tab.isPinned
+                        )
+                    )
+                }
+
+                is com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab -> {
+                    startupTabs.add(
+                        StartupTab(
+                            type = StartupTabType.FILES,
+                            extra = "tool:duplicate_finder",
+                            isPinned = tab.isPinned
+                        )
+                    )
                 }
             }
         }
         if (startupTabs.isNotEmpty()) {
-            globalClass.preferencesManager.lastSessionTabs = StartupTabs(startupTabs).toJson()
+            val savedIndex = currentState.selectedTabIndex.coerceIn(0, startupTabs.lastIndex)
+            globalClass.preferencesManager.lastSessionTabs = StartupTabs(
+                tabs = startupTabs,
+                selectedTabIndex = savedIndex
+            ).toJson()
         }
     }
 
-    fun loadStartupTabs() {
+    private fun instantiateStartupTab(tab: StartupTab?): Tab {
+        if (tab == null) return HomeTab()
+        val restored: Tab = when (tab.type) {
+            StartupTabType.FILES -> {
+                val extra = tab.extra
+                when {
+                    extra.startsWith("virtual_from_home:") -> {
+                        val vType = extra.removePrefix("virtual_from_home:").toIntOrNull()
+                            ?: com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.RECENT
+                        FilesTab(com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder(vType)).apply {
+                            parentTab = HomeTab()
+                        }
+                    }
+                    extra.startsWith("virtual:") -> {
+                        val vType = extra.removePrefix("virtual:").toIntOrNull()
+                            ?: com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder.RECENT
+                        FilesTab(com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder(vType))
+                    }
+                    extra.startsWith("local_from_home:") -> {
+                        val path = extra.removePrefix("local_from_home:").ifEmpty { "/storage/emulated/0" }
+                        FilesTab(LocalFileHolder(File(path))).apply {
+                            parentTab = HomeTab()
+                        }
+                    }
+                    extra == "tool:vault" -> com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.VaultTab()
+                    extra == "tool:ftp" -> com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.FtpServerTab()
+                    extra == "tool:web_share" -> com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.WebSharingTab()
+                    extra == "tool:storage_analysis" -> com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.StorageAnalysisTab()
+                    extra == "tool:duplicate_finder" -> com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.DuplicateFinderTab()
+                    else -> {
+                        val safePath = if (extra.isEmpty() || !extra.startsWith("/")) {
+                            "/storage/emulated/0"
+                        } else {
+                            extra
+                        }
+                        FilesTab(LocalFileHolder(File(safePath)))
+                    }
+                }
+            }
+            StartupTabType.APPS -> AppsTab()
+            else -> HomeTab()
+        }
+        restored.isPinned = tab.isPinned
+        return restored
+    }
+
+    fun loadStartupTabs(restoreFromBackgroundKill: Boolean = false) {
         isExitingViaBackPress = false
         managerScope.launch {
             val configuredStartupTabsObj: StartupTabs =
                 fromJson(globalClass.preferencesManager.startupTabs) ?: StartupTabs.default()
 
+            val shouldRestoreSession = globalClass.preferencesManager.rememberLastSession || restoreFromBackgroundKill
             val startupTabsObj: StartupTabs =
-                if (globalClass.preferencesManager.rememberLastSession) {
+                if (shouldRestoreSession) {
                     val lastSessionObj: StartupTabs? = fromJson(globalClass.preferencesManager.lastSessionTabs)
                     if (lastSessionObj != null && lastSessionObj.tabs.isNotEmpty()) {
-                        val configuredHasHome = configuredStartupTabsObj.tabs.any { it.type == StartupTabType.HOME }
-                        if (!configuredHasHome) {
-                            val filteredTabs = lastSessionObj.tabs.filter { it.type != StartupTabType.HOME }
-                            if (filteredTabs.isNotEmpty()) StartupTabs(filteredTabs) else configuredStartupTabsObj
-                        } else {
-                            lastSessionObj
-                        }
+                        lastSessionObj
                     } else {
                         configuredStartupTabsObj
                     }
@@ -744,25 +961,20 @@ class MainActivityManager {
                 }
 
             val tabs = arrayListOf<Tab>()
-            val index = 0
 
-            startupTabsObj.tabs.forEachIndexed { _, tab ->
-                val newTab = when (tab?.type) {
-                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(tab.extra.ifEmpty { "/storage/emulated/0" })))
-                    StartupTabType.APPS -> AppsTab()
-                    else -> HomeTab()
-                }
-                tabs.add(newTab)
+            startupTabsObj.tabs.forEach { tab ->
+                tabs.add(instantiateStartupTab(tab))
             }
 
             if (tabs.isEmpty()) {
                 val firstConfigured = configuredStartupTabsObj.tabs.firstOrNull()
-                val fallbackTab = when (firstConfigured?.type) {
-                    StartupTabType.FILES -> FilesTab(LocalFileHolder(File(firstConfigured.extra.ifEmpty { "/storage/emulated/0" })))
-                    StartupTabType.APPS -> AppsTab()
-                    else -> HomeTab()
-                }
-                tabs.add(fallbackTab)
+                tabs.add(instantiateStartupTab(firstConfigured))
+            }
+
+            val index = if (shouldRestoreSession) {
+                startupTabsObj.selectedTabIndex.coerceIn(0, tabs.lastIndex)
+            } else {
+                0
             }
 
             // Update the state first
@@ -773,15 +985,13 @@ class MainActivityManager {
                 )
             }
 
-            // Call callbacks on tabs AFTER state update
-            tabs.forEachIndexed { tabIndex, tab ->
-                if (tabIndex == index) {
-                    // This is the selected tab
-                    if (tab.isCreated) {
-                        tab.onTabResumed()
-                    } else {
-                        tab.onTabStarted()
-                    }
+            // Call callbacks on the selected tab AFTER state update
+            val activeTab = tabs.getOrNull(index)
+            if (activeTab != null) {
+                if (activeTab.isCreated) {
+                    activeTab.onTabResumed()
+                } else {
+                    activeTab.onTabStarted()
                 }
             }
         }

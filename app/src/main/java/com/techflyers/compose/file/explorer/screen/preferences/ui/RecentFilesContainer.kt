@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Add
@@ -19,18 +20,21 @@ import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.FilterNone
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOff
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,9 +61,65 @@ import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 fun RecentFilesContainer() {
     val prefs = globalClass.preferencesManager
     var showExcludedPathsDialog by remember { mutableStateOf(false) }
+    var showCustomLimitDialog by remember { mutableStateOf(false) }
 
     val recentFilesLimits = remember {
-        arrayListOf("25", "50", "100", "250", "500", "Unlimited")
+        arrayListOf("0", "5", "10", "15", "25", "50", "100", "250", "500", "Unlimited", "Custom…")
+    }
+
+    val refreshHomeRecentFiles = {
+        StorageProvider.invalidateRecentFilesCache()
+        globalClass.mainActivityManager.state.value.tabs
+            .filterIsInstance<HomeTab>()
+            .forEach { it.refreshRecentFiles() }
+    }
+
+    if (showCustomLimitDialog) {
+        var customLimitInput by remember {
+            mutableStateOf(if (prefs.recentFilesLimit >= 0) prefs.recentFilesLimit.toString() else "25")
+        }
+        AlertDialog(
+            onDismissRequest = { showCustomLimitDialog = false },
+            title = { Text(stringResource(R.string.recent_files_limit)) },
+            text = {
+                Column {
+                    Text(
+                        text = "Enter a custom maximum number of recent files (0 disables recent files loading):",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    OutlinedTextField(
+                        value = customLimitInput,
+                        onValueChange = { input ->
+                            customLimitInput = input.filter { it.isDigit() }
+                        },
+                        label = { Text("Limit (0 or higher)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val parsed = customLimitInput.toIntOrNull()
+                        if (parsed != null && parsed >= 0) {
+                            prefs.recentFilesLimit = parsed
+                            refreshHomeRecentFiles()
+                        }
+                        showCustomLimitDialog = false
+                    }
+                ) {
+                    Text(stringResource(R.string.apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomLimitDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 
     if (showExcludedPathsDialog) {
@@ -70,7 +131,6 @@ fun RecentFilesContainer() {
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // Header
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -94,7 +154,6 @@ fun RecentFilesContainer() {
                     )
                 }
 
-                // Add new path section
                 var newPathText by remember { mutableStateOf("") }
                 var isAddButtonEnabled by remember { mutableStateOf(false) }
 
@@ -121,7 +180,6 @@ fun RecentFilesContainer() {
                         IconButton(
                             onClick = {
                                 if (newPathText.trim().isNotEmpty()) {
-                                    // Add the path to excluded paths
                                     val currentPaths =
                                         prefs.excludedPathsFromRecentFiles.toMutableSet()
                                     currentPaths.add(newPathText.trim())
@@ -150,7 +208,6 @@ fun RecentFilesContainer() {
                     singleLine = true
                 )
 
-                // Excluded paths list
                 val excludedPaths = prefs.excludedPathsFromRecentFiles
 
                 if (excludedPaths.isNotEmpty()) {
@@ -212,7 +269,6 @@ fun RecentFilesContainer() {
                         }
                     }
                 } else {
-                    // Empty state
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -250,54 +306,59 @@ fun RecentFilesContainer() {
         }
     }
 
-    val refreshHomeRecentFiles = {
-        StorageProvider.invalidateRecentFilesCache()
-        globalClass.mainActivityManager.state.value.tabs
-            .filterIsInstance<HomeTab>()
-            .forEach { it.refreshRecentFiles() }
-    }
-
     val canDisableOnHome = prefs.showRecentInSidebar || prefs.showRecentInCategories
 
-    Container(title = stringResource(R.string.recent_files)) {
+    Container(
+        title = stringResource(R.string.recent_files),
+        icon = Icons.Rounded.History
+    ) {
         PreferenceItem(
             label = stringResource(R.string.recent_files_limit),
-            supportingText = if (prefs.recentFilesLimit == -1) {
-                "Unlimited (lists all files from newer to older)"
-            } else {
-                "${prefs.recentFilesLimit} files"
+            supportingText = when (prefs.recentFilesLimit) {
+                -1 -> "Unlimited (lists all recent files ordered from newest to oldest)"
+                0 -> "0 (Recent files disabled)"
+                else -> "Show up to ${prefs.recentFilesLimit} most recently modified files"
             },
-            icon = Icons.Rounded.History,
+            icon = Icons.Rounded.FilterNone,
             onClick = {
+                val unlimitedIndex = recentFilesLimits.indexOf("Unlimited")
+                val customIndex = recentFilesLimits.lastIndex
                 val selectedIdx = if (prefs.recentFilesLimit == -1) {
-                    recentFilesLimits.lastIndex
+                    unlimitedIndex
                 } else {
                     recentFilesLimits.indexOf(prefs.recentFilesLimit.toString())
-                        .takeIf { it >= 0 } ?: recentFilesLimits.lastIndex
+                        .takeIf { it >= 0 } ?: customIndex
                 }
                 prefs.singleChoiceDialog.show(
                     title = globalClass.getString(R.string.recent_files_limit),
-                    description = "Maximum number of recent files to list (Unlimited lists all files from newer to older)",
+                    description = "Maximum number of recent files to list (0 disables loading, Unlimited lists all files from newer to older)",
                     choices = recentFilesLimits,
                     selectedChoice = selectedIdx,
                     onSelect = { idx ->
                         val chosen = recentFilesLimits[idx]
-                        prefs.recentFilesLimit = if (chosen == "Unlimited") -1 else (chosen.toIntOrNull() ?: -1)
-                        refreshHomeRecentFiles()
+                        when (chosen) {
+                            "Unlimited" -> {
+                                prefs.recentFilesLimit = -1
+                                refreshHomeRecentFiles()
+                            }
+                            "Custom…" -> {
+                                showCustomLimitDialog = true
+                            }
+                            else -> {
+                                prefs.recentFilesLimit = chosen.toIntOrNull() ?: -1
+                                refreshHomeRecentFiles()
+                            }
+                        }
                     }
                 )
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
-        // Placement Option A: Sidebar
         PreferenceItem(
             label = "Show Recent files in sidebar",
-            supportingText = "Add a Recent files shortcut in the navigation drawer",
+            supportingText = "Add a quick Recent files shortcut inside the navigation drawer",
             icon = Icons.Rounded.Menu,
             switchState = prefs.showRecentInSidebar,
             onSwitchChange = { enabled ->
@@ -309,15 +370,11 @@ fun RecentFilesContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
-        // Placement Option B: Categories
         PreferenceItem(
             label = "Show Recent files under Categories",
-            supportingText = "Display a Recent files tile inside the Categories section",
+            supportingText = "Display a Recent files tile inside the Home Categories grid",
             icon = Icons.Rounded.Category,
             switchState = prefs.showRecentInCategories,
             onSwitchChange = { enabled ->
@@ -329,12 +386,8 @@ fun RecentFilesContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
-        // Placement Option C: Disable on Home tab (only available if A or B is enabled)
         PreferenceItem(
             label = "Disable Recent files on Home tab",
             supportingText = if (canDisableOnHome) {
@@ -355,21 +408,50 @@ fun RecentFilesContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.extensive_recent_files_scan),
             supportingText = stringResource(R.string.scan_hidden_files_and_folders),
             icon = Icons.AutoMirrored.Rounded.ManageSearch,
             switchState = !prefs.removeHiddenPathsFromRecentFiles,
-            onSwitchChange = {
-                prefs.removeHiddenPathsFromRecentFiles = !it
-                refreshHomeRecentFiles()
+            onSwitchChange = { enabled ->
+                prefs.removeHiddenPathsFromRecentFiles = !enabled
+                if (enabled) {
+                    StorageProvider.triggerRecentFilesIndexingIfNeeded(forceRebuild = false) {
+                        refreshHomeRecentFiles()
+                    }
+                } else {
+                    refreshHomeRecentFiles()
+                }
             }
         )
+
+        if (!prefs.removeHiddenPathsFromRecentFiles) {
+            PreferenceDivider()
+
+            val isIndexing = StorageProvider.isIndexingRecentFiles
+            val indexedCount = StorageProvider.indexedRecentFilesCount
+            PreferenceItem(
+                label = "Recent files index",
+                supportingText = if (isIndexing) {
+                    "Indexing device files… ($indexedCount files indexed)"
+                } else if (indexedCount > 0) {
+                    "$indexedCount files indexed • Tap to rebuild index"
+                } else {
+                    "Tap to build recent files index now"
+                },
+                icon = Icons.Rounded.History,
+                enabled = !isIndexing,
+                onClick = {
+                    StorageProvider.triggerRecentFilesIndexingIfNeeded(forceRebuild = true) {
+                        refreshHomeRecentFiles()
+                    }
+                }
+            )
+        }
+
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.hide_temp_and_db_files),
@@ -382,10 +464,7 @@ fun RecentFilesContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.excluded_paths),

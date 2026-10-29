@@ -8,11 +8,10 @@ import android.text.format.Formatter
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.techflyers.compose.file.explorer.office.OfficeEngine
-import com.techflyers.compose.file.explorer.screen.viewer.document.ai.DocumentAiService
+import com.techflyers.compose.file.explorer.office.OfficeEngineMode
 import com.techflyers.compose.file.explorer.screen.viewer.document.core.PdfDocument
 import com.techflyers.compose.file.explorer.screen.viewer.document.core.PdfEditTool
 import com.techflyers.compose.file.explorer.screen.viewer.document.core.PdfMarkup
@@ -31,7 +30,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.util.ArrayDeque
 
 data class DocumentViewerUiState(
@@ -83,15 +81,11 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private val _uiState = MutableStateFlow(DocumentViewerUiState())
     val uiState: StateFlow<DocumentViewerUiState> = _uiState.asStateFlow()
 
-    // Page bitmaps cache
     val pageBitmaps = mutableStateMapOf<Int, Bitmap>()
     val pageAspectRatios = mutableStateMapOf<Int, Float>()
     val pageTextBlocks = mutableStateMapOf<Int, List<PdfTextBlock>>()
-
-    // Markups per page
     val pageMarkups = mutableStateMapOf<Int, MutableList<PdfMarkup>>()
 
-    // Undo / Redo stacks
     private sealed class MarkupAction {
         data class Add(val page: Int, val markup: PdfMarkup) : MarkupAction()
         data class Remove(val page: Int, val markup: PdfMarkup, val index: Int) : MarkupAction()
@@ -102,13 +96,16 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private var searchJob: Job? = null
     private var textExtractionJob: Job? = null
     private var installerObserverJob: Job? = null
+    private var downloadWatchdogJob: Job? = null
     private var conversionProgressJob: Job? = null
+    private var loadDocumentJob: Job? = null
     private var renderWidth = 1080
 
     fun initDocument(uri: Uri, deviceScreenWidth: Int = 1080) {
         renderWidth = deviceScreenWidth.coerceAtLeast(480)
         val name = UniversalDocumentConverter.getFileName(context, uri)
         val isOffice = OfficeEngine.isOfficeFile(name)
+        val engineMode = OfficeEngine.getEngineMode(context)
 
         _uiState.update {
             it.copy(
@@ -120,19 +117,16 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             )
         }
 
-        // Check if office document and LibreOffice is not installed
-        if (isOffice && !OfficeEngine.isInstalled(context)) {
-            val currentState = OfficeEngine.installer(context).state.value
-            if (currentState is com.techflyers.compose.file.explorer.office.OfficeEngineState.Downloading ||
-                currentState is com.techflyers.compose.file.explorer.office.OfficeEngineState.Installing) {
-                observeInstallerDownload()
-            } else {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        showOfficeDownloadPrompt = true
-                    )
-                }
+        if (isOffice && engineMode == OfficeEngineMode.BUILTIN) {
+            loadDocument(uri, preferLibreOffice = false)
+        } else if (isOffice && !OfficeEngine.isInstalled(context)) {
+            // Always show the download/fallback prompt dialog so the user is never stuck without
+            // the option to select the built-in viewer even if a previous download got stuck.
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    showOfficeDownloadPrompt = true
+                )
             }
         } else {
             loadDocument(uri, preferLibreOffice = true)
@@ -145,8 +139,36 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         observeInstallerDownload()
     }
 
+    fun switchToBuiltInViewer() {
+        installerObserverJob?.cancel()
+        downloadWatchdogJob?.cancel()
+        conversionProgressJob?.cancel()
+        loadDocumentJob?.cancel()
+        OfficeEngine.installer(context).cancel()
+        _uiState.update { it.copy(showOfficeDownloadPrompt = false, error = null) }
+        val uri = _uiState.value.originalUri ?: return
+        loadDocument(uri, preferLibreOffice = false)
+    }
+
+    fun resetEngineAndPrompt() {
+        installerObserverJob?.cancel()
+        downloadWatchdogJob?.cancel()
+        conversionProgressJob?.cancel()
+        loadDocumentJob?.cancel()
+        OfficeEngine.resetEngine(context)
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                progress = null,
+                error = null,
+                showOfficeDownloadPrompt = true
+            )
+        }
+    }
+
     fun observeInstallerDownload() {
         installerObserverJob?.cancel()
+        downloadWatchdogJob?.cancel()
         _uiState.update {
             it.copy(
                 showOfficeDownloadPrompt = false,
@@ -155,12 +177,37 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 loadingMessage = "Connecting to download LibreOffice engine…"
             )
         }
+        var lastProgressBytes = -1L
+        var lastProgressTimestamp = System.currentTimeMillis()
+
+        downloadWatchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(5000)
+                val elapsed = System.currentTimeMillis() - lastProgressTimestamp
+                if (elapsed > 25_000L && !OfficeEngine.isInstalled(context)) {
+                    OfficeEngine.installer(context).cancel()
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            showOfficeDownloadPrompt = true,
+                            error = "LibreOffice download timed out or stalled. You can retry or use the built-in viewer."
+                        )
+                    }
+                    break
+                }
+            }
+        }
+
         installerObserverJob = viewModelScope.launch {
             OfficeEngine.installer(context).state.collect { state ->
                 when (state) {
                     is com.techflyers.compose.file.explorer.office.OfficeEngineState.Downloading -> {
                         val done = state.downloaded
                         val total = state.total
+                        if (done != lastProgressBytes) {
+                            lastProgressBytes = done
+                            lastProgressTimestamp = System.currentTimeMillis()
+                        }
                         val pct = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
                         val mbDone = Formatter.formatFileSize(context, done)
                         val mbTotal = Formatter.formatFileSize(context, total)
@@ -178,6 +225,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         }
                     }
                     is com.techflyers.compose.file.explorer.office.OfficeEngineState.Installing -> {
+                        lastProgressTimestamp = System.currentTimeMillis()
                         _uiState.update {
                             it.copy(
                                 showOfficeDownloadPrompt = false,
@@ -188,7 +236,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         }
                     }
                     is com.techflyers.compose.file.explorer.office.OfficeEngineState.Installed -> {
-                        // Automatically detect completion without manual exit!
+                        downloadWatchdogJob?.cancel()
                         val uri = _uiState.value.originalUri
                         if (uri != null && _uiState.value.activePdfUri == null) {
                             _uiState.update {
@@ -203,10 +251,11 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         }
                     }
                     is com.techflyers.compose.file.explorer.office.OfficeEngineState.Failed -> {
+                        downloadWatchdogJob?.cancel()
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                showOfficeDownloadPrompt = false,
+                                showOfficeDownloadPrompt = true,
                                 error = "Download failed: ${state.message}"
                             )
                         }
@@ -218,6 +267,8 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun onDismissDownloadPromptAndUseFallback() {
+        installerObserverJob?.cancel()
+        downloadWatchdogJob?.cancel()
         _uiState.update { it.copy(showOfficeDownloadPrompt = false) }
         val uri = _uiState.value.originalUri ?: return
         loadDocument(uri, preferLibreOffice = false)
@@ -225,10 +276,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
 
     fun loadDocument(sourceUri: Uri, preferLibreOffice: Boolean) {
         conversionProgressJob?.cancel()
-        viewModelScope.launch(Dispatchers.IO) {
+        loadDocumentJob?.cancel()
+        loadDocumentJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, progress = 0.10f, loadingMessage = "Preparing document…", error = null) }
 
-            // Dynamic fluid progress steps during conversion
             conversionProgressJob = viewModelScope.launch {
                 val stages = listOf(
                     0.25f to "Analyzing document formatting…",
@@ -269,7 +320,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 conversionProgressJob?.cancel()
                 _uiState.update { it.copy(progress = 0.96f, loadingMessage = "Opening PDF…") }
 
-                // Check encryption
                 val isEncrypted = PdfSecurityService.isPasswordProtected(context, activePdfUri)
                 if (isEncrypted) {
                     _uiState.update {
@@ -335,7 +385,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 )
             }
 
-            // Pre-calculate aspect ratios and render initial pages
             for (p in 0 until minOf(doc.pageCount, 15)) {
                 val size = pdfViewer.pageSize(doc, p)
                 if (size != null && size.width > 0 && size.height > 0) {
@@ -364,7 +413,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             val start = (centerPage - 1).coerceAtLeast(0)
             val end = (centerPage + 2).coerceAtMost(doc.pageCount - 1)
 
-            // Evict bitmaps far away from current viewport to keep memory small and eliminate GC stutter
             withContext(Dispatchers.Main) {
                 val keysToRemove = pageBitmaps.keys.filter { kotlin.math.abs(it - centerPage) > 7 }
                 keysToRemove.forEach { pageBitmaps.remove(it) }
@@ -434,8 +482,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    // ── Search ─────────────────────────────────────────────────────────────────
-
     fun setSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
         searchJob?.cancel()
@@ -445,7 +491,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
 
         searchJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(250) // debounce
+            delay(250)
             val uri = _uiState.value.activePdfUri ?: return@launch
             val count = _uiState.value.pageCount
             val matches = textService.searchAll(context, uri, query, count)
@@ -484,8 +530,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             )
         }
     }
-
-    // ── Markups, Drawing & Undo/Redo ──────────────────────────────────────────
 
     fun addMarkup(page: Int, markup: PdfMarkup) {
         val list = pageMarkups.getOrPut(page) { mutableListOf() }
@@ -541,8 +585,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    // ── Tool & State Toggles ──────────────────────────────────────────────────
-
     fun setActiveTool(tool: PdfEditTool) {
         _uiState.update { it.copy(activeTool = tool) }
     }
@@ -581,8 +623,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         renderPagesAround(page)
     }
 
-    // ── Dialog Visibility ─────────────────────────────────────────────────────
-
     fun setShowAiSheet(show: Boolean, selectedText: String? = null) {
         _uiState.update { it.copy(showAiSheet = show, selectedText = selectedText) }
         if (show && _uiState.value.fullText.isNullOrBlank()) {
@@ -615,7 +655,9 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     override fun onCleared() {
         super.onCleared()
         installerObserverJob?.cancel()
+        downloadWatchdogJob?.cancel()
         conversionProgressJob?.cancel()
+        loadDocumentJob?.cancel()
         textExtractionJob?.cancel()
         textService.close()
         val doc = _uiState.value.document

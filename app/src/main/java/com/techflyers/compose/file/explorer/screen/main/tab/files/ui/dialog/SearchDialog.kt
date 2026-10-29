@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -133,10 +134,17 @@ fun SearchDialog(
         val context = LocalContext.current
         val useDarkIcons = !isSystemInDarkTheme()
         var showAdvancedOptions by remember { mutableStateOf(false) }
+        val prefs = globalClass.preferencesManager
+        val filterAtBottom = prefs.filterBarAtBottom
 
         // Auto-trigger search on type or filter change with debounce
-        LaunchedEffect(searchManager.searchQuery, searchManager.searchOptions.selectedFormats) {
-            val hasFormats = searchManager.searchOptions.selectedFormats.isNotEmpty()
+        LaunchedEffect(
+            searchManager.searchQuery,
+            searchManager.searchOptions.selectedFormats,
+            searchManager.searchOptions.selectedFilterIds,
+            prefs.filterConfigVersion
+        ) {
+            val hasFormats = searchManager.searchOptions.hasActiveFilters()
             val hasQuery = searchManager.searchQuery.length >= 2
             if ((hasQuery || hasFormats) && !searchManager.isAiMode) {
                 if (searchManager.isSearching) {
@@ -185,22 +193,23 @@ fun SearchDialog(
                     onAiToggle = { searchManager.toggleAiMode(tab) }
                 )
 
-                // Format Tag Filters
-                SearchFilterTagsRow(
-                    selectedFormats = searchManager.searchOptions.selectedFormats,
-                    onFilterToggled = { filter ->
-                        val current = searchManager.searchOptions.selectedFormats
-                        val newFormats = if (current.contains(filter)) {
-                            current - filter
-                        } else {
-                            current + filter
+                // Format Tag Filters (Top position)
+                if (!filterAtBottom) {
+                    SearchFilterTagsRow(
+                        selectedFilterIds = searchManager.searchOptions.selectedFilterIds,
+                        onFilterIdToggled = { filterId ->
+                            val current = searchManager.searchOptions.selectedFilterIds
+                            val next = if (current.contains(filterId)) current - filterId else current + filterId
+                            searchManager.searchOptions = searchManager.searchOptions.copy(selectedFilterIds = next)
+                        },
+                        onClearAll = {
+                            searchManager.searchOptions = searchManager.searchOptions.copy(
+                                selectedFormats = emptySet(),
+                                selectedFilterIds = emptySet()
+                            )
                         }
-                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = newFormats)
-                    },
-                    onClearAll = {
-                        searchManager.searchOptions = searchManager.searchOptions.copy(selectedFormats = emptySet())
-                    }
-                )
+                    )
+                }
 
                 // Advanced Options
                 AnimatedVisibility(
@@ -224,24 +233,46 @@ fun SearchDialog(
                 }
 
                 // Results Section
-                SearchResultsSection(
-                    searchManager = searchManager,
-                    tab = tab,
-                    context = context,
-                    onExpandClick = { selectedHolders ->
-                        val expandedTab = FilesTab(VirtualFileHolder(SEARCH))
-                        if (selectedHolders.isNotEmpty()) {
-                            selectedHolders.forEach { holder ->
-                                expandedTab.selectedFiles[holder.uniquePath] = holder
+                Box(modifier = Modifier.weight(1f)) {
+                    SearchResultsSection(
+                        searchManager = searchManager,
+                        tab = tab,
+                        context = context,
+                        onExpandClick = { selectedHolders ->
+                            val expandedTab = FilesTab(VirtualFileHolder(SEARCH))
+                            if (selectedHolders.isNotEmpty()) {
+                                selectedHolders.forEach { holder ->
+                                    expandedTab.selectedFiles[holder.uniquePath] = holder
+                                }
+                                expandedTab.selectedFilesCount = expandedTab.selectedFiles.size
+                                expandedTab.updateSelectedFilesSize()
                             }
-                            expandedTab.selectedFilesCount = expandedTab.selectedFiles.size
-                            expandedTab.updateSelectedFilesSize()
-                        }
-                        globalClass.mainActivityManager.addTabAndSelect(expandedTab)
-                        onDismissRequest()
-                    },
-                    onDismissRequest = onDismissRequest
-                )
+                            globalClass.mainActivityManager.addTabAndSelect(expandedTab)
+                            onDismissRequest()
+                        },
+                        onDismissRequest = onDismissRequest
+                    )
+                }
+
+                // Format Tag Filters (Bottom position)
+                if (filterAtBottom) {
+                    HorizontalDivider(thickness = 0.5.dp)
+                    SearchFilterTagsRow(
+                        selectedFilterIds = searchManager.searchOptions.selectedFilterIds,
+                        onFilterIdToggled = { filterId ->
+                            val current = searchManager.searchOptions.selectedFilterIds
+                            val next = if (current.contains(filterId)) current - filterId else current + filterId
+                            searchManager.searchOptions = searchManager.searchOptions.copy(selectedFilterIds = next)
+                        },
+                        onClearAll = {
+                            searchManager.searchOptions = searchManager.searchOptions.copy(
+                                selectedFormats = emptySet(),
+                                selectedFilterIds = emptySet()
+                            )
+                        },
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
 
             // AI Model Choice and Download Dialogs
@@ -329,7 +360,23 @@ private fun SearchHeader(
                     }
                 },
                 trailingIcon = {
-                    Row {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (searchManager.searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    searchManager.searchQuery = ""
+                                    searchManager.stopSearch()
+                                    if (!searchManager.searchOptions.hasActiveFilters()) {
+                                        searchManager.clearResults()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Clear search query"
+                                )
+                            }
+                        }
                         if (searchManager.isSearching) {
                             IconButton(
                                 onClick = {
@@ -869,17 +916,19 @@ private fun SearchResultsSection(
                                     .firstOrNull { it.copyHereTargetFolder != null }
                                     ?.copyHereTargetFolder
                             if (copyHereTarget != null) {
-                                globalClass.taskManager.addTaskAndRun(
-                                    CopyTask(items, deleteSourceFiles = false),
-                                    CopyTaskParameters(copyHereTarget)
+                                tab.requestCopyHereTransfer(
+                                    items = items,
+                                    targetFolder = copyHereTarget,
+                                    deleteSourceFiles = false,
+                                    onConfirmed = { selectedSearchFiles.clear() }
                                 )
                             } else {
                                 globalClass.taskManager.addTask(
                                     CopyTask(items, deleteSourceFiles = false)
                                 )
                                 showMsg("Copied ${items.size} item(s) to task clipboard")
+                                selectedSearchFiles.clear()
                             }
-                            selectedSearchFiles.clear()
                         }
                     ) {
                         Icon(
@@ -897,17 +946,19 @@ private fun SearchResultsSection(
                                     .firstOrNull { it.copyHereTargetFolder != null }
                                     ?.copyHereTargetFolder
                             if (copyHereTarget != null) {
-                                globalClass.taskManager.addTaskAndRun(
-                                    CopyTask(items, deleteSourceFiles = true),
-                                    CopyTaskParameters(copyHereTarget)
+                                tab.requestCopyHereTransfer(
+                                    items = items,
+                                    targetFolder = copyHereTarget,
+                                    deleteSourceFiles = true,
+                                    onConfirmed = { selectedSearchFiles.clear() }
                                 )
                             } else {
                                 globalClass.taskManager.addTask(
                                     CopyTask(items, deleteSourceFiles = true)
                                 )
                                 showMsg("Cut ${items.size} item(s) to task clipboard")
+                                selectedSearchFiles.clear()
                             }
-                            selectedSearchFiles.clear()
                         }
                     ) {
                         Icon(
@@ -1084,77 +1135,57 @@ private fun SearchResultItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchFilterTagsRow(
-    selectedFormats: Set<SearchFileFilter>,
-    onFilterToggled: (SearchFileFilter) -> Unit,
+    selectedFilterIds: Set<String>,
+    onFilterIdToggled: (String) -> Unit,
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val prefs = globalClass.preferencesManager
+    var showCustomizeDialog by remember { mutableStateOf(false) }
+    val configuredFilters = remember(prefs.searchFiltersConfigJson, prefs.filterConfigVersion) {
+        com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FilterConfigManager.getSearchFilters().filter { it.isEnabled }
+    }
+
+    if (showCustomizeDialog) {
+        FilterCustomizationDialog(
+            initialScope = com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FilterScope.SEARCH,
+            onDismiss = { showCustomizeDialog = false }
+        )
+    }
+
     LazyRow(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 6.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(bottom = 4.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // "All" chip
         item(key = "all") {
-            val isAllSelected = selectedFormats.isEmpty()
-            FilterChip(
+            val isAllSelected = selectedFilterIds.isEmpty()
+            com.techflyers.compose.file.explorer.screen.main.tab.files.misc.CompactFilterChip(
+                label = stringResource(R.string.all),
                 selected = isAllSelected,
                 onClick = onClearAll,
-                label = {
-                    Text(
-                        text = stringResource(R.string.all),
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                },
-                leadingIcon = if (isAllSelected) {
-                    {
-                        Icon(
-                            imageVector = Icons.Rounded.Done,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                } else null,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                shape = RoundedCornerShape(8.dp)
+                onLongClick = { showCustomizeDialog = true }
             )
         }
 
-        // Format tag chips
-        items(SearchFileFilter.entries.toTypedArray(), key = { it.name }) { filter ->
-            val isSelected = selectedFormats.contains(filter)
-            FilterChip(
+        items(configuredFilters, key = { it.id }) { filterItem ->
+            val isSelected = selectedFilterIds.contains(filterItem.id)
+            com.techflyers.compose.file.explorer.screen.main.tab.files.misc.CompactFilterChip(
+                label = filterItem.name,
                 selected = isSelected,
-                onClick = { onFilterToggled(filter) },
-                label = {
-                    Text(
-                        text = stringResource(filter.labelRes),
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (isSelected) Icons.Rounded.Done else filter.icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                shape = RoundedCornerShape(8.dp)
+                onClick = { onFilterIdToggled(filterItem.id) },
+                onLongClick = { showCustomizeDialog = true }
+            )
+        }
+
+        item(key = "customize_search_filters") {
+            com.techflyers.compose.file.explorer.screen.main.tab.files.misc.CompactFilterCustomizeButton(
+                onClick = { showCustomizeDialog = true }
             )
         }
     }

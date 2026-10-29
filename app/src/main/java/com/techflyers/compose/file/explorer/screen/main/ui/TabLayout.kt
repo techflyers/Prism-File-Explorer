@@ -27,8 +27,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoveToInbox
 import androidx.compose.material.icons.rounded.PushPin
@@ -58,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,7 +77,6 @@ import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.apps.AppsTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
-import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.home.HomeTab
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -110,11 +108,13 @@ fun TabLayout(
     var from by remember { mutableIntStateOf(-1) }
     var to by remember { mutableIntStateOf(-1) }
     var draggedItem by remember { mutableIntStateOf(-1) }
+    var isDraggingAnyTab by remember { mutableStateOf(false) }
+    var lastDragFinishedTime by remember { mutableLongStateOf(0L) }
     val list = remember { mutableStateListOf<Int>() }
     var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
 
     val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
-        if (draggedItem > -1) {
+        if (draggedItem > -1 || isDraggingAnyTab) {
             if (from < 0) from = old.index
             to = new.index
 
@@ -122,29 +122,31 @@ fun TabLayout(
         }
     }
 
-    LaunchedEffect(draggedItem) {
-        if (draggedItem < 0 && from > -1 && to > -1) {
+    LaunchedEffect(draggedItem, isDraggingAnyTab) {
+        if (draggedItem < 0 && !isDraggingAnyTab && from > -1 && to > -1) {
+            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
             onReorder(from, to)
             from = -1
             to = -1
         }
     }
 
-    LaunchedEffect(tabs) {
+    // Keep `list` synchronously in sync with `tabs` by `slotId` when not dragging so in-place
+    // tab replacements never render a 0-width missing frame or shift edge tabs off-screen.
+    if (!isDraggingAnyTab && draggedItem < 0) {
         if (list.size == tabs.size) {
             tabs.forEachIndexed { idx, tab ->
-                if (list[idx] != tab.id) {
-                    list[idx] = tab.id
+                if (list[idx] != tab.slotId) {
+                    list[idx] = tab.slotId
                 }
             }
         } else {
             list.clear()
-            list.addAll(tabs.map { it.id })
+            list.addAll(tabs.map { it.slotId })
         }
     }
 
-    val activeTab = tabs.getOrNull(selectedTabIndex)
-    val showRibbonToggle = activeTab is FilesTab && activeTab.activeFolder !is VirtualFileHolder
+    val plusOnLeft = prefs.tabBarPlusButtonOnLeft
 
     Row(
         Modifier
@@ -153,11 +155,11 @@ fun TabLayout(
             .background(color = MaterialTheme.colorScheme.surfaceContainer),
         verticalAlignment = if (isAtBottom) Alignment.Top else Alignment.Bottom
     ) {
-        if (!hideToolbar) {
+        if (plusOnLeft) {
             IconButton(
                 onClick = onAddNewTab
             ) {
-                Icon(imageVector = Icons.Rounded.Add, contentDescription = null)
+                Icon(imageVector = Icons.Rounded.Add, contentDescription = "Add Tab")
             }
         }
         LazyRow(
@@ -165,24 +167,38 @@ fun TabLayout(
                 .weight(1f)
                 .heightIn(max = 42.dp),
             state = tabLayoutState,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = if (hideToolbar) 8.dp else 0.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = if (plusOnLeft) 0.dp else 8.dp,
+                end = if (plusOnLeft) 8.dp else 0.dp
+            ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(list, key = { _, item -> item }) { index, id ->
-                tabs.find { it.id == id }?.let { tab ->
-                    ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
-                        if (isDragged && draggedItem isNot id) {
-                            draggedItem = id
-                        } else if (!isDragged && draggedItem == id) {
+            itemsIndexed(list, key = { _, item -> item }) { index, slotId ->
+                tabs.find { it.slotId == slotId }?.let { tab ->
+                    ReorderableItem(reorderableLazyListState, key = tab.slotId) { isDragged ->
+                        if (isDragged && draggedItem isNot slotId) {
+                            draggedItem = slotId
+                            isDraggingAnyTab = true
+                        } else if (!isDragged && draggedItem == slotId) {
                             draggedItem = -1
+                            isDraggingAnyTab = false
+                            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                         }
 
                         val isSelected = selectedTabIndex == index
                         val isCopyHereDestination = (tab as? FilesTab)?.copyHereTargetFolder != null
+                        val isDragHovered = mainActivityManager.activeDragSourceTab != null &&
+                                mainActivityManager.hoveredTabDropIndex == index
+
+                        androidx.compose.runtime.DisposableEffect(index, tab.id) {
+                            onDispose {
+                                mainActivityManager.unregisterTabDropTarget(index)
+                            }
+                        }
 
                         val backgroundColorAnim = animateColorAsState(
                             targetValue =
-                                if (isDragged) {
+                                if (isDragged || isDragHovered) {
                                     draggedTabBackgroundColor
                                 } else if (isCopyHereDestination) {
                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isSelected) 0.9f else 0.55f)
@@ -195,7 +211,7 @@ fun TabLayout(
 
                         val textColorAnim = animateColorAsState(
                             targetValue =
-                                if (isDragged) {
+                                if (isDragged || isDragHovered) {
                                     draggedTabTextColor
                                 } else if (isCopyHereDestination) {
                                     MaterialTheme.colorScheme.onPrimaryContainer
@@ -205,14 +221,17 @@ fun TabLayout(
                         )
 
                         val alphaAnim = animateFloatAsState(
-                            targetValue = if ((isSelected || isCopyHereDestination) && draggedItem == -1) 1f else 0.5f
+                            targetValue = if ((isSelected || isCopyHereDestination || isDragHovered) && draggedItem == -1) 1f else 0.5f
                         )
 
                         var showTabHeaderMenu by remember(tab.id) {
                             mutableStateOf(false)
                         }
-                        var lastClickTime by remember(tab.id) {
-                            mutableLongStateOf(0L)
+
+                        LaunchedEffect(isDragged, isDraggingAnyTab, draggedItem) {
+                            if (isDragged || isDraggingAnyTab || draggedItem != -1) {
+                                showTabHeaderMenu = false
+                            }
                         }
 
                         Row(
@@ -220,6 +239,9 @@ fun TabLayout(
                                 .defaultMinSize(minWidth = 100.dp)
                                 .fillMaxHeight()
                                 .padding(end = 4.dp)
+                                .onGloballyPositioned { coords ->
+                                    mainActivityManager.registerTabDropTarget(index, coords)
+                                }
                                 .background(
                                     color = backgroundColorAnim.value,
                                     shape = tabShape
@@ -230,31 +252,47 @@ fun TabLayout(
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
                                         val currentTime = android.os.SystemClock.uptimeMillis()
-                                        if (currentTime - lastClickTime < 300L) {
-                                            lastClickTime = 0L
+                                        if (isDragged || isDraggingAnyTab || draggedItem != -1 ||
+                                            (currentTime - lastDragFinishedTime) < 400L
+                                        ) {
                                             showTabHeaderMenu = false
-                                            if (!tab.isPinned) {
-                                                if (tabs.size > 1) {
-                                                    mainActivityManager.removeTabAt(index)
-                                                } else if (tab !is HomeTab) {
-                                                    mainActivityManager.replaceCurrentTabWith(HomeTab())
-                                                }
-                                            }
+                                            return@combinedClickable
+                                        }
+                                        if (!isSelected) {
+                                            mainActivityManager.selectTabAt(index)
                                         } else {
-                                            lastClickTime = currentTime
-                                            if (!isSelected) {
-                                                mainActivityManager.selectTabAt(index)
-                                            } else {
-                                                showTabHeaderMenu = true
-                                            }
+                                            showTabHeaderMenu = true
                                         }
                                     },
                                     onLongClick = {
-                                        showTabHeaderMenu = true
+                                        if (!isDragged && !isDraggingAnyTab && draggedItem == -1) {
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index, true)
+                                            }
+                                            showTabHeaderMenu = true
+                                        }
                                     }
                                 )
                                 .padding(horizontal = 16.dp)
-                                .longPressDraggableHandle()
+                                .longPressDraggableHandle(
+                                    onDragStarted = {
+                                        isDraggingAnyTab = true
+                                        showTabHeaderMenu = false
+                                    },
+                                    onDragStopped = {
+                                        val didReorder = from > -1 && to > -1 && from != to
+                                        isDraggingAnyTab = false
+                                        lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
+                                        if (!didReorder) {
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index, true)
+                                            }
+                                            showTabHeaderMenu = true
+                                        } else {
+                                            showTabHeaderMenu = false
+                                        }
+                                    }
+                                )
                                 .then(
                                     if (!globalClass.preferencesManager.disableNavigationGestures && !tab.isPinned) {
                                         Modifier.detectVerticalSwipe(
@@ -300,7 +338,7 @@ fun TabLayout(
                                 fontWeight = if (isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
                                 color = textColorAnim.value
                             )
-                            if (showTabHeaderMenu) {
+                            if (showTabHeaderMenu && !isDragged && !isDraggingAnyTab && draggedItem == -1) {
                                 OptionsMenu(
                                     tab = tab,
                                     index = index,
@@ -313,34 +351,15 @@ fun TabLayout(
                 }
             }
         }
-        if (showRibbonToggle) {
-            IconButton(
-                onClick = {
-                    prefs.showDirectoryTypeFilterRibbon = !prefs.showDirectoryTypeFilterRibbon
-                }
-            ) {
-                Icon(
-                    imageVector = if (prefs.showDirectoryTypeFilterRibbon) {
-                        Icons.Rounded.FilterList
-                    } else {
-                        Icons.Rounded.FilterListOff
-                    },
-                    contentDescription = stringResource(R.string.show_directory_type_filter_ribbon),
-                    tint = if (prefs.showDirectoryTypeFilterRibbon) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                )
-            }
-        }
         if (globalClass.preferencesManager.hideToolbar) {
+            MoreOptionsButton()
+        }
+        if (!plusOnLeft) {
             IconButton(
                 onClick = onAddNewTab
             ) {
-                Icon(imageVector = Icons.Rounded.Add, contentDescription = null)
+                Icon(imageVector = Icons.Rounded.Add, contentDescription = "Add Tab")
             }
-            MoreOptionsButton()
         }
     }
 
@@ -494,7 +513,7 @@ fun OptionsMenu(
             }
         }
 
-        if (!tab.isPinned && globalClass.mainActivityManager.state.value.tabs.size > 1) {
+        if (!tab.isPinned && (globalClass.mainActivityManager.state.value.tabs.size > 1 || tab !is HomeTab)) {
             DropdownMenuItem(
                 text = { Text(text = stringResource(R.string.close)) },
                 onClick = {
@@ -562,6 +581,7 @@ fun OptionsMenu(
             DropdownMenuItem(
                 text = { Text(text = stringResource(R.string.home_tab_title)) },
                 onClick = {
+                    globalClass.mainActivityManager.recordClosedTab(tab, index)
                     globalClass.mainActivityManager.replaceCurrentTabWith(HomeTab())
                     onDismiss()
                 }

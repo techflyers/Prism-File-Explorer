@@ -64,16 +64,23 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material.icons.rounded.SubtitlesOff
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialTheme.colorScheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -104,13 +111,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.util.TypedValue
 import androidx.media3.ui.PlayerView
 import androidx.media3.common.Player
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.toFormattedTime
+import com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.ui.FileSelectionDialog
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance
+import com.techflyers.compose.file.explorer.screen.viewer.video.model.SubtitleItem
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.VideoPlayerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -211,8 +221,10 @@ fun VideoPlayerScreen(
     var gestureBrightnessIsAutomatic by remember { mutableStateOf(false) }
     var gestureReachedAutomaticDuringGesture by remember { mutableStateOf(false) }
 
-    // Playlist bottom sheet visibility
+    // Playlist & subtitle bottom sheet visibility
     var showPlaylist by remember { mutableStateOf(false) }
+    var showSubtitleSheet by remember { mutableStateOf(false) }
+    var showSubtitleFilePicker by remember { mutableStateOf(false) }
     var showMetadataSheet by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -287,14 +299,18 @@ fun VideoPlayerScreen(
                     playerHeight = coordinates.size.height
                 }
         ) {
-            // Video Player View with pinch-to-zoom
+            // Video Player View with pinch-to-zoom and subtitle sizing
             if (playerState.isReady) {
                 AndroidView(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
                             player = videoPlayerInstance.getPlayer()
                             useController = false
+                            subtitleView?.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, playerState.subtitleTextSizeSp)
                         }
+                    },
+                    update = { view ->
+                        view.subtitleView?.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, playerState.subtitleTextSizeSp)
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -467,6 +483,10 @@ fun VideoPlayerScreen(
                         showPlaylist = true
                         interactionCount++
                     },
+                    onSubtitleClick = {
+                        showSubtitleSheet = true
+                        interactionCount++
+                    },
                     onPlayNext = {
                         videoPlayerInstance.playNext()
                         interactionCount++
@@ -602,6 +622,51 @@ fun VideoPlayerScreen(
                         showPlaylist = false
                     },
                     onDismiss = { showPlaylist = false }
+                )
+            }
+
+            // Subtitle selector & settings bottom sheet
+            if (showSubtitleSheet && !playerState.isInPictureInPicture) {
+                VideoSubtitleSheet(
+                    state = playerState,
+                    onToggleSubtitles = { enabled ->
+                        videoPlayerInstance.toggleSubtitles(enabled)
+                    },
+                    onSelectSubtitle = { item ->
+                        videoPlayerInstance.selectSubtitle(context, item)
+                        showSubtitleSheet = false
+                    },
+                    onBrowseExternalSubtitle = {
+                        showSubtitleSheet = false
+                        showSubtitleFilePicker = true
+                    },
+                    onChangeTextSize = { sizeSp ->
+                        videoPlayerInstance.setSubtitleTextSize(sizeSp)
+                    },
+                    onDismiss = { showSubtitleSheet = false }
+                )
+            }
+
+            if (showSubtitleFilePicker && !playerState.isInPictureInPicture) {
+                val currentVideoUri = playerState.playlist
+                    .getOrNull(playerState.currentPlaylistIndex) ?: videoUri
+                val currentVideoDir = remember(currentVideoUri) {
+                    val path = VideoPlayerActivity.resolveFilePath(context, currentVideoUri) ?: currentVideoUri.path
+                    path?.let { File(it).parentFile }
+                }
+                FileSelectionDialog(
+                    show = showSubtitleFilePicker,
+                    title = "Select Subtitle (.srt, .vtt, .ass, .ttml)",
+                    initialDirectory = currentVideoDir,
+                    allowedExtensions = VideoPlayerInstance.SUBTITLE_EXTENSIONS,
+                    onDismissRequest = { showSubtitleFilePicker = false },
+                    onItemsSelected = { files ->
+                        showSubtitleFilePicker = false
+                        val chosen = files.firstOrNull()
+                        if (chosen != null && chosen.isFile) {
+                            videoPlayerInstance.addAndSelectExternalSubtitle(context, chosen)
+                        }
+                    }
                 )
             }
 
@@ -749,6 +814,7 @@ fun VideoControls(
     onRotateScreen: () -> Unit,
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
+    onSubtitleClick: () -> Unit = {},
     onPlayNext: () -> Unit,
     onPlayPrevious: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
@@ -795,6 +861,7 @@ fun VideoControls(
                 onRotateScreen = onRotateScreen,
                 onEnterPiP = onEnterPiP,
                 onPlaylistClick = onPlaylistClick,
+                onSubtitleClick = onSubtitleClick,
                 onOpenWith = onOpenWith,
                 onInfoClick = onInfoClick,
                 onDelete = onDelete,
@@ -881,6 +948,7 @@ fun TopBar(
     onRotateScreen: () -> Unit,
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
+    onSubtitleClick: () -> Unit = {},
     onOpenWith: (() -> Unit)? = null,
     onInfoClick: () -> Unit = {},
     onDelete: () -> Unit,
@@ -950,6 +1018,19 @@ fun TopBar(
                     fontWeight = FontWeight.Bold,
                     color = if (playerState.playbackSpeed != 1.0f) colorScheme.primary else Color.White,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+
+            // Subtitles (CC) selector & settings
+            IconButton(onClick = {
+                onSubtitleClick()
+                onUserInteraction()
+            }) {
+                val hasActiveSub = playerState.subtitlesEnabled && playerState.selectedSubtitleUri != null
+                Icon(
+                    imageVector = if (playerState.subtitlesEnabled) Icons.Rounded.Subtitles else Icons.Rounded.SubtitlesOff,
+                    contentDescription = "Subtitles",
+                    tint = if (hasActiveSub) colorScheme.primary else Color.White
                 )
             }
 
@@ -1378,6 +1459,228 @@ fun VideoPlaylistSheet(
                             color = colorScheme.onSurface.copy(alpha = 0.05f),
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VideoSubtitleSheet(
+    state: VideoPlayerState,
+    onToggleSubtitles: (Boolean) -> Unit,
+    onSelectSubtitle: (SubtitleItem?) -> Unit,
+    onBrowseExternalSubtitle: () -> Unit,
+    onChangeTextSize: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val textSizes = listOf(
+        "Small" to 16f,
+        "Normal" to 20f,
+        "Large" to 24f,
+        "Extra Large" to 30f
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 20.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Subtitles,
+                        contentDescription = null,
+                        tint = colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Subtitles & Captions",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (state.availableSubtitles.isEmpty())
+                                "No subtitle files found in current folder"
+                            else
+                                "${state.availableSubtitles.size} subtitle file(s) in current folder",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = state.subtitlesEnabled,
+                        onCheckedChange = onToggleSubtitles
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close"
+                        )
+                    }
+                }
+            }
+
+            androidx.compose.material3.HorizontalDivider(
+                color = colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+
+            // Subtitle Text Size Selector
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    text = "Subtitle Text Size",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    textSizes.forEach { (label, sizeSp) ->
+                        FilterChip(
+                            selected = state.subtitleTextSizeSp == sizeSp,
+                            onClick = { onChangeTextSize(sizeSp) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+            }
+
+            // Browse External Subtitle File Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onBrowseExternalSubtitle,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Select Subtitle File from Storage (.srt, .vtt, .ass)")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                item {
+                    val isOff = !state.subtitlesEnabled || state.selectedSubtitleUri == null
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectSubtitle(null) }
+                            .background(
+                                if (isOff) colorScheme.primary.copy(alpha = 0.12f)
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SubtitlesOff,
+                            contentDescription = null,
+                            tint = if (isOff) colorScheme.primary else colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Off (Disable Subtitles)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isOff) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isOff) colorScheme.primary else colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isOff) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                itemsIndexed(state.availableSubtitles) { _, subItem ->
+                    val isSelected = state.subtitlesEnabled && state.selectedSubtitleUri == subItem.uri
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectSubtitle(subItem) }
+                            .background(
+                                if (isSelected) colorScheme.primary.copy(alpha = 0.15f)
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Subtitles,
+                            contentDescription = null,
+                            tint = if (isSelected) colorScheme.primary else colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = subItem.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) colorScheme.primary else colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (subItem.isAutoMatched) {
+                                Text(
+                                    text = "Auto-matched with video filename",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colorScheme.primary
+                                )
+                            }
+                        }
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

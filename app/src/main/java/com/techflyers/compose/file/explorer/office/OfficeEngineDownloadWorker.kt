@@ -92,38 +92,47 @@ class OfficeEngineDownloadWorker(context: Context, params: WorkerParameters) : C
             if (!append) {
                 have = 0
                 digest.reset()
+                if (part.exists()) part.delete()
             }
 
             val total = bundle.sizeBytes
             var lastUpdate = 0L
-            conn.inputStream.use { input ->
-                FileOutputStream(part, append).use { out ->
-                    val buf = ByteArray(BUFFER)
-                    while (coroutineContext.isActive) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        digest.update(buf, 0, n)
-                        have += n
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdate > 300) {
-                            lastUpdate = now
-                            setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD, KEY_DONE to have, KEY_TOTAL to total))
-                            safeSetForeground(foregroundInfo(have, total, indeterminate = false, installing = false))
+            try {
+                conn.inputStream.use { input ->
+                    FileOutputStream(part, append).use { out ->
+                        val buf = ByteArray(BUFFER)
+                        while (coroutineContext.isActive) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            digest.update(buf, 0, n)
+                            have += n
+                            val now = System.currentTimeMillis()
+                            if (now - lastUpdate > 300) {
+                                lastUpdate = now
+                                setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD, KEY_DONE to have, KEY_TOTAL to total))
+                                safeSetForeground(foregroundInfo(have, total, indeterminate = false, installing = false))
+                            }
                         }
                     }
                 }
+            } finally {
+                runCatching { conn.disconnect() }
             }
             coroutineContext.ensureActive()
         }
 
-        check(have == bundle.sizeBytes) { "Download incomplete: expected ${bundle.sizeBytes}, got $have" }
-        val sha = digest.digest().joinToString("") { "%02x".format(it) }
-        check(sha.equals(bundle.sha256, ignoreCase = true)) {
+        if (have != bundle.sizeBytes) {
             part.delete()
-            "SHA-256 mismatch (expected ${bundle.sha256}, got $sha)"
+            throw IOException("Download incomplete: expected ${bundle.sizeBytes} bytes, got $have bytes")
+        }
+        val sha = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!sha.equals(bundle.sha256, ignoreCase = true)) {
+            part.delete()
+            throw IOException("SHA-256 verification failed; partial download cleared")
         }
         val complete = File(dir, "${bundle.sha256}.tar.xz")
+        if (complete.exists()) complete.delete()
         if (!part.renameTo(complete)) throw IOException("Cannot finalize archive")
         return complete
     }

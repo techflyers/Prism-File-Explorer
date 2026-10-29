@@ -229,6 +229,7 @@ fun RenameDialog(
                                     },
                                 value = nameInput,
                                 onValueChange = {
+                                    val hasNewline = it.text.contains('\n') || it.text.contains('\r')
                                     val sanitized = it.text.replace("\n", "").replace("\r", "")
                                     nameInput = if (sanitized != it.text) {
                                         it.copy(
@@ -241,11 +242,14 @@ fun RenameDialog(
                                     } else {
                                         it
                                     }
+                                    if (hasNewline) {
+                                        executeRename()
+                                    }
                                 },
                                 label = { Text(text = stringResource(R.string.name)) },
                                 singleLine = false,
-                                minLines = 3,
-                                maxLines = 6,
+                                minLines = 1,
+                                maxLines = 5,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(
                                     onDone = { executeRename() },
@@ -275,12 +279,17 @@ fun RenameDialog(
                                         .autoShowKeyboard()
                                         .onPreviewKeyEvent { keyEvent ->
                                             if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
-                                                moveToExtension()
+                                                if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                    moveToExtension()
+                                                } else {
+                                                    executeRename()
+                                                }
                                                 true
                                             } else false
                                         },
                                     value = nameInput,
                                     onValueChange = {
+                                        val hasNewline = it.text.contains('\n') || it.text.contains('\r')
                                         val sanitized = it.text.replace("\n", "").replace("\r", "")
                                         nameInput = if (sanitized != it.text) {
                                             it.copy(
@@ -293,16 +302,43 @@ fun RenameDialog(
                                         } else {
                                             it
                                         }
+                                        if (hasNewline) {
+                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                moveToExtension()
+                                            } else {
+                                                executeRename()
+                                            }
+                                        }
                                     },
                                     label = { Text(text = stringResource(R.string.name)) },
                                     singleLine = false,
-                                    minLines = 3,
-                                    maxLines = 6,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                    minLines = 1,
+                                    maxLines = 5,
+                                    keyboardOptions = KeyboardOptions(
+                                        imeAction = if (globalClass.preferencesManager.disableEnterFocusExtension) ImeAction.Done else ImeAction.Next
+                                    ),
                                     keyboardActions = KeyboardActions(
-                                        onNext = { moveToExtension() },
-                                        onDone = { moveToExtension() },
-                                        onGo = { moveToExtension() }
+                                        onNext = {
+                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                moveToExtension()
+                                            } else {
+                                                executeRename()
+                                            }
+                                        },
+                                        onDone = {
+                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                moveToExtension()
+                                            } else {
+                                                executeRename()
+                                            }
+                                        },
+                                        onGo = {
+                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                moveToExtension()
+                                            } else {
+                                                executeRename()
+                                            }
+                                        }
                                     ),
                                     shape = RoundedCornerShape(6.dp),
                                     colors = TextFieldDefaults.colors(
@@ -325,9 +361,13 @@ fun RenameDialog(
                                         },
                                     value = extensionInput,
                                     onValueChange = {
+                                        val hasNewline = it.text.contains('\n') || it.text.contains('\r')
                                         val clean = it.text.replace(".", "").replace("\n", "").replace("\r", "")
                                         val newSelection = if (clean != it.text) TextRange(clean.length) else it.selection
                                         extensionInput = it.copy(text = clean, selection = newSelection)
+                                        if (hasNewline) {
+                                            executeRename()
+                                        }
                                     },
                                     label = { Text(text = stringResource(R.string.extension)) },
                                     singleLine = true,
@@ -534,9 +574,14 @@ fun AdvanceRenameDialog(
                 TextField(
                     modifier = Modifier.fillMaxWidth(),
                     value = newNameInput,
-                    onValueChange = { newNameInput = it.also { isReady = false } },
+                    onValueChange = {
+                        val sanitized = it.text.replace("\n", "").replace("\r", "")
+                        newNameInput = (if (sanitized != it.text) it.copy(text = sanitized) else it).also { isReady = false }
+                    },
                     label = { Text(text = stringResource(R.string.new_name)) },
-                    singleLine = true,
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 5,
                     shape = RoundedCornerShape(12.dp),
                     trailingIcon = {
                         IconButton(

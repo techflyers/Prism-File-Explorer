@@ -827,19 +827,64 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                                     .autoShowKeyboard()
                                     .onPreviewKeyEvent { keyEvent ->
                                         if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
-                                            moveToExtension()
+                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                                moveToExtension()
+                                            } else {
+                                                executeRename()
+                                            }
                                             true
                                         } else false
                                     },
                                 value = nameInput,
-                                onValueChange = { nameInput = it },
+                                onValueChange = {
+                                    val hasNewline = it.text.contains('\n') || it.text.contains('\r')
+                                    val sanitized = it.text.replace("\n", "").replace("\r", "")
+                                    nameInput = if (sanitized != it.text) {
+                                        it.copy(
+                                            text = sanitized,
+                                            selection = TextRange(
+                                                it.selection.start.coerceIn(0, sanitized.length),
+                                                it.selection.end.coerceIn(0, sanitized.length)
+                                            )
+                                        )
+                                    } else {
+                                        it
+                                    }
+                                    if (hasNewline) {
+                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                            moveToExtension()
+                                        } else {
+                                            executeRename()
+                                        }
+                                    }
+                                },
                                 label = { Text(text = stringResource(R.string.name)) },
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = if (globalClass.preferencesManager.disableEnterFocusExtension) ImeAction.Done else ImeAction.Next
+                                ),
                                 keyboardActions = KeyboardActions(
-                                    onNext = { moveToExtension() },
-                                    onDone = { moveToExtension() },
-                                    onGo = { moveToExtension() }
+                                    onNext = {
+                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                            moveToExtension()
+                                        } else {
+                                            executeRename()
+                                        }
+                                    },
+                                    onDone = {
+                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                            moveToExtension()
+                                        } else {
+                                            executeRename()
+                                        }
+                                    },
+                                    onGo = {
+                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
+                                            moveToExtension()
+                                        } else {
+                                            executeRename()
+                                        }
+                                    }
                                 ),
                                 shape = RoundedCornerShape(6.dp),
                                 colors = TextFieldDefaults.colors(
@@ -862,9 +907,13 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                                     },
                                 value = extensionInput,
                                 onValueChange = {
-                                    val clean = it.text.replace(".", "")
+                                    val hasNewline = it.text.contains('\n') || it.text.contains('\r')
+                                    val clean = it.text.replace(".", "").replace("\n", "").replace("\r", "")
                                     val newSelection = if (clean != it.text) TextRange(clean.length) else it.selection
                                     extensionInput = it.copy(text = clean, selection = newSelection)
+                                    if (hasNewline) {
+                                        executeRename()
+                                    }
                                 },
                                 label = { Text(text = stringResource(R.string.extension)) },
                                 singleLine = true,

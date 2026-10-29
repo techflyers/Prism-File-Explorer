@@ -13,11 +13,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
-import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ArchivePasswordDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ApkPreviewDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ArchivePasswordDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.BookmarksDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.CopyHereConfirmationDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.CreateNewFileDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.DeleteConfirmationDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.DragDropActionDialog
@@ -29,18 +32,25 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.File
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ImportPrefsDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.OpenWithAppListDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.RenameDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SavedDirectoryComparisonDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SearchDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ShareFolderCompressDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskConflictDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskPanel
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.TaskRunningDialog
 
-import com.techflyers.compose.file.explorer.App.Companion.globalClass
-
 @Composable
 fun ColumnScope.FilesTabContentView(tab: FilesTab) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val prefs = globalClass.preferencesManager
+    val filterAtBottom = prefs.filterBarAtBottom
+
+    androidx.compose.runtime.LaunchedEffect(tab.id) {
+        if (!tab.isCreated) {
+            tab.onTabStarted()
+        }
+    }
 
     Dialogs(tab)
     Box(
@@ -52,13 +62,27 @@ fun ColumnScope.FilesTabContentView(tab: FilesTab) {
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // In landscape, breadcrumb is shown inline in the toolbar instead
-            if (!isLandscape && globalClass.preferencesManager.showPathBar) {
+            if (prefs.showPathBar) {
                 BreadcrumbBar(tab)
+            }
+            if (!filterAtBottom) {
+                if (tab.activeFolder is VirtualFileHolder) {
+                    FormatRibbon(tab, compact = isLandscape)
+                } else {
+                    TypeFilterRibbon(tab)
+                }
             }
             InfoRow()
             HorizontalDivider(modifier = Modifier, thickness = 1.dp)
             FilesList(tab)
+            if (filterAtBottom) {
+                HorizontalDivider(modifier = Modifier, thickness = 0.5.dp)
+                if (tab.activeFolder is VirtualFileHolder) {
+                    FormatRibbon(tab, compact = isLandscape)
+                } else {
+                    TypeFilterRibbon(tab)
+                }
+            }
             BottomOptionsBar(tab, forceLandscapeOverride = isLandscape)
         }
         DragDropFloatingPill(tab)
@@ -99,7 +123,6 @@ fun Dialogs(tab: FilesTab) {
         tab = tab,
         onDismissRequest = {
             tab.toggleSortingMenu(false)
-            tab.applySortingChange()
         }
     )
 
@@ -146,6 +169,12 @@ fun Dialogs(tab: FilesTab) {
         show = dialogsState.value.showFileProperties,
         tab = tab,
         onDismissRequest = { tab.toggleFilePropertiesDialog(false) }
+    )
+
+    SavedDirectoryComparisonDialog(
+        show = tab.showSavedComparisonDialog,
+        tab = tab,
+        onDismissRequest = { tab.showSavedComparisonDialog = false }
     )
 
     TaskPanel(
@@ -207,4 +236,6 @@ fun Dialogs(tab: FilesTab) {
     TaskConflictDialog()
 
     DragDropActionDialog(tab = tab)
+
+    CopyHereConfirmationDialog(tab = tab)
 }

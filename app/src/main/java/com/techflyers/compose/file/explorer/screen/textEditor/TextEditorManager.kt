@@ -405,6 +405,11 @@ class TextEditorManager {
             return false
         }
 
+        val isVaultTemp = com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.isVaultTempFile(localFileHolder.file)
+        if (isVaultTemp) {
+            fileInstanceList.removeAll { it.file.uniquePath == localFileHolder.uniquePath }
+            globalClass.preferencesManager.readOnly = false
+        }
         activeFile = getFileInstance(localFileHolder)?.file ?: localFileHolder
 
         val intent = Intent(context, TextEditorActivity::class.java).apply {
@@ -478,8 +483,14 @@ class TextEditorManager {
             }
 
             globalClass.preferencesManager.let {
-                it.readOnly = true
-                editable = false
+                val isVaultTemp = com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.isVaultTempFile(activeFile.file)
+                if (isVaultTemp) {
+                    it.readOnly = false
+                    editable = true
+                } else {
+                    it.readOnly = true
+                    editable = false
+                }
                 setPinLineNumber(it.pinLineNumber)
                 getComponent(Magnifier::class.java).isEnabled = it.enableMagnifier
                 getComponent(EditorAutoCompletion::class.java).apply {

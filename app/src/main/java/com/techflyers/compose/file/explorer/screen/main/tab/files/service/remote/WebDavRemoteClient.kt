@@ -10,17 +10,47 @@ import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.StringReader
 import java.net.URLDecoder
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import javax.xml.parsers.DocumentBuilderFactory
 
 class WebDavRemoteClient(
     private val conn: NetworkConnectionModel
 ) : RemoteClient {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
+    private val client: OkHttpClient by lazy {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(conn.effectiveConnectTimeoutSec.toLong(), TimeUnit.SECONDS)
+            .readTimeout(conn.effectiveReadTimeoutSec.toLong(), TimeUnit.SECONDS)
+            .writeTimeout(conn.effectiveReadTimeoutSec.toLong(), TimeUnit.SECONDS)
+
+        if (conn.effectiveKeepAliveSec > 0) {
+            builder.pingInterval(conn.effectiveKeepAliveSec.toLong(), TimeUnit.SECONDS)
+        }
+
+        if (!conn.effectiveVerifySslCert) {
+            try {
+                val trustAllCerts = arrayOf<TrustManager>(
+                    object : X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                    }
+                )
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, trustAllCerts, SecureRandom())
+                builder.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                builder.hostnameVerifier { _, _ -> true }
+            } catch (_: Exception) {}
+        }
+
+        builder.build()
+    }
 
     private val baseUrl: String
         get() {
@@ -38,8 +68,14 @@ class WebDavRemoteClient(
         }
 
     private fun authHeader(): String? {
-        if (conn.username.isEmpty() && conn.password.isEmpty()) return null
-        return Credentials.basic(conn.username, conn.password)
+        return when (conn.effectiveAuthMethod) {
+            "NONE", "ANONYMOUS" -> null
+            "BEARER" -> if (conn.password.isNotBlank()) "Bearer ${conn.password.trim()}" else null
+            else -> {
+                if (conn.username.isEmpty() && conn.password.isEmpty()) null
+                else Credentials.basic(conn.username, conn.password, java.nio.charset.Charset.forName(conn.effectiveEncoding))
+            }
+        }
     }
 
     private fun getFullUrl(path: String): String {
@@ -71,7 +107,6 @@ class WebDavRemoteClient(
     }
 
     override fun disconnect() {
-        // No-op for HTTP client
     }
 
     override fun listDirectory(path: String): List<RemoteFileItem> {
@@ -153,7 +188,8 @@ class WebDavRemoteClient(
         val localFile = File(localPath)
         if (!localFile.exists()) throw FileNotFoundException("Local file not found")
 
-        val requestBody = localFile.asRequestBody("application/octet-stream".toMediaType())
+        val contentType = if (conn.effectiveTransferMode == "ASCII") "text/plain" else "application/octet-stream"
+        val requestBody = localFile.asRequestBody(contentType.toMediaType())
         val builder = Request.Builder()
             .url(url)
             .put(requestBody)
@@ -259,19 +295,17 @@ class WebDavRemoteClient(
 
             val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
 
-            // The first element is usually the directory itself, we skip it
             var skipFirst = true
 
             for (i in 0 until length) {
                 val element = responses[i]
                 val hrefNode = getElementsByLocalName(element, "href").firstOrNull() ?: continue
                 var href = hrefNode.textContent
-                href = URLDecoder.decode(href, "UTF-8")
+                href = URLDecoder.decode(href, conn.effectiveEncoding)
 
                 if (skipFirst) {
                     skipFirst = false
-                    // Verify if this is indeed the current dir
-                    val decodedPath = URLDecoder.decode(href, "UTF-8").removeSuffix("/")
+                    val decodedPath = URLDecoder.decode(href, conn.effectiveEncoding).removeSuffix("/")
                     val decodedCurrent = currentDir.removeSuffix("/")
                     if (decodedPath.endsWith(decodedCurrent)) {
                         continue

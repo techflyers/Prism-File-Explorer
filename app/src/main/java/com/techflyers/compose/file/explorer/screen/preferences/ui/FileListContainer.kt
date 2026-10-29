@@ -9,21 +9,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.automirrored.rounded.ShortText
-import androidx.compose.material.icons.automirrored.rounded.WrapText
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Badge
-import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.Height
-import androidx.compose.material.icons.rounded.HideSource
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.HorizontalRule
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Numbers
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.ViewStream
+import androidx.compose.material.icons.rounded.SubdirectoryArrowLeft
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.VerticalAlignBottom
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -40,7 +46,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
-import com.techflyers.compose.file.explorer.common.emptyString
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FilterScope
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FilterCustomizationDialog
 import com.techflyers.compose.file.explorer.screen.preferences.constant.FileItemSize
 
 @Composable
@@ -48,6 +55,14 @@ fun FileListContainer() {
     val prefs = globalClass.preferencesManager
 
     var showEndCharsDialog by remember { mutableStateOf(false) }
+    var showFilterCustomizeDialog by remember { mutableStateOf(false) }
+
+    if (showFilterCustomizeDialog) {
+        FilterCustomizationDialog(
+            initialScope = FilterScope.GENERAL,
+            onDismiss = { showFilterCustomizeDialog = false }
+        )
+    }
 
     if (showEndCharsDialog) {
         var portraitInput by remember { mutableStateOf(prefs.filenameEndCharsCount.toString()) }
@@ -113,17 +128,20 @@ fun FileListContainer() {
         )
     }
 
-    Container(title = stringResource(R.string.file_list)) {
+    Container(
+        title = stringResource(R.string.file_list),
+        icon = Icons.AutoMirrored.Rounded.FormatListBulleted
+    ) {
         PreferenceItem(
             label = stringResource(R.string.file_list_size),
-            supportingText = when (prefs.itemSize) {
+            supportingText = "Row density and icon scale: " + when (prefs.itemSize) {
                 FileItemSize.EXTRA_SMALL.ordinal -> stringResource(R.string.extra_small)
                 FileItemSize.SMALL.ordinal -> stringResource(R.string.small)
                 FileItemSize.MEDIUM.ordinal -> stringResource(R.string.medium)
                 FileItemSize.LARGE.ordinal -> stringResource(R.string.large)
                 else -> stringResource(R.string.extra_large)
             },
-            icon = Icons.Rounded.Height,
+            icon = Icons.Rounded.FormatSize,
             onClick = {
                 prefs.singleChoiceDialog.show(
                     title = globalClass.getString(R.string.file_list_size),
@@ -141,62 +159,93 @@ fun FileListContainer() {
             }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_hidden_files),
-            supportingText = emptyString,
-            icon = Icons.Rounded.HideSource,
+            supportingText = "Display files and folders whose names start with a dot (.)",
+            icon = Icons.Rounded.VisibilityOff,
             switchState = prefs.showHiddenFiles,
             onSwitchChange = { prefs.showHiddenFiles = it }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_folder_s_content_count),
-            supportingText = emptyString,
+            supportingText = "Display the number of subfolders and files inside each folder row",
             icon = Icons.Rounded.Numbers,
             switchState = prefs.showFolderContentCount,
             onSwitchChange = { prefs.showFolderContentCount = it }
         )
 
-        if (prefs.disableTabBar) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
-            PreferenceItem(
-                label = stringResource(R.string.show_directory_type_filter_ribbon),
-                supportingText = stringResource(R.string.show_directory_type_filter_ribbon_desc),
-                icon = Icons.Rounded.FilterList,
-                switchState = prefs.showDirectoryTypeFilterRibbon,
-                onSwitchChange = { prefs.showDirectoryTypeFilterRibbon = it }
-            )
-        }
+        PreferenceItem(
+            label = "Show \"..\" parent folder entry",
+            supportingText = "Display a '..' row at the top of directory listings to quickly navigate up one level",
+            icon = Icons.Rounded.SubdirectoryArrowLeft,
+            switchState = prefs.showParentDirectoryEntry,
+            onSwitchChange = { prefs.showParentDirectoryEntry = it }
+        )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.show_directory_type_filter_ribbon),
+            supportingText = stringResource(R.string.show_directory_type_filter_ribbon_desc),
+            icon = Icons.Rounded.FilterList,
+            switchState = prefs.showDirectoryTypeFilterRibbon,
+            onSwitchChange = { prefs.showDirectoryTypeFilterRibbon = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Customize filters & extensions",
+            supportingText = "Add, remove, rearrange, rename, and edit file extensions for general, search, and category filters",
+            icon = Icons.Rounded.FilterAlt,
+            onClick = { showFilterCustomizeDialog = true }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Position filter buttons at bottom",
+            supportingText = if (prefs.filterBarAtBottom) {
+                "Filter chips appear at the bottom of directory, category, and search views"
+            } else {
+                "Filter chips appear at the top of directory, category, and search views"
+            },
+            icon = Icons.Rounded.VerticalAlignBottom,
+            switchState = prefs.filterBarAtBottom,
+            onSwitchChange = { prefs.filterBarAtBottom = it }
+        )
+
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Deep empty folder check",
-            supportingText = "Show an unslashed null icon (○) for folders containing subfolders but no files within",
+            supportingText = "Show an unslashed circle icon (○) when a folder has subfolders but no files inside",
             icon = Icons.Rounded.RadioButtonUnchecked,
             switchState = prefs.deepEmptyFolderCheck,
             onSwitchChange = { prefs.deepEmptyFolderCheck = it }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         PreferenceItem(
-            label = "Hide File Extensions",
-            supportingText = "Show file names without their extension suffix",
-            icon = Icons.Rounded.HideSource,
+            label = "Hide file extensions",
+            supportingText = "Display filenames without their trailing file extension suffix",
+            icon = Icons.Rounded.TextFields,
             switchState = prefs.hideFileExtensions,
             onSwitchChange = { prefs.hideFileExtensions = it }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         val endCharsText = if (prefs.filenameEndCharsCount <= 0) {
-            stringResource(R.string.filename_end_characters_none)
+            stringResource(R.string.filename_end_characters_none) + " — preserve file extension only"
         } else {
             val lv = prefs.filenameEndCharsCountLandscape
             if (lv >= 0 && lv != prefs.filenameEndCharsCount) {
@@ -214,7 +263,7 @@ fun FileListContainer() {
             onClick = { showEndCharsDialog = true }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_source_folder_badges),
@@ -224,16 +273,17 @@ fun FileListContainer() {
             onSwitchChange = { prefs.showSourceBadges = it }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_file_list_divider),
             supportingText = stringResource(R.string.show_file_list_divider_desc),
-            icon = Icons.Rounded.ViewStream,
+            icon = Icons.Rounded.HorizontalRule,
             switchState = prefs.showFileListDivider,
             onSwitchChange = { prefs.showFileListDivider = it }
         )
 
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.file_size_tint),
@@ -243,6 +293,8 @@ fun FileListContainer() {
             onSwitchChange = { prefs.sizeTintEnabled = it }
         )
 
+        PreferenceDivider()
+
         PreferenceItem(
             label = stringResource(R.string.folder_scan_for_tint),
             supportingText = stringResource(R.string.folder_scan_for_tint_desc),
@@ -250,6 +302,8 @@ fun FileListContainer() {
             switchState = prefs.folderScanForTint,
             onSwitchChange = { prefs.folderScanForTint = it }
         )
+
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.deep_scan_categories),
@@ -259,14 +313,34 @@ fun FileListContainer() {
             onSwitchChange = { prefs.deepScanCategories = it }
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerLow, thickness = 3.dp)
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Stabilize directory loading",
+            supportingText = "Pre-resolve item details and load directory batches smoothly to prevent layout shifts",
+            icon = Icons.Rounded.Layers,
+            switchState = prefs.stabilizeDirectoryLoading,
+            onSwitchChange = { prefs.stabilizeDirectoryLoading = it }
+        )
+
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Only refresh sort icon on navigation",
-            supportingText = "Update the sort icon and reuse cached folder listings when navigating back and forth between folders instead of forcing a full folder reload",
-            icon = Icons.Rounded.FilterList,
+            supportingText = "Reuse cached folder listings when navigating back and forth instead of forcing a full reload",
+            icon = Icons.AutoMirrored.Rounded.Sort,
             switchState = prefs.onlyRefreshSortIconOnNavigation,
             onSwitchChange = { prefs.onlyRefreshSortIconOnNavigation = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Disable auto-scroll on bottom selection",
+            supportingText = "Prevent the file list from nudging upward when selecting items near the bottom edge",
+            icon = Icons.Rounded.SwapVert,
+            switchState = prefs.disableAutoScrollOnBottomSelection,
+            onSwitchChange = { prefs.disableAutoScrollOnBottomSelection = it }
         )
     }
 }

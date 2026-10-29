@@ -1,25 +1,27 @@
 package com.techflyers.compose.file.explorer.screen.preferences.ui
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.AltRoute
-import androidx.compose.material.icons.automirrored.rounded.Label
-import androidx.compose.material.icons.rounded.AccessTime
-import androidx.compose.material.icons.rounded.CalendarToday
-import androidx.compose.material.icons.rounded.Bookmark
-import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.Nightlight
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Tab
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.UnfoldLess
-import androidx.compose.material.icons.rounded.VerticalAlignBottom
-import androidx.compose.material.icons.rounded.VerticalAlignTop
-import androidx.compose.material.icons.rounded.ViewHeadline
-import androidx.compose.material.icons.rounded.ViewStream
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Label
+import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BorderBottom
+import androidx.compose.material.icons.rounded.CalendarToday
+import androidx.compose.material.icons.rounded.CallToAction
+import androidx.compose.material.icons.rounded.Dock
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Nightlight
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Tab
+import androidx.compose.material.icons.rounded.TabUnselected
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.UnfoldLess
+import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.rounded.ViewStream
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,7 +36,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
-import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SelectionRibbonSettingsDialog
@@ -45,16 +46,18 @@ import java.util.Locale
 @Composable
 fun AppearanceContainer() {
     val prefs = globalClass.preferencesManager
-    var showDateFormatDialog by remember { mutableStateOf(false) }
     var showSelectionRibbonSettingsDialog by remember { mutableStateOf(false) }
 
-    Container(title = stringResource(R.string.appearance)) {
+    Container(
+        title = stringResource(R.string.appearance),
+        icon = Icons.Rounded.Palette
+    ) {
         PreferenceItem(
             label = stringResource(R.string.theme),
             supportingText = when (prefs.theme) {
-                ThemePreference.LIGHT.ordinal -> stringResource(R.string.light)
-                ThemePreference.DARK.ordinal -> stringResource(R.string.dark)
-                else -> stringResource(R.string.follow_system)
+                ThemePreference.LIGHT.ordinal -> "Light theme (${stringResource(R.string.light)})"
+                ThemePreference.DARK.ordinal -> "Dark theme (${stringResource(R.string.dark)})"
+                else -> "Match system theme (${stringResource(R.string.follow_system)})"
             },
             icon = Icons.Rounded.Nightlight,
             onClick = {
@@ -72,49 +75,67 @@ fun AppearanceContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Show directory path bar",
-            supportingText = "Display breadcrumb path bar above the file list",
+            supportingText = "Display the interactive breadcrumb path bar above the file list",
             icon = Icons.Rounded.FolderOpen,
             switchState = prefs.showPathBar,
             onSwitchChange = { prefs.showPathBar = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Hide Home tab search bar",
-            supportingText = "Hide the search bar on the Home tab (keeps the search icon visible)",
-            icon = Icons.Rounded.Search,
+            supportingText = "Hide the search box on the Home tab while keeping the toolbar search icon visible",
+            icon = Icons.Rounded.SearchOff,
             switchState = prefs.hideHomeSearchBar,
             onSwitchChange = { prefs.hideHomeSearchBar = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
-            label = "Disable Tabs",
-            supportingText = "Disable tab bar in favor of a compact single-row top bar",
-            icon = Icons.Rounded.ViewHeadline,
+            label = "Search external storage on Home screen",
+            supportingText = "Include mounted external storage devices (SD cards, USB drives) when searching from the Home screen",
+            icon = Icons.Rounded.FolderOpen,
+            switchState = prefs.searchExternalStorageFromHome,
+            onSwitchChange = { prefs.searchExternalStorageFromHome = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Disable tab bar (Single-row top bar)",
+            supportingText = "Replace the separate tab bar with a compact dropdown tab switcher in the main toolbar",
+            icon = Icons.Rounded.TabUnselected,
             switchState = prefs.disableTabBar,
             onSwitchChange = { prefs.disableTabBar = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
+        PreferenceDivider()
+
+        val plusPositionChoices = listOf("Right (Default)", "Left")
+        PreferenceItem(
+            label = "Tab bar '+' button position",
+            supportingText = if (prefs.tabBarPlusButtonOnLeft) "Left side of the tab bar" else "Right side of the tab bar",
+            icon = Icons.Rounded.Tab,
+            onClick = {
+                prefs.singleChoiceDialog.show(
+                    title = "Tab bar '+' button position",
+                    description = "Choose whether the '+' (New Tab) button appears on the left or right side of the tab bar",
+                    choices = plusPositionChoices,
+                    selectedChoice = if (prefs.tabBarPlusButtonOnLeft) 1 else 0,
+                    onSelect = { idx ->
+                        prefs.tabBarPlusButtonOnLeft = (idx == 1)
+                    }
+                )
+            }
         )
+
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_tabs_in_drawer),
@@ -124,10 +145,7 @@ fun AppearanceContainer() {
             onSwitchChange = { prefs.showTabsInDrawer = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.show_bookmarks_in_drawer),
@@ -137,10 +155,7 @@ fun AppearanceContainer() {
             onSwitchChange = { prefs.showBookmarksInDrawer = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         val customFormatLabel = stringResource(R.string.custom_format)
         val commonDateFormat = arrayListOf(
@@ -208,7 +223,7 @@ fun AppearanceContainer() {
 
         PreferenceItem(
             label = stringResource(R.string.date_time_format),
-            supportingText = prefs.dateTimeFormat,
+            supportingText = "Format for file modification timestamps (${prefs.dateTimeFormat})",
             icon = Icons.Rounded.CalendarToday,
             onClick = {
                 val selectedIndex = commonDateFormat.indexOf(prefs.dateTimeFormat).let {
@@ -231,135 +246,105 @@ fun AppearanceContainer() {
             }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "12-hour time format",
-            supportingText = if (prefs.use12HourFormat) "Using 12-hour format" else "Using 24-hour format",
+            supportingText = if (prefs.use12HourFormat) "Display timestamps in 12-hour AM/PM format" else "Display timestamps in 24-hour format",
             icon = Icons.Rounded.AccessTime,
             switchState = prefs.use12HourFormat,
             onSwitchChange = { prefs.use12HourFormat = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Hide main toolbar",
-            supportingText = emptyString,
+            supportingText = "Hide the top application bar to maximize screen space for files",
             icon = Icons.Rounded.VerticalAlignTop,
             switchState = prefs.hideToolbar,
             onSwitchChange = { prefs.hideToolbar = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Auto-hide toolbars on scroll (Portrait)",
-            supportingText = "Toolbar and tab bar hide when scrolling down in portrait, reappear on scroll up",
+            supportingText = "Collapse the toolbar and tab bar when scrolling down in portrait mode",
             icon = Icons.Rounded.UnfoldLess,
             switchState = prefs.autoHideToolbars,
             onSwitchChange = { prefs.autoHideToolbars = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = "Auto-hide toolbars on scroll (Landscape)",
-            supportingText = "Toolbar and tab bar hide when scrolling down in landscape, reappear on scroll up",
-            icon = Icons.Rounded.UnfoldLess,
+            supportingText = "Collapse the toolbar and tab bar when scrolling down in landscape mode",
+            icon = Icons.Rounded.ScreenRotation,
             switchState = prefs.autoHideToolbarsLandscape,
             onSwitchChange = { prefs.autoHideToolbarsLandscape = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.move_toolbar_to_bottom),
-            supportingText = emptyString,
-            icon = Icons.Rounded.VerticalAlignBottom,
+            supportingText = "Position the main navigation toolbar at the bottom of the screen for easier one-handed reach",
+            icon = Icons.Rounded.CallToAction,
             switchState = prefs.moveToolbarToBottom,
             onSwitchChange = { prefs.moveToolbarToBottom = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.move_tabs_to_bottom),
-            supportingText = emptyString,
-            icon = Icons.Rounded.VerticalAlignBottom,
+            supportingText = "Position the tab bar at the bottom of the screen above the navigation bar",
+            icon = Icons.Rounded.BorderBottom,
             switchState = prefs.moveTabsToBottom,
             onSwitchChange = { prefs.moveTabsToBottom = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.enable_bottom_toolbar),
             supportingText = stringResource(R.string.enable_bottom_toolbar_desc),
-            icon = Icons.Rounded.VerticalAlignBottom,
+            icon = Icons.Rounded.Dock,
             switchState = prefs.enableBottomToolbar,
             onSwitchChange = { prefs.enableBottomToolbar = it }
         )
 
         if (prefs.enableBottomToolbar) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
+            PreferenceDivider()
 
             PreferenceItem(
                 label = stringResource(R.string.show_bottom_bar_labels),
-                supportingText = emptyString,
+                supportingText = "Display text captions underneath icons in the persistent bottom toolbar",
                 icon = Icons.AutoMirrored.Rounded.Label,
                 switchState = prefs.showBottomBarLabels,
                 onSwitchChange = { prefs.showBottomBarLabels = it }
             )
-
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
         }
 
-        PreferenceItem(
-                label = stringResource(R.string.selection_ribbon_two_rows),
-                supportingText = stringResource(R.string.selection_ribbon_two_rows_desc),
-                icon = Icons.Rounded.ViewStream,
-                switchState = prefs.selectionRibbonTwoRows,
-                onSwitchChange = { prefs.selectionRibbonTwoRows = it }
-        )
-
-        HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
-                label = stringResource(R.string.customize_selection_ribbon),
-                supportingText = stringResource(R.string.customize_selection_ribbon_desc),
-                icon = Icons.Rounded.Tune,
-                onClick = { showSelectionRibbonSettingsDialog = true }
+            label = stringResource(R.string.selection_ribbon_two_rows),
+            supportingText = stringResource(R.string.selection_ribbon_two_rows_desc),
+            icon = Icons.Rounded.ViewStream,
+            switchState = prefs.selectionRibbonTwoRows,
+            onSwitchChange = { prefs.selectionRibbonTwoRows = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.customize_selection_ribbon),
+            supportingText = stringResource(R.string.customize_selection_ribbon_desc),
+            icon = Icons.Rounded.Tune,
+            onClick = { showSelectionRibbonSettingsDialog = true }
         )
         if (showSelectionRibbonSettingsDialog) {
             SelectionRibbonSettingsDialog(onDismiss = { showSelectionRibbonSettingsDialog = false })

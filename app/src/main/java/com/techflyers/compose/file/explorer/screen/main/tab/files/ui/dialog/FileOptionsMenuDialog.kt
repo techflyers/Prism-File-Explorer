@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
@@ -498,14 +499,36 @@ fun FileOptionsMenuDialog(
                         tab.unselectAllFiles()
                     }
 
-                    val isLocked = com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.hasLock(targetContentHolder.uniquePath)
+                    val hasLock = com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.hasLock(targetContentHolder.uniquePath)
+                    val isCurrentlyLocked = com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.isLocked(targetContentHolder.uniquePath)
+                    val isEncrypted = com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.isFolderEncrypted(targetContentHolder.uniquePath)
+                    if (hasLock && !isCurrentlyLocked) {
+                        FileOption(
+                            Icons.Rounded.Lock,
+                            if (isEncrypted) "Re-lock & Encrypt Folder Now" else "Re-lock Folder Now"
+                        ) {
+                            onDismissRequest()
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.relockSession(targetContentHolder.uniquePath)
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    globalClass.showMsg(if (isEncrypted) "Folder re-locked and AES-256 encrypted" else "Folder re-locked")
+                                    tab.reloadFiles()
+                                }
+                            }
+                            tab.unselectAllFiles()
+                        }
+                    }
                     FileOption(
                         Icons.Rounded.Lock,
-                        stringResource(if (isLocked) R.string.remove_folder_lock else R.string.lock_folder)
+                        if (hasLock) {
+                            if (isEncrypted) "${stringResource(R.string.remove_folder_lock)} & Decrypt" else stringResource(R.string.remove_folder_lock)
+                        } else {
+                            "${stringResource(R.string.lock_folder)} / Encrypt"
+                        }
                     ) {
                         onDismissRequest()
                         tab.pendingLockPath = targetContentHolder.uniquePath
-                        tab.pendingLockMode = if (isLocked) {
+                        tab.pendingLockMode = if (hasLock) {
                             com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.REMOVE
                         } else {
                             com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.CREATE

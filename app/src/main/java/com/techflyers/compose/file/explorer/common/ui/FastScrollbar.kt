@@ -27,15 +27,17 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
  * Sora Editor styled scrollbar:
- *  - 10.dp width, min 60.dp thumb length (matching Sora Editor RenderingConstants)
+ *  - 8.dp width, min 56.dp thumb length
  *  - Slide & fade animations on hide/show (translating horizontally off-screen)
- *  - Full-height track background revealed when dragging / pressed
- *  - Immediate hold-and-drag touch interception with direct proportional seeking
+ *  - Non-obstructive touch handling: only intercepts when dragging the visible thumb on the Main pass
+ *    (after child buttons have had a chance to handle taps/long-presses), preventing interference
+ *    with right-aligned action buttons.
  */
 @Composable
 fun Modifier.scrollbar(state: LazyGridState): Modifier {
@@ -146,12 +148,11 @@ private fun Modifier.soraScrollbarImpl(
         }
         visible = true
         if (!isHolding) {
-            delay(1500)
+            delay(1200)
             visible = false
         }
     }
 
-    // Slide and fade animation matching Sora Editor's percentage translation & alpha
     val visibilityProgress by animateFloatAsState(
         targetValue = if ((visible || isHolding) && metrics.canScroll) 1f else 0f,
         animationSpec = tween(200),
@@ -160,16 +161,14 @@ private fun Modifier.soraScrollbarImpl(
 
     var trackHeightPx by remember { mutableFloatStateOf(0f) }
 
-    // Sora Editor color scheme tokens adapted to Compose Material Theme
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     val thumbColorNormal = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     val thumbColorPressed = MaterialTheme.colorScheme.primary
 
-    // Sora Editor RenderingConstants dimensions
-    val scrollbarWidthDp = 10.dp
-    val minThumbLengthDp = 60.dp
+    val scrollbarWidthDp = 8.dp
+    val minThumbLengthDp = 56.dp
     val cornerRadiusDp = 2.dp
-    val hitZoneWidthDp = 32.dp
+    val hitZoneWidthDp = 14.dp
 
     return this
         .onSizeChanged { trackHeightPx = it.height.toFloat() }
@@ -188,7 +187,6 @@ private fun Modifier.soraScrollbarImpl(
             val thumbLeft = size.width - scrollbarWidthPx + slideXPx
             val cornerRadius = CornerRadius(cornerRadiusDp.toPx(), cornerRadiusDp.toPx())
 
-            // Full-height Track (drawn when holding/dragging, matching Sora Editor behavior)
             if (isHolding) {
                 drawRoundRect(
                     color = trackColor.copy(alpha = trackColor.alpha * alpha),
@@ -198,7 +196,6 @@ private fun Modifier.soraScrollbarImpl(
                 )
             }
 
-            // Thumb
             val currentThumbColor = if (isHolding) thumbColorPressed else thumbColorNormal
             drawRoundRect(
                 color = currentThumbColor.copy(alpha = currentThumbColor.alpha * alpha),
@@ -211,34 +208,47 @@ private fun Modifier.soraScrollbarImpl(
             if (!metrics.canScroll) return@pointerInput
             val hitWidthPx = hitZoneWidthDp.toPx()
             val minThumbPx = minThumbLengthDp.toPx()
+            val dragThresholdPx = 6.dp.toPx()
 
             awaitPointerEventScope {
                 while (true) {
-                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    // Use Main pass with requireUnconsumed = true so child IconButtons (e.g. Copy SHA-256, Open in new tab)
+                    // are never blocked or hijacked by the scrollbar.
+                    val down = awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Main)
+                    if (!visible && !isHolding) continue
                     val inHitZone = down.position.x >= size.width - hitWidthPx
                     if (!inHitZone) continue
 
-                    down.consume()
-                    isHolding = true
-                    visible = true
+                    val thumbH = (trackHeightPx * metrics.thumbSizeFraction).coerceAtLeast(minThumbPx)
+                    val usable = (trackHeightPx - thumbH).coerceAtLeast(1f)
+                    val thumbTop = metrics.thumbFraction * usable
+                    val onThumb = down.position.y in (thumbTop - 16f)..(thumbTop + thumbH + 16f)
+                    if (!onThumb) continue
+
+                    var draggingThumb = false
 
                     fun seekToY(y: Float) {
-                        val thumbH = (trackHeightPx * metrics.thumbSizeFraction).coerceAtLeast(minThumbPx)
-                        val usable = (trackHeightPx - thumbH).coerceAtLeast(1f)
-                        val newFraction = ((y - thumbH / 2f) / usable).coerceIn(0f, 1f)
+                        val currentThumbH = (trackHeightPx * metrics.thumbSizeFraction).coerceAtLeast(minThumbPx)
+                        val currentUsable = (trackHeightPx - currentThumbH).coerceAtLeast(1f)
+                        val newFraction = ((y - currentThumbH / 2f) / currentUsable).coerceIn(0f, 1f)
                         coroutineScope.launch { onSeekFraction(newFraction, metrics.maxIndex) }
                     }
 
-                    seekToY(down.position.y)
-
                     while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val event = awaitPointerEvent(PointerEventPass.Main)
                         val anyPressed = event.changes.any { it.pressed }
                         if (!anyPressed) break
 
                         val change = event.changes.firstOrNull { it.pressed } ?: break
-                        change.consume()
-                        seekToY(change.position.y)
+                        if (!draggingThumb && abs(change.position.y - down.position.y) >= dragThresholdPx) {
+                            draggingThumb = true
+                            isHolding = true
+                            visible = true
+                        }
+                        if (draggingThumb) {
+                            change.consume()
+                            seekToY(change.position.y)
+                        }
                     }
 
                     isHolding = false

@@ -21,6 +21,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.io.FileInputStream
 import java.math.BigInteger
 import java.nio.file.Files
@@ -81,7 +84,8 @@ sealed interface PropertiesState {
         val file2Md5: String,
         val file1Sha256: String,
         val file2Sha256: String,
-        val isMatch: Boolean
+        val isMatch: Boolean,
+        val primaryAlgorithm: String = "MD5"
     )
 
     enum class DirectoryEntryStatus {
@@ -91,12 +95,18 @@ sealed interface PropertiesState {
     }
 
     data class DirectoryEntryFileInfo(
+        val folderIndex: Int = 0,
         val folderName: String,
         val folderPath: String,
         val holder: ContentHolder,
         val md5: String,
-        val size: Long
-    )
+        val size: Long,
+        val lastModified: Long = holder.lastModified,
+        val hashAlgorithm: String = "xxHash3",
+        val sha256: String = ""
+    ) {
+        val hash: String get() = md5
+    }
 
     data class DirectoryComparisonEntry(
         val relativePath: String,
@@ -112,7 +122,11 @@ sealed interface PropertiesState {
         val identicalCount: Int,
         val modifiedCount: Int,
         val uniqueCountsByFolder: Map<String, Int>,
-        val entries: List<DirectoryComparisonEntry>
+        val entries: List<DirectoryComparisonEntry>,
+        val hashAlgorithm: String = "xxHash3",
+        val timestamp: Long = System.currentTimeMillis(),
+        val savedDuplicateGroups: List<Pair<String, List<ContentHolder>>> = emptyList(),
+        val savedTwoFileComparison: TwoFileChecksumComparison? = null
     )
 
     data class MultipleContentProperties(
@@ -130,6 +144,217 @@ sealed interface PropertiesState {
         val directoryComparisonProgress: StateFlow<CalculationProgress> = MutableStateFlow(CalculationProgress()),
         val directoryComparison: StateFlow<DirectoryComparisonResult?> = MutableStateFlow(null)
     ) : PropertiesState
+}
+
+object SavedDirectoryComparisonStore {
+    @Volatile
+    private var lastDuplicateGroupsCache: List<Pair<String, List<ContentHolder>>> = emptyList()
+
+    @Volatile
+    private var lastTwoFileCompCache: PropertiesState.TwoFileChecksumComparison? = null
+
+    fun updateDuplicatesSnapshot(
+        groups: List<Pair<String, List<ContentHolder>>>,
+        twoFile: PropertiesState.TwoFileChecksumComparison?
+    ) {
+        lastDuplicateGroupsCache = groups
+        lastTwoFileCompCache = twoFile
+        val existing = load()
+        if (existing != null) {
+            save(
+                existing.copy(
+                    savedDuplicateGroups = groups,
+                    savedTwoFileComparison = twoFile
+                )
+            )
+        }
+    }
+
+    fun save(result: PropertiesState.DirectoryComparisonResult) {
+        try {
+            val root = JSONObject()
+            root.put("folderNames", JSONArray(result.folderNames))
+            root.put("folderPaths", JSONArray(result.folderPaths))
+            root.put("isIdentical", result.isIdentical)
+            root.put("identicalCount", result.identicalCount)
+            root.put("modifiedCount", result.modifiedCount)
+            root.put("hashAlgorithm", result.hashAlgorithm)
+            root.put("timestamp", result.timestamp)
+
+            val uniqueObj = JSONObject()
+            result.uniqueCountsByFolder.forEach { (k, v) -> uniqueObj.put(k, v) }
+            root.put("uniqueCountsByFolder", uniqueObj)
+
+            val entriesArr = JSONArray()
+            result.entries.take(2500).forEach { entry ->
+                val eObj = JSONObject()
+                eObj.put("relativePath", entry.relativePath)
+                eObj.put("isFolder", entry.isFolder)
+                eObj.put("status", entry.status.name)
+                val filesArr = JSONArray()
+                entry.entriesByFolder.forEach { info ->
+                    val fObj = JSONObject()
+                    fObj.put("folderIndex", info.folderIndex)
+                    fObj.put("folderName", info.folderName)
+                    fObj.put("folderPath", info.folderPath)
+                    fObj.put("filePath", info.holder.uniquePath)
+                    fObj.put("md5", info.md5)
+                    fObj.put("size", info.size)
+                    fObj.put("lastModified", info.lastModified)
+                    fObj.put("hashAlgorithm", info.hashAlgorithm)
+                    fObj.put("sha256", info.sha256)
+                    filesArr.put(fObj)
+                }
+                eObj.put("entriesByFolder", filesArr)
+                entriesArr.put(eObj)
+            }
+            root.put("entries", entriesArr)
+
+            val dupGroups = result.savedDuplicateGroups.ifEmpty { lastDuplicateGroupsCache }
+            val dupArr = JSONArray()
+            dupGroups.take(1000).forEach { (hash, holders) ->
+                val gObj = JSONObject()
+                gObj.put("hash", hash)
+                val pArr = JSONArray()
+                holders.forEach { h -> pArr.put(h.uniquePath) }
+                gObj.put("paths", pArr)
+                dupArr.put(gObj)
+            }
+            root.put("duplicateGroups", dupArr)
+
+            val twoFile = result.savedTwoFileComparison ?: lastTwoFileCompCache
+            if (twoFile != null) {
+                val tfObj = JSONObject()
+                tfObj.put("file1Name", twoFile.file1Name)
+                tfObj.put("file2Name", twoFile.file2Name)
+                tfObj.put("file1Md5", twoFile.file1Md5)
+                tfObj.put("file2Md5", twoFile.file2Md5)
+                tfObj.put("file1Sha256", twoFile.file1Sha256)
+                tfObj.put("file2Sha256", twoFile.file2Sha256)
+                tfObj.put("isMatch", twoFile.isMatch)
+                tfObj.put("primaryAlgorithm", twoFile.primaryAlgorithm)
+                root.put("twoFileComparison", tfObj)
+            }
+
+            globalClass.preferencesManager.lastDirectoryComparisonJson = root.toString()
+        } catch (_: Exception) {}
+    }
+
+    fun load(): PropertiesState.DirectoryComparisonResult? {
+        val raw = globalClass.preferencesManager.lastDirectoryComparisonJson
+        if (raw.isBlank()) return null
+        return try {
+            val root = JSONObject(raw)
+            val folderNamesArr = root.optJSONArray("folderNames") ?: JSONArray()
+            val folderNames = (0 until folderNamesArr.length()).map { folderNamesArr.getString(it) }
+            val folderPathsArr = root.optJSONArray("folderPaths") ?: JSONArray()
+            val folderPaths = (0 until folderPathsArr.length()).map { folderPathsArr.getString(it) }
+            val isIdentical = root.optBoolean("isIdentical", false)
+            val identicalCount = root.optInt("identicalCount", 0)
+            val modifiedCount = root.optInt("modifiedCount", 0)
+            val hashAlgorithm = root.optString("hashAlgorithm", "xxHash3")
+            val timestamp = root.optLong("timestamp", 0L)
+
+            val uniqueObj = root.optJSONObject("uniqueCountsByFolder") ?: JSONObject()
+            val uniqueCounts = linkedMapOf<String, Int>()
+            folderNames.forEach { name ->
+                uniqueCounts[name] = uniqueObj.optInt(name, 0)
+            }
+            val keys = uniqueObj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                uniqueCounts[key] = uniqueObj.optInt(key, 0)
+            }
+
+            val entriesArr = root.optJSONArray("entries") ?: JSONArray()
+            val entries = mutableListOf<PropertiesState.DirectoryComparisonEntry>()
+            for (i in 0 until entriesArr.length()) {
+                val eObj = entriesArr.getJSONObject(i)
+                val relPath = eObj.optString("relativePath", "")
+                val isFolder = eObj.optBoolean("isFolder", false)
+                val statusName = eObj.optString("status", "MODIFIED")
+                val status = runCatching {
+                    PropertiesState.DirectoryEntryStatus.valueOf(statusName)
+                }.getOrDefault(PropertiesState.DirectoryEntryStatus.MODIFIED)
+
+                val filesArr = eObj.optJSONArray("entriesByFolder") ?: JSONArray()
+                val infos = mutableListOf<PropertiesState.DirectoryEntryFileInfo>()
+                for (j in 0 until filesArr.length()) {
+                    val fObj = filesArr.getJSONObject(j)
+                    val filePath = fObj.optString("filePath", "")
+                    val holder = LocalFileHolder(File(filePath))
+                    val folderIdx = fObj.optInt("folderIndex", j.coerceAtMost((folderNames.size - 1).coerceAtLeast(0)))
+                    infos.add(
+                        PropertiesState.DirectoryEntryFileInfo(
+                            folderIndex = folderIdx,
+                            folderName = fObj.optString("folderName", folderNames.getOrNull(folderIdx) ?: ""),
+                            folderPath = fObj.optString("folderPath", folderPaths.getOrNull(folderIdx) ?: ""),
+                            holder = holder,
+                            md5 = fObj.optString("md5", ""),
+                            size = fObj.optLong("size", holder.size),
+                            lastModified = fObj.optLong("lastModified", holder.lastModified),
+                            hashAlgorithm = fObj.optString("hashAlgorithm", hashAlgorithm),
+                            sha256 = fObj.optString("sha256", "")
+                        )
+                    )
+                }
+                entries.add(
+                    PropertiesState.DirectoryComparisonEntry(
+                        relativePath = relPath,
+                        isFolder = isFolder,
+                        status = status,
+                        entriesByFolder = infos
+                    )
+                )
+            }
+
+            val dupGroups = mutableListOf<Pair<String, List<ContentHolder>>>()
+            val dupArr = root.optJSONArray("duplicateGroups")
+            if (dupArr != null) {
+                for (i in 0 until dupArr.length()) {
+                    val gObj = dupArr.getJSONObject(i)
+                    val hash = gObj.optString("hash", "")
+                    val pArr = gObj.optJSONArray("paths") ?: JSONArray()
+                    val holders = (0 until pArr.length()).map { idx ->
+                        LocalFileHolder(File(pArr.getString(idx)))
+                    }
+                    if (hash.isNotBlank() && holders.isNotEmpty()) {
+                        dupGroups.add(hash to holders)
+                    }
+                }
+            }
+
+            val tfObj = root.optJSONObject("twoFileComparison")
+            val twoFile = if (tfObj != null) {
+                PropertiesState.TwoFileChecksumComparison(
+                    file1Name = tfObj.optString("file1Name", ""),
+                    file2Name = tfObj.optString("file2Name", ""),
+                    file1Md5 = tfObj.optString("file1Md5", ""),
+                    file2Md5 = tfObj.optString("file2Md5", ""),
+                    file1Sha256 = tfObj.optString("file1Sha256", ""),
+                    file2Sha256 = tfObj.optString("file2Sha256", ""),
+                    isMatch = tfObj.optBoolean("isMatch", false),
+                    primaryAlgorithm = tfObj.optString("primaryAlgorithm", "MD5")
+                )
+            } else null
+
+            PropertiesState.DirectoryComparisonResult(
+                folderNames = folderNames,
+                folderPaths = folderPaths,
+                isIdentical = isIdentical,
+                identicalCount = identicalCount,
+                modifiedCount = modifiedCount,
+                uniqueCountsByFolder = uniqueCounts,
+                entries = entries,
+                hashAlgorithm = hashAlgorithm,
+                timestamp = timestamp,
+                savedDuplicateGroups = dupGroups,
+                savedTwoFileComparison = twoFile
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 data class ContentPropertiesUiState(
@@ -165,6 +390,10 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
     fun reload() {
         if (contentHolders.size == 1) {
             loadSingleContentDetails(contentHolders.first())
+        } else if (contentHolders.size > 1) {
+            activeJobs.forEach { it.cancel() }
+            activeJobs.clear()
+            loadMultipleContentDetails(contentHolders)
         }
     }
 
@@ -229,7 +458,6 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     contentCountFlow.value =
                         globalClass.getString(R.string.files_folders_count, fileCount, folderCount)
 
-                    // Update size for directories
                     _uiState.update { state ->
                         val currentDetails =
                             state.details as? PropertiesState.SingleContentProperties
@@ -247,7 +475,6 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             }
             activeJobs.add(job)
         } else if (file is LocalFileHolder) {
-            // Calculate checksum with progress
             val job = calculationScope.launch {
                 checksumProgressFlow.value = CalculationProgress(isCalculating = true)
                 try {
@@ -267,7 +494,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 }
             }
             activeJobs.add(job)
-            // Calculate SHA-1 with progress
+
             val sha1Job = calculationScope.launch {
                 sha1ProgressFlow.value = CalculationProgress(isCalculating = true)
                 try {
@@ -287,7 +514,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 }
             }
             activeJobs.add(sha1Job)
-            // Calculate SHA-256 with progress
+
             val sha256Job = calculationScope.launch {
                 sha256ProgressFlow.value = CalculationProgress(isCalculating = true)
                 try {
@@ -382,14 +609,13 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     if (file.isFolder) {
                         val (filesCount, foldersCount, dirSize) = calculateDirectoryStats(file)
                         totalFiles += filesCount
-                        totalFolders += foldersCount + 1 // +1 for the directory itself
+                        totalFolders += foldersCount + 1
                         totalSize += dirSize
                     } else {
                         totalFiles++
                         totalSize += file.size
                     }
 
-                    // Update intermediate results
                     totalFileCountFlow.value = globalClass.getString(
                         R.string.files_folders_count,
                         totalFiles,
@@ -397,7 +623,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     )
                     totalSizeFlow.value = totalSize.toFormattedSize()
 
-                    yield() // Allow cancellation
+                    yield()
                 }
             } catch (_: Exception) {
                 totalFileCountFlow.value = globalClass.getString(R.string.error_calculating)
@@ -441,6 +667,18 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         } catch (_: Exception) {}
     }
 
+    private suspend fun computeConfiguredHash(
+        file: LocalFileHolder,
+        algorithm: String,
+        onProgress: (Long, Long, Long) -> Unit = { _, _, _ -> }
+    ): String {
+        return when (algorithm) {
+            "SHA-256" -> calculateSha256(file, onProgress)
+            "MD5" -> calculateMD5WithProgress(file, onProgress)
+            else -> calculateXxHash3WithProgress(file, onProgress)
+        }
+    }
+
     private fun calculateDuplicates(
         contentHolders: List<ContentHolder>,
         checksumStatusFlow: MutableStateFlow<String>,
@@ -449,6 +687,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         twoFileComparisonFlow: MutableStateFlow<PropertiesState.TwoFileChecksumComparison?>
     ) {
         val checksumJob = calculationScope.launch {
+            val configuredAlgo = globalClass.preferencesManager.comparisonHashAlgorithm.ifBlank { "xxHash3" }
             val directLocalFiles = contentHolders.filterIsInstance<LocalFileHolder>().filter { !it.isFolder }
             val localFiles = if (directLocalFiles.isNotEmpty()) {
                 directLocalFiles
@@ -468,7 +707,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
             checksumProgressFlow.value =
                 CalculationProgress(isCalculating = true, total = localFiles.size.toLong(), totalFiles = localFiles.size.toLong())
             val checksumMap = linkedMapOf<String, MutableList<ContentHolder>>()
-            val md5ByPath = mutableMapOf<String, String>()
+            val hashByPath = mutableMapOf<String, String>()
             var processed = 0L
             val startTime = System.currentTimeMillis()
             try {
@@ -489,33 +728,39 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                         totalFiles = localFiles.size.toLong(),
                         etaSeconds = eta
                     )
-                    val md5 = calculateMD5WithProgress(file) { _, _, _ -> }
-                    if (md5.isNotBlank() && md5 != globalClass.getString(R.string.error_calculating)) {
-                        checksumMap.getOrPut(md5) { mutableListOf() }.add(file)
-                        md5ByPath[file.uniquePath] = md5
+                    // For 2-file comparison, compute MD5 so the classic 2-File MD5 + SHA-256 comparison card is always populated
+                    val hash = if (localFiles.size == 2 && configuredAlgo == "xxHash3") {
+                        calculateMD5WithProgress(file) { _, _, _ -> }
+                    } else {
+                        computeConfiguredHash(file, configuredAlgo)
+                    }
+                    if (hash.isNotBlank() && hash != globalClass.getString(R.string.error_calculating)) {
+                        checksumMap.getOrPut(hash) { mutableListOf() }.add(file)
+                        hashByPath[file.uniquePath] = hash
                     }
                     yield()
                 }
+                var twoFileCompResult: PropertiesState.TwoFileChecksumComparison? = null
                 if (localFiles.size == 2) {
                     val f1 = localFiles[0]
                     val f2 = localFiles[1]
                     val sha1Hash = calculateSha256(f1) { _, _, _ -> }
                     val sha2Hash = calculateSha256(f2) { _, _, _ -> }
-                    val m1 = md5ByPath[f1.uniquePath] ?: ""
-                    val m2 = md5ByPath[f2.uniquePath] ?: ""
-                    twoFileComparisonFlow.value = PropertiesState.TwoFileChecksumComparison(
+                    val m1 = hashByPath[f1.uniquePath] ?: ""
+                    val m2 = hashByPath[f2.uniquePath] ?: ""
+                    twoFileCompResult = PropertiesState.TwoFileChecksumComparison(
                         file1Name = f1.displayName,
                         file2Name = f2.displayName,
                         file1Md5 = m1,
                         file2Md5 = m2,
                         file1Sha256 = sha1Hash,
                         file2Sha256 = sha2Hash,
-                        isMatch = sha1Hash.isNotBlank() && sha1Hash == sha2Hash && m1 == m2
+                        isMatch = sha1Hash.isNotBlank() && sha1Hash == sha2Hash && m1 == m2,
+                        primaryAlgorithm = if (configuredAlgo == "xxHash3") "MD5" else configuredAlgo
                     )
+                    twoFileComparisonFlow.value = twoFileCompResult
                 }
                 val duplicateOnlyGroups = checksumMap.filter { it.value.size > 1 }.map { it.key to it.value.toList() }
-                // Include all checksum groups (duplicates first, then distinct files) so the user gets
-                // the same checksum card with copy hash, open, locate, and delete even when files are distinct.
                 val allGroups = checksumMap.entries
                     .sortedWith(
                         compareByDescending<Map.Entry<String, MutableList<ContentHolder>>> { it.value.size }
@@ -523,16 +768,17 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     )
                     .map { it.key to it.value.toList() }
                 duplicateGroupsFlow.value = allGroups
+                SavedDirectoryComparisonStore.updateDuplicatesSnapshot(allGroups, twoFileCompResult)
 
                 val hashedCount = checksumMap.values.sumOf { it.size }
                 if (duplicateOnlyGroups.isEmpty()) {
                     if (hashedCount == 0 && localFiles.isNotEmpty()) {
                         checksumStatusFlow.value = globalClass.getString(R.string.error_calculating)
                     } else {
-                        checksumStatusFlow.value = globalClass.getString(R.string.all_files_distinct)
+                        checksumStatusFlow.value = "${globalClass.getString(R.string.all_files_distinct)} ($configuredAlgo)"
                     }
                 } else {
-                    checksumStatusFlow.value = globalClass.getString(R.string.duplicates_found, duplicateOnlyGroups.size)
+                    checksumStatusFlow.value = "${globalClass.getString(R.string.duplicates_found, duplicateOnlyGroups.size)} ($configuredAlgo)"
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -554,7 +800,8 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         val dirJob = calculationScope.launch {
             progressFlow.value = CalculationProgress(isCalculating = true)
             try {
-                // Disambiguate folder labels if multiple folders have the same displayName
+                val configuredAlgo = globalClass.preferencesManager.comparisonHashAlgorithm.ifBlank { "xxHash3" }
+
                 val nameCounts = folders.groupingBy { it.displayName }.eachCount()
                 val folderLabels = folders.map { folder ->
                     if ((nameCounts[folder.displayName] ?: 0) > 1) {
@@ -565,9 +812,10 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     }
                 }
 
-                // Map: relativePath -> MutableList<Triple<folderIndex, ContentHolder, isFolder>>
-                val relativeMap = linkedMapOf<String, MutableList<Triple<Int, ContentHolder, Boolean>>>()
-                var totalFilesToHash = 0L
+                // Only compare actual files (!child.isFolder) so intermediate directory nodes
+                // never inflate Identical or Unique file counts.
+                val relativeFileMap = linkedMapOf<String, MutableList<Pair<Int, ContentHolder>>>()
+                var totalFilesToProcess = 0L
 
                 suspend fun scanTree(rootFolderIndex: Int, currentFolder: ContentHolder, prefix: String) {
                     if (!currentCoroutineContext().isActive) return
@@ -576,12 +824,14 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                         for (child in children) {
                             if (!currentCoroutineContext().isActive) return
                             val relPath = if (prefix.isEmpty()) child.displayName else "$prefix/${child.displayName}"
-                            relativeMap.getOrPut(relPath) { mutableListOf() }
-                                .add(Triple(rootFolderIndex, child, child.isFolder))
                             if (child.isFolder) {
                                 scanTree(rootFolderIndex, child, relPath)
                             } else {
-                                totalFilesToHash++
+                                val list = relativeFileMap.getOrPut(relPath) { mutableListOf() }
+                                if (list.none { it.first == rootFolderIndex }) {
+                                    list.add(rootFolderIndex to child)
+                                    totalFilesToProcess++
+                                }
                             }
                         }
                     } catch (_: Exception) {}
@@ -592,7 +842,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     scanTree(idx, folder, "")
                 }
 
-                var hashedFiles = 0L
+                var processedFiles = 0L
                 val startTime = System.currentTimeMillis()
                 val entries = mutableListOf<PropertiesState.DirectoryComparisonEntry>()
                 var identicalCount = 0
@@ -601,63 +851,67 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     folderLabels.forEach { put(it, 0) }
                 }
 
-                for ((relPath, items) in relativeMap) {
+                for ((relPath, items) in relativeFileMap) {
                     if (!isActive) return@launch
-                    val isEntryFolder = items.all { it.third }
+                    val presentFolderIndices = items.map { it.first }.distinct()
+                    val isPresentInAllFolders = presentFolderIndices.size == folders.size
                     val fileInfos = mutableListOf<PropertiesState.DirectoryEntryFileInfo>()
 
-                    for ((folderIdx, holder, isDir) in items) {
-                        val md5 = if (!isDir && holder is LocalFileHolder) {
-                            hashedFiles++
-                            val elapsed = System.currentTimeMillis() - startTime
-                            val eta = if (elapsed > 500 && hashedFiles > 0 && totalFilesToHash > 0) {
-                                val avg = elapsed / hashedFiles
-                                ((totalFilesToHash - hashedFiles).coerceAtLeast(0L) * avg) / 1000L
-                            } else -1L
-                            progressFlow.value = CalculationProgress(
-                                isCalculating = true,
-                                current = hashedFiles,
-                                total = totalFilesToHash.coerceAtLeast(1L),
-                                filesProcessed = hashedFiles,
-                                totalFiles = totalFilesToHash,
-                                etaSeconds = eta
-                            )
-                            calculateMD5WithProgress(holder) { _, _, _ -> }
+                    for ((folderIdx, holder) in items) {
+                        processedFiles++
+                        val elapsed = System.currentTimeMillis() - startTime
+                        val eta = if (elapsed > 400 && processedFiles > 0 && totalFilesToProcess > 0) {
+                            val avg = elapsed / processedFiles
+                            ((totalFilesToProcess - processedFiles).coerceAtLeast(0L) * avg) / 1000L
+                        } else -1L
+                        progressFlow.value = CalculationProgress(
+                            isCalculating = true,
+                            current = processedFiles,
+                            total = totalFilesToProcess.coerceAtLeast(1L),
+                            filesProcessed = processedFiles,
+                            totalFiles = totalFilesToProcess,
+                            etaSeconds = eta
+                        )
+
+                        val algoForEntry = if (!isPresentInAllFolders && configuredAlgo != "xxHash3") {
+                            "xxHash3"
+                        } else {
+                            configuredAlgo
+                        }
+                        val hashValue = if (holder is LocalFileHolder) {
+                            computeConfiguredHash(holder, algoForEntry)
                         } else {
                             ""
                         }
                         fileInfos.add(
                             PropertiesState.DirectoryEntryFileInfo(
+                                folderIndex = folderIdx,
                                 folderName = folderLabels[folderIdx],
                                 folderPath = folders[folderIdx].uniquePath,
                                 holder = holder,
-                                md5 = md5,
-                                size = if (isDir) 0L else holder.size
+                                md5 = hashValue,
+                                size = holder.size,
+                                lastModified = holder.lastModified,
+                                hashAlgorithm = algoForEntry,
+                                sha256 = if (algoForEntry == "SHA-256") hashValue else ""
                             )
                         )
                     }
 
                     val status = when {
-                        items.size < folders.size -> {
+                        !isPresentInAllFolders -> {
                             fileInfos.forEach { info ->
                                 uniqueCounts[info.folderName] = (uniqueCounts[info.folderName] ?: 0) + 1
                             }
                             PropertiesState.DirectoryEntryStatus.UNIQUE
                         }
-                        isEntryFolder -> {
-                            identicalCount++
-                            PropertiesState.DirectoryEntryStatus.IDENTICAL
-                        }
-                        items.any { it.third } != items.all { it.third } -> {
-                            modifiedCount++
-                            PropertiesState.DirectoryEntryStatus.MODIFIED
-                        }
                         else -> {
+                            val distinctSizes = fileInfos.map { it.size }.distinct()
                             val distinctHashes = fileInfos.map { it.md5 }.distinct()
-                            val allValid = fileInfos.all {
+                            val allValidHashes = fileInfos.all {
                                 it.md5.isNotBlank() && it.md5 != globalClass.getString(R.string.error_calculating)
                             }
-                            if (allValid && distinctHashes.size == 1) {
+                            if (distinctSizes.size == 1 && allValidHashes && distinctHashes.size == 1) {
                                 identicalCount++
                                 PropertiesState.DirectoryEntryStatus.IDENTICAL
                             } else {
@@ -670,7 +924,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     entries.add(
                         PropertiesState.DirectoryComparisonEntry(
                             relativePath = relPath,
-                            isFolder = isEntryFolder,
+                            isFolder = false,
                             status = status,
                             entriesByFolder = fileInfos
                         )
@@ -691,21 +945,34 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 val totalUnique = uniqueCounts.values.sum()
                 val isIdentical = modifiedCount == 0 && totalUnique == 0
 
-                resultFlow.value = PropertiesState.DirectoryComparisonResult(
+                val statusSummary = if (isIdentical) {
+                    "Directories match ($identicalCount matching files • $configuredAlgo)"
+                } else {
+                    "$identicalCount matching, $modifiedCount mismatched, $totalUnique only in one directory ($configuredAlgo)"
+                }
+
+                val comparisonResult = PropertiesState.DirectoryComparisonResult(
                     folderNames = folderLabels,
                     folderPaths = folders.map { it.uniquePath },
                     isIdentical = isIdentical,
                     identicalCount = identicalCount,
                     modifiedCount = modifiedCount,
                     uniqueCountsByFolder = uniqueCounts,
-                    entries = sortedEntries
+                    entries = sortedEntries,
+                    hashAlgorithm = configuredAlgo,
+                    timestamp = System.currentTimeMillis()
+                )
+                resultFlow.value = comparisonResult
+                SavedDirectoryComparisonStore.save(comparisonResult)
+
+                // Record in Closed Tabs History so user can reopen from Closed Tabs History at any time
+                globalClass.mainActivityManager.recordClosedComparison(
+                    title = "Compare: ${folderLabels.joinToString(" vs ")}",
+                    subtitle = statusSummary,
+                    selectionPaths = folders.map { it.uniquePath }
                 )
 
-                statusFlow.value = if (isIdentical) {
-                    "Folders are identical ($identicalCount matching items)"
-                } else {
-                    "$modifiedCount modified, $totalUnique unique, $identicalCount identical"
-                }
+                statusFlow.value = statusSummary
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -811,16 +1078,48 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                     }
 
                     if (processed % 50 == 0L) {
-                        yield() // Periodically yield for cancellation
+                        yield()
                     }
                 }
             } catch (_: SecurityException) {
-                // Skip directories we can't access
             }
         }
 
         processDirectory(directory)
         return Triple(fileCount, folderCount, totalSize)
+    }
+
+    private suspend fun calculateXxHash3WithProgress(
+        file: LocalFileHolder,
+        onProgress: (Long, Long, Long) -> Unit
+    ): String {
+        if (file.isFolder) return emptyString
+        return withContext(IO) {
+            try {
+                val fileSize = file.size
+                val startTime = System.currentTimeMillis()
+                var lastUpdateTime = startTime
+                XxHash3.hashFile(
+                    file = file.file,
+                    onProgress = { bytesProcessed, _ ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateTime >= 150L || bytesProcessed == fileSize) {
+                            val elapsed = now - startTime
+                            val eta = if (elapsed > 300 && bytesProcessed > 0) {
+                                val rate = (bytesProcessed * 1000L) / elapsed
+                                if (rate > 0) (fileSize - bytesProcessed).coerceAtLeast(0L) / rate else -1L
+                            } else -1L
+                            onProgress(bytesProcessed, fileSize, eta)
+                            lastUpdateTime = now
+                        }
+                    }
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                globalClass.getString(R.string.error_calculating)
+            }
+        }
     }
 
     private suspend fun calculateSha1(
@@ -878,49 +1177,7 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
         onProgress: (Long, Long, Long) -> Unit
     ): String {
         if (file.isFolder) return emptyString
-
-        return withContext(IO) {
-            val md = MessageDigest.getInstance("SHA-256")
-            val fileSize = file.size
-            var bytesProcessed = 0L
-            val startTime = System.currentTimeMillis()
-            var lastUpdateTime = startTime
-
-            try {
-                FileInputStream(file.file).use { fis ->
-                    val buffer = ByteArray(64 * 1024)
-                    var read: Int
-                    while (fis.read(buffer).also { read = it } isNot -1) {
-                        if (!currentCoroutineContext().isActive) break
-                        md.update(buffer, 0, read)
-                        bytesProcessed += read
-
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdateTime >= 150L || bytesProcessed == fileSize) {
-                            val elapsed = now - startTime
-                            val eta = if (elapsed > 300 && bytesProcessed > 0) {
-                                val rate = (bytesProcessed * 1000L) / elapsed
-                                if (rate > 0) (fileSize - bytesProcessed).coerceAtLeast(0L) / rate else -1L
-                            } else -1L
-                            onProgress(bytesProcessed, fileSize, eta)
-                            lastUpdateTime = now
-                        }
-
-                        if (bytesProcessed % (256 * 1024) == 0L) {
-                            yield()
-                        }
-                    }
-                }
-
-                val digest = md.digest()
-                val bigInt = BigInteger(1, digest)
-                bigInt.toString(16).padStart(64, '0')
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                globalClass.getString(R.string.error_calculating)
-            }
-        }
+        return computeFileSha256(file.file, onProgress)
     }
 
     private suspend fun calculateMD5WithProgress(
@@ -965,6 +1222,53 @@ class ContentPropertiesProvider(private val contentHolders: List<ContentHolder>)
                 val digest = md.digest()
                 val bigInt = BigInteger(1, digest)
                 bigInt.toString(16).padStart(32, '0')
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                globalClass.getString(R.string.error_calculating)
+            }
+        }
+    }
+
+    companion object {
+        suspend fun computeFileSha256(
+            file: File,
+            onProgress: (Long, Long, Long) -> Unit = { _, _, _ -> }
+        ): String = withContext(IO) {
+            if (!file.exists() || file.isDirectory) return@withContext emptyString
+            val md = MessageDigest.getInstance("SHA-256")
+            val fileSize = file.length()
+            var bytesProcessed = 0L
+            val startTime = System.currentTimeMillis()
+            var lastUpdateTime = startTime
+
+            try {
+                FileInputStream(file).use { fis ->
+                    val buffer = ByteArray(64 * 1024)
+                    var read: Int
+                    while (fis.read(buffer).also { read = it } isNot -1) {
+                        if (!currentCoroutineContext().isActive) break
+                        md.update(buffer, 0, read)
+                        bytesProcessed += read
+
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateTime >= 150L || bytesProcessed == fileSize) {
+                            val elapsed = now - startTime
+                            val eta = if (elapsed > 300 && bytesProcessed > 0) {
+                                val rate = (bytesProcessed * 1000L) / elapsed
+                                if (rate > 0) (fileSize - bytesProcessed).coerceAtLeast(0L) / rate else -1L
+                            } else -1L
+                            onProgress(bytesProcessed, fileSize, eta)
+                            lastUpdateTime = now
+                        }
+
+                        if (bytesProcessed % (256 * 1024) == 0L) {
+                            yield()
+                        }
+                    }
+                }
+                val digest = md.digest()
+                BigInteger(1, digest).toString(16).padStart(64, '0')
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {

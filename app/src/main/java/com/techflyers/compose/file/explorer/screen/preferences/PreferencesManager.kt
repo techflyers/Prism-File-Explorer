@@ -33,6 +33,7 @@ import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePre
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefDataStore
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefMutableState
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class PreferencesManager {
@@ -106,8 +107,20 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var searchExternalStorageFromHome by prefMutableState(
+        keyName = "searchExternalStorageFromHome",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var disableTabBar by prefMutableState(
         keyName = "disableTabBar",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var tabBarPlusButtonOnLeft by prefMutableState(
+        keyName = "tabBarPlusButtonOnLeft",
         defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
@@ -260,6 +273,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var disableEnterFocusExtension by prefMutableState(
+        keyName = "disableEnterFocusExtension",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var dragDropAction by prefMutableState(
         keyName = "dragDropAction",
         defaultValue = DragDropAction.ASK.ordinal,
@@ -390,16 +409,16 @@ class PreferencesManager {
         get() {
             if (pinnedFilesJson.isEmpty()) {
                 val oldSetKey = stringSetPreferencesKey("pinnedFiles")
-                val oldSet = runBlocking {
-                    globalClass.prefDataStore.data.first()[oldSetKey]
-                }
+                val oldSet = com.techflyers.compose.file.explorer.screen.preferences.misc.getInitialPreferencesSnapshot()[oldSetKey]
                 if (oldSet != null) {
                     val list = oldSet.toList()
                     pinnedFilesJson = list.toJson()
-                    runBlocking {
-                        globalClass.prefDataStore.edit {
-                            it.remove(oldSetKey)
-                        }
+                    com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+                        try {
+                            globalClass.prefDataStore.edit {
+                                it.remove(oldSetKey)
+                            }
+                        } catch (_: Exception) {}
                     }
                     return list
                 }
@@ -791,19 +810,36 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var disableAutoScrollOnBottomSelection by prefMutableState(
+        keyName = "disableAutoScrollOnBottomSelection",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     private val folderSortingPrefsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val folderViewConfigPrefsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    @Volatile
+    private var cachedDefaultViewConfigPrefs: ViewConfigs? = null
+
+    var pendingCopyTasksJson by prefMutableState(
+        keyName = "pendingCopyTasksJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
 
     fun getSortingPrefsFor(content: ContentHolder): FileSortingPrefs {
         val key = "fileSortingPrefs_${content.uniquePath}"
-        val cachedJson = folderSortingPrefsCache[key] ?: runBlocking {
-            val raw = globalClass.prefDataStore.data.first()[stringPreferencesKey(key)]
-            folderSortingPrefsCache[key] = raw ?: ""
-            raw ?: ""
+        val cachedJson = folderSortingPrefsCache[key] ?: run {
+            val raw = com.techflyers.compose.file.explorer.screen.preferences.misc.getInitialPreferencesSnapshot()[stringPreferencesKey(key)] ?: ""
+            folderSortingPrefsCache[key] = raw
+            raw
         }
         if (cachedJson.isNotEmpty()) {
             fromJson<FileSortingPrefs>(cachedJson)?.let { return it }
         }
-        return if (content is VirtualFileHolder && (content.type == VirtualFileHolder.RECENT || content.type == VirtualFileHolder.ALL_FILES)) {
+        return if (content is VirtualFileHolder && (content.type == VirtualFileHolder.RECENT || content.type == VirtualFileHolder.ALL_FILES) &&
+            defaultSortMethod == SORT_BY_NAME && !reverse
+        ) {
             FileSortingPrefs(
                 sortMethod = SORT_BY_DATE,
                 showFoldersFirst = false,
@@ -821,19 +857,23 @@ class PreferencesManager {
     )
 
     fun getDefaultViewConfigPrefs(): ViewConfigs {
-        return runBlocking {
-            fromJson(
-                globalClass.prefDataStore.data.first()[stringPreferencesKey("viewConfigPrefs")]
-            ) ?: ViewConfigs()
-        }
+        cachedDefaultViewConfigPrefs?.let { return it }
+        val raw = com.techflyers.compose.file.explorer.screen.preferences.misc.getInitialPreferencesSnapshot()[stringPreferencesKey("viewConfigPrefs")]
+        val resolved = fromJson<ViewConfigs>(raw) ?: ViewConfigs()
+        cachedDefaultViewConfigPrefs = resolved
+        return resolved
     }
 
     fun setDefaultViewConfigPrefs(prefs: ViewConfigs) {
         itemSize = prefs.itemSize
-        runBlocking {
-            globalClass.prefDataStore.edit {
-                it[stringPreferencesKey("viewConfigPrefs")] = prefs.toJson()
-            }
+        cachedDefaultViewConfigPrefs = prefs
+        val json = prefs.toJson()
+        com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+            try {
+                globalClass.prefDataStore.edit {
+                    it[stringPreferencesKey("viewConfigPrefs")] = json
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -852,7 +892,10 @@ class PreferencesManager {
     }
 
     fun reloadFromDataStore() {
-        runBlocking {
+        folderSortingPrefsCache.clear()
+        folderViewConfigPrefsCache.clear()
+        cachedDefaultViewConfigPrefs = null
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
             val currentPrefs = globalClass.prefDataStore.data.first()
             com.techflyers.compose.file.explorer.screen.preferences.misc.reloadAllPrefMutableStates(currentPrefs)
         }
@@ -866,11 +909,16 @@ class PreferencesManager {
     }
 
     fun getViewConfigPrefsFor(content: ContentHolder): ViewConfigs {
-        return runBlocking {
-            fromJson(
-                globalClass.prefDataStore.data.first()[stringPreferencesKey("viewConfigPrefs_${content.uniquePath}")]
-            ) ?: categoryGalleryDefault(content) ?: getDefaultViewConfigPrefs()
+        val key = "viewConfigPrefs_${content.uniquePath}"
+        val cachedJson = folderViewConfigPrefsCache[key] ?: run {
+            val raw = com.techflyers.compose.file.explorer.screen.preferences.misc.getInitialPreferencesSnapshot()[stringPreferencesKey(key)] ?: ""
+            folderViewConfigPrefsCache[key] = raw
+            raw
         }
+        if (cachedJson.isNotEmpty()) {
+            fromJson<ViewConfigs>(cachedJson)?.let { return it }
+        }
+        return categoryGalleryDefault(content) ?: getDefaultViewConfigPrefs()
     }
 
     private fun categoryGalleryDefault(content: ContentHolder): ViewConfigs? {
@@ -878,28 +926,36 @@ class PreferencesManager {
         if (type == VirtualFileHolder.IMAGE || type == VirtualFileHolder.VIDEO ||
             type == VirtualFileHolder.APK || type == VirtualFileHolder.DOCUMENT
         ) {
-            return getDefaultViewConfigPrefs().copy(
+            val defaultCfg = getDefaultViewConfigPrefs()
+            return defaultCfg.copy(
                 viewType = ViewType.GRID,
                 galleryMode = true,
-                columnCount = maxOf(getDefaultViewConfigPrefs().columnCount, 3)
+                columnCount = maxOf(defaultCfg.columnCount, 3)
             )
         }
         return null
     }
 
     fun setViewConfigPrefsFor(content: ContentHolder, prefs: ViewConfigs) {
+        val key = "viewConfigPrefs_${content.uniquePath}"
         if (prefs == getDefaultViewConfigPrefs()) {
-            runBlocking {
-                globalClass.prefDataStore.edit {
-                    it.remove(stringPreferencesKey("viewConfigPrefs_${content.uniquePath}"))
-                }
+            folderViewConfigPrefsCache[key] = ""
+            com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+                try {
+                    globalClass.prefDataStore.edit {
+                        it.remove(stringPreferencesKey(key))
+                    }
+                } catch (_: Exception) {}
             }
         } else {
-            runBlocking {
-                globalClass.prefDataStore.edit {
-                    it[stringPreferencesKey("viewConfigPrefs_${content.uniquePath}")] =
-                        prefs.toJson()
-                }
+            val json = prefs.toJson()
+            folderViewConfigPrefsCache[key] = json
+            com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+                try {
+                    globalClass.prefDataStore.edit {
+                        it[stringPreferencesKey(key)] = json
+                    }
+                } catch (_: Exception) {}
             }
         }
     }
@@ -908,20 +964,24 @@ class PreferencesManager {
         val key = "fileSortingPrefs_${content.uniquePath}"
         val json = prefs.toJson()
         folderSortingPrefsCache[key] = json
-        runBlocking {
-            globalClass.prefDataStore.edit {
-                it[stringPreferencesKey(key)] = json
-            }
+        com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+            try {
+                globalClass.prefDataStore.edit {
+                    it[stringPreferencesKey(key)] = json
+                }
+            } catch (_: Exception) {}
         }
     }
 
     fun deleteSortingPrefsFor(content: ContentHolder) {
         val key = "fileSortingPrefs_${content.uniquePath}"
         folderSortingPrefsCache[key] = ""
-        runBlocking {
-            globalClass.prefDataStore.edit {
-                it.remove(stringPreferencesKey(key))
-            }
+        com.techflyers.compose.file.explorer.screen.preferences.misc.prefWriteScope.launch {
+            try {
+                globalClass.prefDataStore.edit {
+                    it.remove(stringPreferencesKey(key))
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -946,6 +1006,78 @@ class PreferencesManager {
         }
         return bytesFreed
     }
+
+    //---------- Filters & Customization -------------//
+    var generalFiltersConfigJson by prefMutableState(
+        keyName = "generalFiltersConfigJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var searchFiltersConfigJson by prefMutableState(
+        keyName = "searchFiltersConfigJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var categoryFiltersConfigJson by prefMutableState(
+        keyName = "categoryFiltersConfigJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var filterBarAtBottom by prefMutableState(
+        keyName = "filterBarAtBottom",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var filterConfigVersion by mutableStateOf(0)
+
+    //---------- Folder Security & Encryption -------------//
+    var encryptLockedFolders by prefMutableState(
+        keyName = "encryptLockedFolders",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var autoEncryptLargeFolders by prefMutableState(
+        keyName = "autoEncryptLargeFolders",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    //---------- Selection & Directory Loading -------------//
+    var twoTapLongPressRangeSelection by prefMutableState(
+        keyName = "twoTapLongPressRangeSelection",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var stabilizeDirectoryLoading by prefMutableState(
+        keyName = "stabilizeDirectoryLoading",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    //---------- Directory Comparison -------------//
+    var comparisonHashAlgorithm by prefMutableState(
+        keyName = "comparisonHashAlgorithm",
+        defaultValue = "xxHash3", // "xxHash3", "SHA-256", "MD5"
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var lastDirectoryComparisonJson by prefMutableState(
+        keyName = "lastDirectoryComparisonJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var comparisonTableColumnsJson by prefMutableState(
+        keyName = "comparisonTableColumnsJson",
+        defaultValue = "[\"filename\",\"result\",\"left_date\",\"right_date\",\"left_size\",\"right_size\",\"extension\"]",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
 
     class SingleChoiceDialog {
         var show by mutableStateOf(false)

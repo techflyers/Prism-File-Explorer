@@ -147,6 +147,7 @@ private fun MarkdownViewerScreen(
     var activeMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     var textViewRef by remember { mutableStateOf<TextView?>(null) }
+    var printWebViewRef by remember { mutableStateOf<WebView?>(null) }
     val scope = rememberCoroutineScope()
 
     val filePath = remember {
@@ -419,6 +420,14 @@ private fun MarkdownViewerScreen(
                         onValueChange = {
                             searchQuery = it
                             activeMatchIndex = 0
+                            if (isPrintLayout && !showSource) {
+                                if (it.length >= 2) {
+                                    printWebViewRef?.findAllAsync(it)
+                                } else {
+                                    printWebViewRef?.clearMatches()
+                                    totalMatchesCount = 0
+                                }
+                            }
                         },
                         placeholder = { Text("Search text...") },
                         modifier = Modifier.weight(1f),
@@ -427,6 +436,7 @@ private fun MarkdownViewerScreen(
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = {
                                     searchQuery = ""
+                                    printWebViewRef?.clearMatches()
                                     totalMatchesCount = 0
                                 }) {
                                     Icon(Icons.Rounded.Close, contentDescription = "Clear")
@@ -443,12 +453,20 @@ private fun MarkdownViewerScreen(
                         )
                     }
                     IconButton(onClick = {
-                        activeMatchIndex = if (activeMatchIndex <= 0) maxOf(0, totalMatchesCount - 1) else activeMatchIndex - 1
+                        if (isPrintLayout && !showSource) {
+                            printWebViewRef?.findNext(false)
+                        } else {
+                            activeMatchIndex = if (activeMatchIndex <= 0) maxOf(0, totalMatchesCount - 1) else activeMatchIndex - 1
+                        }
                     }) {
                         Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous")
                     }
                     IconButton(onClick = {
-                        activeMatchIndex = (activeMatchIndex + 1) % maxOf(1, totalMatchesCount)
+                        if (isPrintLayout && !showSource) {
+                            printWebViewRef?.findNext(true)
+                        } else {
+                            activeMatchIndex = (activeMatchIndex + 1) % maxOf(1, totalMatchesCount)
+                        }
                     }) {
                         Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Next")
                     }
@@ -473,101 +491,54 @@ private fun MarkdownViewerScreen(
                         }
                     }
                 } else if (isPrintLayout) {
-                    // Dedicated document/sheet print layout
+                    // Dedicated A4 document/sheet print preview layout
                     val isDark = isSystemInDarkTheme()
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(if (isDark) Color(0xFF141416) else Color(0xFFE8ECEF))
-                            .verticalScroll(previewScrollState),
-                        contentAlignment = Alignment.TopCenter
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .widthIn(min = 320.dp, max = 680.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 24.dp)
-                                .shadow(elevation = 6.dp, shape = RoundedCornerShape(4.dp)),
-                            shape = RoundedCornerShape(4.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White
-                            ),
-                            border = BorderStroke(1.dp, Color(0xFFD6D8DC))
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 28.dp, vertical = 28.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = fileName,
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Serif
-                                        ),
-                                        color = Color(0xFF1C1B1F),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(
-                                        text = "PRINT PREVIEW",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.sp
-                                        ),
-                                        color = Color(0xFF757575)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 1.dp)
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                AndroidView(
-                                    factory = { ctx ->
-                                        TextView(ctx).apply {
-                                            textSize = 15f
-                                            setTextColor(0xFF1C1B1F.toInt())
-                                            setLinkTextColor(0xFF0B57D0.toInt())
-                                            setPadding(0, 8, 0, 16)
-                                            setTextIsSelectable(true)
-                                            setLineSpacing(6f, 1.2f)
-                                            typeface = android.graphics.Typeface.SERIF
-                                            textViewRef = this
-                                        }
-                                    },
-                                    update = { textView ->
-                                        markwon.setMarkdown(textView, sourceContent)
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Spacer(modifier = Modifier.height(20.dp))
-                                HorizontalDivider(color = Color(0xFFE8E8E8), thickness = 1.dp)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "Prism File Explorer +",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF9E9E9E)
-                                    )
-                                    Text(
-                                        text = "Document View",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF9E9E9E)
-                                    )
-                                }
-                            }
+                    val baseDir = remember(filePath) {
+                        try {
+                            val f = File(filePath)
+                            if (f.exists() && f.parentFile != null) "file://${f.parentFile!!.absolutePath}/" else null
+                        } catch (_: Exception) {
+                            null
                         }
                     }
+                    val printHtml = remember(fileName, sourceContent, isDark) {
+                        generatePrintHtml(
+                            title = fileName,
+                            markdown = sourceContent,
+                            isScreenPreview = true,
+                            isDarkBackdrop = isDark
+                        )
+                    }
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                webViewClient = WebViewClient()
+                                setFindListener { activeMatchOrdinal, numberOfMatches, _ ->
+                                    activeMatchIndex = activeMatchOrdinal
+                                    totalMatchesCount = numberOfMatches
+                                }
+                                settings.apply {
+                                    javaScriptEnabled = false
+                                    allowFileAccess = true
+                                    useWideViewPort = true
+                                    loadWithOverviewMode = true
+                                    builtInZoomControls = true
+                                    displayZoomControls = false
+                                    textZoom = 100
+                                    layoutAlgorithm = android.webkit.WebSettings.LayoutAlgorithm.NORMAL
+                                }
+                                setInitialScale(0)
+                                printWebViewRef = this
+                            }
+                        },
+                        update = { webView ->
+                            if (webView.tag != printHtml) {
+                                webView.tag = printHtml
+                                webView.loadDataWithBaseURL(baseDir, printHtml, "text/html", "UTF-8", null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 } else {
                     // Markdown rendered preview (mobile style)
                     AndroidView(
@@ -620,8 +591,23 @@ private fun printMarkdownDocument(context: Context, fileName: String, content: S
             return
         }
         val jobName = "Prism_${fileName.substringBeforeLast('.')}"
-        val webView = WebView(context)
-        val html = generatePrintHtml(fileName, content)
+        val webView = WebView(context).apply {
+            settings.apply {
+                javaScriptEnabled = false
+                allowFileAccess = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                textZoom = 100
+                layoutAlgorithm = android.webkit.WebSettings.LayoutAlgorithm.NORMAL
+            }
+            // Lay out offscreen WebView at A4 CSS pixel dimensions (794 x 1123 at 96 DPI)
+            measure(
+                android.view.View.MeasureSpec.makeMeasureSpec(794, android.view.View.MeasureSpec.EXACTLY),
+                android.view.View.MeasureSpec.makeMeasureSpec(1123, android.view.View.MeasureSpec.UNSPECIFIED)
+            )
+            layout(0, 0, 794, 1123)
+        }
+        val html = generatePrintHtml(fileName, content, isScreenPreview = false)
 
         val baseDir = try {
             val f = File(sourcePath)
@@ -632,6 +618,11 @@ private fun printMarkdownDocument(context: Context, fileName: String, content: S
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
+                webView.measure(
+                    android.view.View.MeasureSpec.makeMeasureSpec(794, android.view.View.MeasureSpec.EXACTLY),
+                    android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED)
+                )
+                webView.layout(0, 0, 794, webView.measuredHeight.coerceAtLeast(1123))
                 val printAdapter = webView.createPrintDocumentAdapter(jobName)
                 val printAttributes = PrintAttributes.Builder()
                     .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
@@ -647,7 +638,12 @@ private fun printMarkdownDocument(context: Context, fileName: String, content: S
     }
 }
 
-private fun generatePrintHtml(title: String, markdown: String): String {
+private fun generatePrintHtml(
+    title: String,
+    markdown: String,
+    isScreenPreview: Boolean = false,
+    isDarkBackdrop: Boolean = false
+): String {
     val bodyHtml = try {
         val extensions = listOf(
             TablesExtension.create(),
@@ -661,12 +657,69 @@ private fun generatePrintHtml(title: String, markdown: String): String {
         "<pre style=\"white-space: pre-wrap;\">${markdown.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</pre>"
     }
 
+    val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val backdropColor = if (isDarkBackdrop) "#141416" else "#E8ECEF"
+    val screenBodyStyle = if (isScreenPreview) {
+        """
+        html, body {
+            background-color: $backdropColor;
+            margin: 0;
+            padding: 20px 16px;
+        }
+        .print-sheet {
+            width: 794px;
+            min-height: 1123px;
+            margin: 0 auto;
+            padding: 56px 64px;
+            background-color: #ffffff;
+            border: 1px solid #d6d8dc;
+            border-radius: 4px;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .doc-content {
+            flex: 1;
+        }
+        .doc-footer {
+            margin-top: 32px;
+            padding-top: 12px;
+            border-top: 1px solid #e8e8e8;
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #9e9e9e;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        """
+    } else {
+        """
+        html, body {
+            background-color: #ffffff;
+            margin: 0;
+            padding: 0;
+        }
+        .print-sheet {
+            width: 794px;
+            margin: 0 auto;
+            padding: 16px;
+            background-color: #ffffff;
+            box-sizing: border-box;
+        }
+        .print-badge, .doc-footer {
+            display: none;
+        }
+        """
+    }
+
     return """
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>${title.replace("<", "&lt;").replace(">", "&gt;")}</title>
+            <meta name="viewport" content="width=840">
+            <title>$escapedTitle</title>
             <style>
                 @page {
                     size: A4;
@@ -677,9 +730,26 @@ private fun generatePrintHtml(title: String, markdown: String): String {
                     font-size: 14px;
                     line-height: 1.65;
                     color: #1a1a1a;
-                    background-color: #ffffff;
-                    margin: 0;
-                    padding: 16px;
+                    -webkit-text-size-adjust: 100%;
+                }
+                $screenBodyStyle
+                @media print {
+                    html, body {
+                        background-color: #ffffff !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+                    .print-sheet {
+                        width: 100% !important;
+                        min-height: 0 !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        border: none !important;
+                        box-shadow: none !important;
+                    }
+                    .print-badge, .doc-footer {
+                        display: none !important;
+                    }
                 }
                 .doc-header {
                     border-bottom: 2px solid #333333;
@@ -694,6 +764,13 @@ private fun generatePrintHtml(title: String, markdown: String): String {
                     font-weight: 700;
                     margin: 0;
                     color: #111111;
+                }
+                .print-badge {
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    color: #757575;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 }
                 h1, h2, h3, h4, h5, h6 {
                     color: #111111;
@@ -771,10 +848,19 @@ private fun generatePrintHtml(title: String, markdown: String): String {
             </style>
         </head>
         <body>
-            <div class="doc-header">
-                <div class="doc-title">${title.replace("<", "&lt;").replace(">", "&gt;")}</div>
+            <div class="print-sheet">
+                <div class="doc-header">
+                    <div class="doc-title">$escapedTitle</div>
+                    <div class="print-badge">PRINT PREVIEW</div>
+                </div>
+                <div class="doc-content">
+                    $bodyHtml
+                </div>
+                <div class="doc-footer">
+                    <span>Prism File Explorer +</span>
+                    <span>Document View</span>
+                </div>
             </div>
-            $bodyHtml
         </body>
         </html>
     """.trimIndent()

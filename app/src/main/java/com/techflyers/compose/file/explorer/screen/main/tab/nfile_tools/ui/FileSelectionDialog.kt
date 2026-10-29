@@ -31,6 +31,8 @@ import java.io.File
 fun FileSelectionDialog(
     show: Boolean,
     initialDirectory: File? = null,
+    allowedExtensions: Set<String>? = null,
+    title: String? = null,
     onDismissRequest: () -> Unit,
     onItemsSelected: (List<File>) -> Unit
 ) {
@@ -51,10 +53,15 @@ fun FileSelectionDialog(
         StorageProvider.getAvailableStorageRoots(context)
     }
 
-    val files: List<File> = remember(currentDir) {
+    val files: List<File> = remember(currentDir, allowedExtensions) {
         try {
             val list = currentDir.listFiles() ?: emptyArray()
-            list.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+            val filtered = if (allowedExtensions != null) {
+                list.filter { it.isDirectory || allowedExtensions.contains(it.extension.lowercase()) }
+            } else {
+                list.toList()
+            }
+            filtered.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
         } catch (_: Exception) {
             emptyList()
         }
@@ -80,7 +87,7 @@ fun FileSelectionDialog(
                     title = {
                         Column {
                             Text(
-                                text = if (currentDir.absolutePath == "/") "Root (/)" else currentDir.name.ifEmpty { "Storage" },
+                                text = title ?: if (currentDir.absolutePath == "/") "Root (/)" else currentDir.name.ifEmpty { "Storage" },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium
@@ -230,6 +237,7 @@ fun FileSelectionDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
+                        enabled = allowedExtensions == null || selectedFiles.isNotEmpty(),
                         onClick = {
                             val selection = selectedFiles.ifEmpty { listOf(currentDir) }
                             onItemsSelected(selection)
@@ -238,7 +246,7 @@ fun FileSelectionDialog(
                     ) {
                         Text(
                             if (selectedFiles.isEmpty()) {
-                                "Select this folder"
+                                if (allowedExtensions != null) "Select a file" else "Select this folder"
                             } else {
                                 "Select (${selectedFiles.size})"
                             }

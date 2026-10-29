@@ -6,14 +6,17 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.name
+import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
 import com.techflyers.compose.file.explorer.screen.viewer.media.MediaNotificationHelper
+import com.techflyers.compose.file.explorer.screen.viewer.video.model.SubtitleItem
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.VideoPlayerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +45,112 @@ class VideoPlayerInstance(
     private var positionTrackingJob: Job? = null
     private var mediaNotificationHelper: MediaNotificationHelper? = null
 
+    // Per-video URI custom or overridden subtitle selection
+    private val customSubtitlesByVideoUri = mutableMapOf<Uri, MutableList<SubtitleItem>>()
+    private val selectedSubtitleByVideoUri = mutableMapOf<Uri, SubtitleItem?>()
+
+    companion object {
+        val SUBTITLE_EXTENSIONS = setOf("srt", "vtt", "ass", "ssa", "ttml", "dfxp", "xml")
+
+        fun resolveSubtitleMimeType(fileName: String): String {
+            return when (fileName.substringAfterLast('.', "").lowercase()) {
+                "srt" -> MimeTypes.APPLICATION_SUBRIP
+                "vtt" -> MimeTypes.TEXT_VTT
+                "ass", "ssa" -> MimeTypes.TEXT_SSA
+                "ttml", "dfxp", "xml" -> MimeTypes.APPLICATION_TTML
+                else -> MimeTypes.APPLICATION_SUBRIP
+            }
+        }
+    }
+
+    private fun discoverSubtitlesForVideo(context: Context, videoUri: Uri): Pair<List<SubtitleItem>, SubtitleItem?> {
+        val resolvedPath = VideoPlayerActivity.resolveFilePath(context, videoUri)
+            ?: videoUri.path
+        val videoFile = resolvedPath?.let { File(it) }?.takeIf { it.exists() }
+        val parentDir = videoFile?.parentFile
+
+        val discovered = mutableListOf<SubtitleItem>()
+        var autoMatched: SubtitleItem? = null
+
+        if (videoFile != null && parentDir != null && parentDir.exists() && parentDir.isDirectory) {
+            val videoBase = videoFile.nameWithoutExtension.lowercase()
+            val subFiles = parentDir.listFiles { f ->
+                f.isFile && f.extension.lowercase() in SUBTITLE_EXTENSIONS
+            }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+            for (subFile in subFiles) {
+                val subBase = subFile.nameWithoutExtension.lowercase()
+                val isMatch = subBase == videoBase || subBase.startsWith("$videoBase.")
+                val item = SubtitleItem(
+                    uri = Uri.fromFile(subFile),
+                    name = subFile.name,
+                    mimeType = resolveSubtitleMimeType(subFile.name),
+                    language = extractLanguageTag(videoBase, subBase),
+                    isAutoMatched = isMatch
+                )
+                discovered.add(item)
+                if (isMatch && autoMatched == null) {
+                    autoMatched = item
+                }
+            }
+        }
+
+        // Merge any user-picked external subtitles for this video
+        customSubtitlesByVideoUri[videoUri]?.forEach { custom ->
+            if (discovered.none { it.uri == custom.uri }) {
+                discovered.add(custom)
+            }
+        }
+
+        val effectiveSelected = if (selectedSubtitleByVideoUri.containsKey(videoUri)) {
+            selectedSubtitleByVideoUri[videoUri]
+        } else {
+            autoMatched
+        }
+
+        return discovered to effectiveSelected
+    }
+
+    private fun extractLanguageTag(videoBase: String, subBase: String): String {
+        if (subBase.startsWith("$videoBase.")) {
+            val suffix = subBase.removePrefix("$videoBase.").trim()
+            if (suffix.length in 2..8) return suffix
+        }
+        return "en"
+    }
+
+    private fun buildMediaItemWithSubtitles(
+        context: Context,
+        itemUri: Uri,
+        overrideSelectedSub: SubtitleItem? = null,
+        hasExplicitOverride: Boolean = false
+    ): MediaItem {
+        val (_, autoMatched) = discoverSubtitlesForVideo(context, itemUri)
+        val activeSub = if (hasExplicitOverride) overrideSelectedSub else autoMatched
+
+        val builder = MediaItem.Builder().setUri(itemUri)
+        if (activeSub != null) {
+            val subConfig = MediaItem.SubtitleConfiguration.Builder(activeSub.uri)
+                .setMimeType(activeSub.mimeType)
+                .setLanguage(activeSub.language)
+                .setLabel(activeSub.name)
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT)
+                .build()
+            builder.setSubtitleConfigurations(listOf(subConfig))
+        }
+        return builder.build()
+    }
+
+    private fun syncSubtitleStateForUri(context: Context, currentUri: Uri) {
+        val (available, selected) = discoverSubtitlesForVideo(context, currentUri)
+        _playerState.update { state ->
+            state.copy(
+                availableSubtitles = available,
+                selectedSubtitleUri = selected?.uri
+            )
+        }
+    }
+
     suspend fun initializePlayer(context: Context, uri: Uri) {
         _playerState.update {
             it.copy(
@@ -62,30 +171,40 @@ class VideoPlayerInstance(
                 .build().apply {
                 val uris = playlist.ifEmpty { listOf(uri) }
                 val mediaItems = uris.map { itemUri ->
-                    MediaItem.Builder().setUri(itemUri).build()
+                    buildMediaItemWithSubtitles(context, itemUri)
                 }
                 setMediaItems(mediaItems)
                 repeatMode = _playerState.value.repeatMode
 
                 val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
+                val initialUri = uris.getOrNull(startIndex) ?: uri
+                val (initialSubs, initialSelectedSub) = discoverSubtitlesForVideo(context, initialUri)
+
                 seekTo(startIndex, 0)
                 prepare()
                 playWhenReady = true
 
                 volume = 1.0f
 
-                val initialTitle = if (uri.scheme == "file") {
-                    uri.path?.let { File(it).name } ?: uri.name
+                val initialTitle = if (initialUri.scheme == "file") {
+                    initialUri.path?.let { File(it).name } ?: initialUri.name
                 } else {
-                    uri.name
+                    initialUri.name
                 } ?: globalClass.getString(R.string.unknown)
 
                 _playerState.update { currentState ->
                     currentState.copy(
                         title = initialTitle,
                         currentPlaylistIndex = startIndex,
-                        isMuted = false
+                        isMuted = false,
+                        availableSubtitles = initialSubs,
+                        selectedSubtitleUri = initialSelectedSub?.uri,
+                        subtitlesEnabled = true
                     )
+                }
+
+                if (initialSelectedSub != null && initialSelectedSub.isAutoMatched) {
+                    globalClass.showMsg("Auto-loaded subtitle: ${initialSelectedSub.name}")
                 }
 
                 addListener(object : Player.Listener {
@@ -121,12 +240,15 @@ class VideoPlayerInstance(
                         } else {
                             currentUri.name
                         } ?: globalClass.getString(R.string.unknown)
+                        val (subs, selectedSub) = discoverSubtitlesForVideo(context, currentUri)
                         _playerState.update { currentState ->
                             currentState.copy(
                                 currentPlaylistIndex = currentIndex,
                                 title = trackTitle,
                                 currentPosition = 0L,
-                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
+                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L,
+                                availableSubtitles = subs,
+                                selectedSubtitleUri = selectedSub?.uri
                             )
                         }
                         updateNotification()
@@ -157,6 +279,85 @@ class VideoPlayerInstance(
 
         startPositionTracking()
         updateNotification()
+    }
+
+    fun selectSubtitle(context: Context, subtitle: SubtitleItem?) {
+        val player = exoPlayer ?: return
+        val currentIndex = player.currentMediaItemIndex
+        val uris = _playerState.value.playlist.ifEmpty { listOf(uri) }
+        val currentUri = uris.getOrNull(currentIndex) ?: uri
+
+        selectedSubtitleByVideoUri[currentUri] = subtitle
+
+        if (subtitle == null) {
+            toggleSubtitles(false)
+            _playerState.update { it.copy(selectedSubtitleUri = null) }
+            return
+        }
+
+        // Enable text track rendering and replace current MediaItem preserving playback position
+        val savedPosition = player.currentPosition
+        val wasPlaying = player.playWhenReady
+
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setPreferredTextLanguage(subtitle.language)
+            .build()
+
+        val updatedMediaItem = buildMediaItemWithSubtitles(
+            context = context,
+            itemUri = currentUri,
+            overrideSelectedSub = subtitle,
+            hasExplicitOverride = true
+        )
+
+        player.replaceMediaItem(currentIndex, updatedMediaItem)
+        player.seekTo(currentIndex, savedPosition)
+        player.playWhenReady = wasPlaying
+
+        syncSubtitleStateForUri(context, currentUri)
+        _playerState.update {
+            it.copy(
+                subtitlesEnabled = true,
+                selectedSubtitleUri = subtitle.uri
+            )
+        }
+        globalClass.showMsg("Subtitle loaded: ${subtitle.name}")
+    }
+
+    fun addAndSelectExternalSubtitle(context: Context, file: File) {
+        if (!file.exists() || !file.isFile) return
+        val uris = _playerState.value.playlist.ifEmpty { listOf(uri) }
+        val currentIndex = exoPlayer?.currentMediaItemIndex ?: 0
+        val currentUri = uris.getOrNull(currentIndex) ?: uri
+
+        val item = SubtitleItem(
+            uri = Uri.fromFile(file),
+            name = file.name,
+            mimeType = resolveSubtitleMimeType(file.name),
+            language = "en",
+            isAutoMatched = false
+        )
+        val list = customSubtitlesByVideoUri.getOrPut(currentUri) { mutableListOf() }
+        if (list.none { it.uri == item.uri }) {
+            list.add(item)
+        }
+        selectSubtitle(context, item)
+    }
+
+    fun toggleSubtitles(enabled: Boolean) {
+        exoPlayer?.let { player ->
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
+                .build()
+        }
+        _playerState.update { it.copy(subtitlesEnabled = enabled) }
+    }
+
+    fun setSubtitleTextSize(sizeSp: Float) {
+        _playerState.update { it.copy(subtitleTextSizeSp = sizeSp.coerceIn(12f, 36f)) }
     }
 
     private fun startPositionTracking() {

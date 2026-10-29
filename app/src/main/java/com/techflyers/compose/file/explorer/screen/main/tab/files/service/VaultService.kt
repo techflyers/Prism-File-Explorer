@@ -365,11 +365,155 @@ object VaultService {
 
         val extension = if (record.isFolder) ".zip" else ""
         val tempFilePath = File(context.cacheDir, "temp_vault_${record.id}_${record.originalName}$extension")
-        tempFilePath.outputStream().use { out ->
-            out.write(decryptedSignature)
-            out.write(restBytes)
+
+        // If this temp file already exists and has unsaved edits on disk, sync them first so we don't clobber edits
+        if (tempFilePath.exists() && !record.isFolder) {
+            syncTempFileIfNeeded(context, tempFilePath)
+            val updatedBytes = scrambledFile.readBytes()
+            val updatedObfuscatedSig = updatedBytes.copyOfRange(fileDataStart, minOf(fileDataStart + SCRAMBLE_SIZE, updatedBytes.size))
+            val updatedRest = updatedBytes.copyOfRange(minOf(fileDataStart + SCRAMBLE_SIZE, updatedBytes.size), updatedBytes.size)
+            val updatedKey = deriveKey(password.toString(), updatedObfuscatedSig.size)
+            val updatedDecryptedSig = xorBytes(updatedObfuscatedSig, updatedKey)
+            tempFilePath.outputStream().use { out ->
+                out.write(updatedDecryptedSig)
+                out.write(updatedRest)
+            }
+        } else {
+            tempFilePath.outputStream().use { out ->
+                out.write(decryptedSignature)
+                out.write(restBytes)
+            }
         }
+        tempFilePath.setWritable(true)
+        lastActivePassword = password.toString()
+        val session = ActiveVaultTempSession(
+            recordId = record.id,
+            password = password.toString(),
+            lastSyncedMtime = tempFilePath.lastModified(),
+            lastSyncedSize = tempFilePath.length()
+        )
+        activeTempSessions[tempFilePath.absolutePath] = session
+        runCatching { activeTempSessions[tempFilePath.canonicalPath] = session }
         return tempFilePath
+    }
+
+    private data class ActiveVaultTempSession(
+        val recordId: String,
+        val password: String,
+        var lastSyncedMtime: Long,
+        var lastSyncedSize: Long
+    )
+
+    @Volatile
+    var lastActivePassword: String = ""
+
+    private val activeTempSessions = java.util.concurrent.ConcurrentHashMap<String, ActiveVaultTempSession>()
+
+    fun isVaultTempFile(file: File): Boolean {
+        return file.name.startsWith("temp_vault_") ||
+                activeTempSessions.containsKey(file.absolutePath) ||
+                runCatching { activeTempSessions.containsKey(file.canonicalPath) }.getOrDefault(false)
+    }
+
+    /**
+     * Re-encrypts a modified temporary vault file back into its scrambled vault storage
+     * without deleting the temporary file so open editors can continue saving seamlessly.
+     */
+    @Synchronized
+    fun syncTempFileIfNeeded(context: Context, file: File): Boolean {
+        if (!file.exists() || !file.isFile) return false
+        val session = activeTempSessions[file.absolutePath]
+            ?: runCatching { activeTempSessions[file.canonicalPath] }.getOrNull()
+            ?: run {
+                if (!file.name.startsWith("temp_vault_")) return false
+                val afterPrefix = file.name.removePrefix("temp_vault_")
+                val recId = afterPrefix.substringBefore("_", "")
+                val pwd = lastActivePassword
+                if (recId.isEmpty() || pwd.isEmpty()) return false
+                ActiveVaultTempSession(recId, pwd, -1L, -1L).also {
+                    activeTempSessions[file.absolutePath] = it
+                }
+            }
+
+        val currentMtime = file.lastModified()
+        val currentSize = file.length()
+        if (session.lastSyncedMtime == currentMtime && session.lastSyncedSize == currentSize) {
+            return false
+        }
+
+        val records = loadRecords(context).toMutableList()
+        val recordIndex = records.indexOfFirst { it.id == session.recordId }
+        if (recordIndex == -1) return false
+        val record = records[recordIndex]
+        if (record.isFolder) return false
+
+        return try {
+            val fileBytes = file.readBytes()
+            val size = fileBytes.size.toLong()
+            val scrambleLen = minOf(SCRAMBLE_SIZE, fileBytes.size)
+            val scrambleBytes = fileBytes.copyOfRange(0, scrambleLen)
+            val restBytes = fileBytes.copyOfRange(scrambleLen, fileBytes.size)
+
+            val key = deriveKey(session.password, scrambleLen)
+            val obfuscatedBytes = xorBytes(scrambleBytes, key)
+
+            val metadata = mapOf(
+                "name" to record.originalName,
+                "path" to record.originalPath,
+                "size" to size,
+                "timestamp" to record.id,
+                "isFolder" to record.isFolder
+            )
+            val metadataBytes = Gson().toJson(metadata).toByteArray(Charsets.UTF_8)
+            val metaKey = deriveKey(session.password, metadataBytes.size)
+            val obfuscatedMetadata = xorBytes(metadataBytes, metaKey)
+
+            val targetFile = File(record.scrambledPath)
+            targetFile.parentFile?.mkdirs()
+            targetFile.outputStream().use { out ->
+                out.write(MAGIC_TAG.toByteArray(Charsets.UTF_8))
+                val metaLen = obfuscatedMetadata.size
+                out.write(
+                    byteArrayOf(
+                        ((metaLen shr 24) and 0xFF).toByte(),
+                        ((metaLen shr 16) and 0xFF).toByte(),
+                        ((metaLen shr 8) and 0xFF).toByte(),
+                        (metaLen and 0xFF).toByte()
+                    )
+                )
+                out.write(obfuscatedMetadata)
+                out.write(obfuscatedBytes)
+                out.write(restBytes)
+            }
+
+            records[recordIndex] = record.copy(size = size)
+            saveRecords(context, records)
+
+            session.lastSyncedMtime = file.lastModified()
+            session.lastSyncedSize = file.length()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    fun syncAllModifiedTempFiles(context: Context): Boolean {
+        var anySynced = false
+        for ((path, _) in activeTempSessions) {
+            val f = File(path)
+            if (f.exists() && syncTempFileIfNeeded(context, f)) {
+                anySynced = true
+            }
+        }
+        context.cacheDir.listFiles()?.forEach { f ->
+            if (f.isFile && f.name.startsWith("temp_vault_")) {
+                if (syncTempFileIfNeeded(context, f)) {
+                    anySynced = true
+                }
+            }
+        }
+        return anySynced
     }
 
     private fun zipDirectoryToBytes(directory: File): ByteArray {

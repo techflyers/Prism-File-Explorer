@@ -6,14 +6,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoDelete
+import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
+import androidx.compose.material.icons.rounded.EnhancedEncryption
+import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockReset
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.toFormattedSize
+import com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.RecycleBinManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -64,45 +70,39 @@ fun FileOperationContainer() {
         }
     }
 
-    Container(title = stringResource(R.string.file_operation)) {
+    Container(
+        title = stringResource(R.string.file_operation),
+        icon = Icons.Rounded.FolderSpecial
+    ) {
         PreferenceItem(
             label = "Auto-rename on file conflict",
-            supportingText = "Automatically duplicate with a new name instead of asking to duplicate, skip, overwrite, or cancel",
+            supportingText = "Automatically duplicate with a numbered name instead of prompting on copy/move conflicts",
             icon = Icons.Rounded.DriveFileRenameOutline,
             switchState = preferences.autoRenameOnConflict,
             onSwitchChange = { preferences.autoRenameOnConflict = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.auto_sign_merged_apk_bundle_files),
             supportingText = stringResource(R.string.auto_sign_merged_apk_bundle_files_description),
-            icon = Icons.Rounded.Key,
+            icon = Icons.Rounded.VerifiedUser,
             switchState = preferences.signMergedApkBundleFiles,
             onSwitchChange = { preferences.signMergedApkBundleFiles = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.move_to_recycle_bin),
-            supportingText = "Move deleted files to recycle bin by default instead of permanently deleting them",
+            supportingText = "Move deleted items to the Recycle Bin by default instead of permanently erasing them",
             icon = Icons.Rounded.DeleteSweep,
             switchState = preferences.moveToRecycleBin,
             onSwitchChange = { preferences.moveToRecycleBin = it }
         )
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.auto_empty_recycle_bin),
@@ -128,10 +128,7 @@ fun FileOperationContainer() {
         )
 
         if (preferences.autoEmptyRecycleBin) {
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                thickness = 3.dp
-            )
+            PreferenceDivider()
 
             PreferenceItem(
                 label = stringResource(R.string.recycle_bin_retention),
@@ -188,10 +185,7 @@ fun FileOperationContainer() {
             }
         }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.empty_recycle_bin),
@@ -245,15 +239,12 @@ fun FileOperationContainer() {
             )
         }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
-            label = "Clear Temporary Files",
-            supportingText = "Delete cached and temporary files created by Prism",
-            icon = Icons.Rounded.DeleteSweep,
+            label = "Clear temporary files",
+            supportingText = "Delete cached thumbnails, temporary extractions, and scratch files created by Prism",
+            icon = Icons.Rounded.CleaningServices,
             onClick = {
                 scope.launch {
                     val freed = withContext(Dispatchers.IO) {
@@ -263,21 +254,45 @@ fun FileOperationContainer() {
                 }
             }
         )
+    }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
+    // Dedicated Folder Security & Encryption Category
+    Container(
+        title = "Folder Security & Encryption",
+        icon = Icons.Rounded.Security
+    ) {
+        PreferenceItem(
+            label = "Encrypt locked folders",
+            supportingText = "Encrypt locked folder contents with AES-256 so external apps cannot access or read them",
+            icon = Icons.Rounded.EnhancedEncryption,
+            switchState = preferences.encryptLockedFolders,
+            onSwitchChange = { preferences.encryptLockedFolders = it }
         )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Automatic encryption for large folders (≥ 100 MB)",
+            supportingText = "Automatically encrypt locked folders when their total size is 100 MB or larger",
+            icon = Icons.Rounded.Lock,
+            switchState = preferences.autoEncryptLargeFolders,
+            onSwitchChange = { preferences.autoEncryptLargeFolders = it }
+        )
+
+        PreferenceDivider()
 
         var showResetLockDialog by remember { mutableStateOf(false) }
         var showResetVaultDialog by remember { mutableStateOf(false) }
+        val lockSummary = remember(showResetLockDialog, preferences.encryptLockedFolders, preferences.autoEncryptLargeFolders) {
+            FolderLockStore.getStatusSummary()
+        }
 
         PreferenceItem(
             label = stringResource(R.string.reset_folder_locks),
-            supportingText = "Clear all protected folder PINs and patterns",
-            icon = Icons.Rounded.Lock,
+            supportingText = lockSummary,
+            icon = Icons.Rounded.LockReset,
             onClick = {
-                if (!com.techflyers.compose.file.explorer.screen.main.tab.files.service.FolderLockStore.hasAnyLocks()) {
+                if (!FolderLockStore.hasAnyLocks()) {
                     globalClass.showMsg("No folders are currently locked")
                 } else {
                     showResetLockDialog = true
@@ -291,20 +306,17 @@ fun FileOperationContainer() {
                 mode = com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FolderLockDialogMode.RESET_CONFIRM,
                 onUnlocked = {
                     showResetLockDialog = false
-                    globalClass.showMsg("Folder locks reset successfully")
+                    globalClass.showMsg("Folder locks reset and contents decrypted")
                 },
                 onDismiss = { showResetLockDialog = false }
             )
         }
 
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            thickness = 3.dp
-        )
+        PreferenceDivider()
 
         PreferenceItem(
             label = stringResource(R.string.reset_vault),
-            supportingText = "Reset secure vault credentials and stored files",
+            supportingText = "Reset secure vault credentials and remove stored vault items",
             icon = Icons.Rounded.Key,
             onClick = { showResetVaultDialog = true }
         )

@@ -256,133 +256,34 @@ fun Toolbar(
         }
 
         if (isLandscape) {
-            val showInlineBreadcrumb = isFilesTab && globalClass.preferencesManager.showPathBar
             val isTabBarDisabledPref = globalClass.preferencesManager.disableTabBar
 
-            BoxWithConstraints(
+            Column(
                 modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart
+                verticalArrangement = Arrangement.Center
             ) {
-                val availableWidth = maxWidth
-                val estimatedTabsWidth = remember(
-                    state.tabs.size,
-                    state.selectedTabIndex,
-                    isTabBarDisabledPref,
-                    (activeTab as? FilesTab)?.tabViewLabel
-                ) {
-                    if (isTabBarDisabledPref) {
-                        165.dp
-                    } else {
-                        val tabsSum = state.tabs.sumOf { tab ->
-                            val labelLen = ((tab as? FilesTab)?.tabViewLabel ?: tab.header).length
-                            val base = maxOf(88, (labelLen * 7.5f).toInt() + 28)
-                            val pinExtra = if (tab.isPinned) 16 else 0
-                            base + pinExtra + 4
-                        }
-                        (36 + tabsSum).dp
-                    }
-                }
-
-                val filesTabForBreadcrumb = activeTab as? FilesTab
-                val estimatedBreadcrumbWidth = remember(
-                    showInlineBreadcrumb,
-                    filesTabForBreadcrumb?.currentPathSegments,
-                    filesTabForBreadcrumb?.highlightedPathSegment
-                ) {
-                    if (!showInlineBreadcrumb || filesTabForBreadcrumb == null) {
-                        0.dp
-                    } else {
-                        val segSum = filesTabForBreadcrumb.currentPathSegments.sumOf { seg ->
-                            val labelLen = when {
-                                seg.uniquePath == Environment.getExternalStorageDirectory().absolutePath -> 16
-                                seg.uniquePath == File.separator -> 4
-                                else -> seg.displayName.length
-                            }
-                            14 + (labelLen * 7.2f).toInt() + 14
-                        }
-                        (34 + segSum).dp
-                    }
-                }
-
-                val targetTabsMaxWidth = if (!showInlineBreadcrumb) {
-                    availableWidth
-                } else if (estimatedTabsWidth + estimatedBreadcrumbWidth <= availableWidth) {
-                    estimatedTabsWidth
+                if (isTabBarDisabledPref) {
+                    SingleRowTabsControl(state.tabs, state.selectedTabIndex)
                 } else {
-                    val minTabsWidth = minOf(
-                        estimatedTabsWidth,
-                        (availableWidth * 0.34f).coerceAtLeast(140.dp)
+                    InlineLandscapeTabBar(
+                        tabLayoutState = state.tabLayoutState,
+                        tabs = state.tabs,
+                        selectedTabIndex = state.selectedTabIndex,
+                        onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+                        onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() }
                     )
-                    val minBreadcrumbWidth = minOf(
-                        estimatedBreadcrumbWidth,
-                        (availableWidth * 0.35f).coerceAtLeast(150.dp)
-                    )
-                    val desiredBreadcrumb = estimatedBreadcrumbWidth.coerceAtMost(availableWidth - minTabsWidth)
-                    if (estimatedTabsWidth <= availableWidth - desiredBreadcrumb) {
-                        estimatedTabsWidth
-                    } else {
-                        val totalDesired = (estimatedTabsWidth.value + estimatedBreadcrumbWidth.value).coerceAtLeast(1f)
-                        val breadcrumbShare = (estimatedBreadcrumbWidth.value / totalDesired).coerceIn(0.38f, 0.68f)
-                        val allocatedBreadcrumb = (availableWidth * breadcrumbShare)
-                            .coerceIn(minBreadcrumbWidth, availableWidth - minTabsWidth)
-                        (availableWidth - allocatedBreadcrumb).coerceAtLeast(minTabsWidth)
-                    }
                 }
-
-                val animatedTabsMaxWidth by animateDpAsState(
-                    targetValue = targetTabsMaxWidth,
-                    label = "landscapeTabsMaxWidth"
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = if (showInlineBreadcrumb) {
-                            Modifier.widthIn(max = animatedTabsMaxWidth)
-                        } else {
-                            Modifier.weight(1f)
-                        },
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        if (isTabBarDisabledPref) {
-                            SingleRowTabsControl(state.tabs, state.selectedTabIndex)
-                        } else {
-                            InlineLandscapeTabBar(
-                                tabLayoutState = state.tabLayoutState,
-                                tabs = state.tabs,
-                                selectedTabIndex = state.selectedTabIndex,
-                                onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-                                onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() }
-                            )
-                        }
-                        if (isFilesTab) {
-                            FilesTabSubtitleIndicator(activeTab as FilesTab)
-                        } else {
-                            AnimatedVisibility(visible = subtitle.isNotEmpty()) {
-                                Text(
-                                    modifier = Modifier.alpha(0.7f),
-                                    text = subtitle,
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    lineHeight = 16.sp,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    if (showInlineBreadcrumb && filesTabForBreadcrumb != null) {
-                        VerticalDivider(
-                            modifier = Modifier
-                                .height(24.dp)
-                                .padding(horizontal = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                        )
-                        InlineToolbarBreadcrumb(
-                            tab = filesTabForBreadcrumb,
-                            modifier = Modifier.weight(1f)
+                if (isFilesTab) {
+                    FilesTabSubtitleIndicator(activeTab as FilesTab)
+                } else {
+                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+                        Text(
+                            modifier = Modifier.alpha(0.7f),
+                            text = subtitle,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            lineHeight = 16.sp,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -451,15 +352,40 @@ fun Toolbar(
                         )
                     }
                 }
-
-                // Quick sort button
-                QuickSortButton(filesTab, modifier = buttonModifier)
             }
+
+            if (filesTab.activeFolder !is VirtualFileHolder) {
+                val prefs = globalClass.preferencesManager
+                TooltipIconButton(
+                    tooltip = stringResource(R.string.show_directory_type_filter_ribbon),
+                    onClick = {
+                        prefs.showDirectoryTypeFilterRibbon = !prefs.showDirectoryTypeFilterRibbon
+                    },
+                    modifier = buttonModifier
+                ) {
+                    Icon(
+                        imageVector = if (prefs.showDirectoryTypeFilterRibbon) {
+                            Icons.Rounded.FilterList
+                        } else {
+                            Icons.Rounded.FilterListOff
+                        },
+                        contentDescription = stringResource(R.string.show_directory_type_filter_ribbon),
+                        tint = if (prefs.showDirectoryTypeFilterRibbon) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+
+            // Keep quick-sort popup in the top toolbar at all times
+            QuickSortButton(filesTab, modifier = buttonModifier)
 
             // Overflow menu
             MoreOptionsButton(modifier = buttonModifier)
         } else {
-            if (activeTab is HomeTab) {
+            if (activeTab is HomeTab && globalClass.preferencesManager.hideHomeSearchBar) {
                 TooltipIconButton(
                     tooltip = stringResource(R.string.search),
                     onClick = { activeTab.showSearchDialog = true },
@@ -1105,13 +1031,11 @@ fun QuickSortButton(tab: FilesTab, modifier: Modifier = Modifier) {
     } // end TooltipBox
 
     if (showOptionsDialog) {
-        val prefsBeforeDialog = remember(showOptionsDialog) { tab.sortingPrefs }
         FileSortingMenuDialog(
             show = true,
             tab = tab,
             onDismissRequest = {
                 showOptionsDialog = false
-                tab.applySortingChange(prefsBeforeDialog)
             }
         )
     }
@@ -1264,53 +1188,59 @@ fun InlineLandscapeTabBar(
     var from by remember { mutableIntStateOf(-1) }
     var to by remember { mutableIntStateOf(-1) }
     var draggedItem by remember { mutableIntStateOf(-1) }
+    var isDraggingAnyTab by remember { mutableStateOf(false) }
+    var lastDragFinishedTime by remember { mutableLongStateOf(0L) }
     val list = remember { mutableStateListOf<Int>() }
     var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
 
     val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
-        if (draggedItem > -1) {
+        if (draggedItem > -1 || isDraggingAnyTab) {
             if (from < 0) from = old.index
             to = new.index
             list.add(new.index, list.removeAt(old.index))
         }
     }
 
-    LaunchedEffect(draggedItem) {
-        if (draggedItem < 0 && from > -1 && to > -1) {
+    LaunchedEffect(draggedItem, isDraggingAnyTab) {
+        if (draggedItem < 0 && !isDraggingAnyTab && from > -1 && to > -1) {
+            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
             onReorder(from, to)
             from = -1
             to = -1
         }
     }
 
-    LaunchedEffect(tabs) {
+    if (!isDraggingAnyTab && draggedItem < 0) {
         if (list.size == tabs.size) {
             tabs.forEachIndexed { idx, tab ->
-                if (list[idx] != tab.id) {
-                    list[idx] = tab.id
+                if (list[idx] != tab.slotId) {
+                    list[idx] = tab.slotId
                 }
             }
         } else {
             list.clear()
-            list.addAll(tabs.map { it.id })
+            list.addAll(tabs.map { it.slotId })
         }
     }
+
+    val plusOnLeft = globalClass.preferencesManager.tabBarPlusButtonOnLeft
 
     Row(
         modifier = modifier.height(34.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
-            onClick = onAddNewTab,
-            modifier = Modifier.size(30.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Add,
-                contentDescription = "New Tab",
-                modifier = Modifier.size(18.dp)
-            )
+        if (plusOnLeft) {
+            IconButton(
+                onClick = onAddNewTab,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "New Tab",
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
-
         LazyRow(
             modifier = Modifier
                 .weight(1f, fill = false)
@@ -1318,21 +1248,32 @@ fun InlineLandscapeTabBar(
             state = tabLayoutState,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(list, key = { _, item -> item }) { index, id ->
-                tabs.find { it.id == id }?.let { tab ->
-                    ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
-                        if (isDragged && draggedItem != id) {
-                            draggedItem = id
-                        } else if (!isDragged && draggedItem == id) {
+            itemsIndexed(list, key = { _, item -> item }) { index, slotId ->
+                tabs.find { it.slotId == slotId }?.let { tab ->
+                    ReorderableItem(reorderableLazyListState, key = tab.slotId) { isDragged ->
+                        if (isDragged && draggedItem != slotId) {
+                            draggedItem = slotId
+                            isDraggingAnyTab = true
+                        } else if (!isDragged && draggedItem == slotId) {
                             draggedItem = -1
+                            isDraggingAnyTab = false
+                            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                         }
 
                         val isSelected = selectedTabIndex == index
                         val isCopyHereDestination = (tab as? FilesTab)?.copyHereTargetFolder != null
+                        val isDragHovered = mainActivityManager.activeDragSourceTab != null &&
+                                mainActivityManager.hoveredTabDropIndex == index
+
+                        androidx.compose.runtime.DisposableEffect(index, tab.id) {
+                            onDispose {
+                                mainActivityManager.unregisterTabDropTarget(index)
+                            }
+                        }
 
                         val backgroundColorAnim = animateColorAsState(
                             targetValue =
-                                if (isDragged) {
+                                if (isDragged || isDragHovered) {
                                     draggedTabBackgroundColor
                                 } else if (isCopyHereDestination) {
                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isSelected) 0.9f else 0.55f)
@@ -1346,7 +1287,7 @@ fun InlineLandscapeTabBar(
 
                         val textColorAnim = animateColorAsState(
                             targetValue =
-                                if (isDragged) {
+                                if (isDragged || isDragHovered) {
                                     draggedTabTextColor
                                 } else if (isCopyHereDestination) {
                                     MaterialTheme.colorScheme.onPrimaryContainer
@@ -1357,15 +1298,18 @@ fun InlineLandscapeTabBar(
                         )
 
                         val alphaAnim = animateFloatAsState(
-                            targetValue = if ((isSelected || isCopyHereDestination) && draggedItem == -1) 1f else 0.55f,
+                            targetValue = if ((isSelected || isCopyHereDestination || isDragHovered) && draggedItem == -1) 1f else 0.55f,
                             label = "landscapeTabAlpha"
                         )
 
                         var showTabHeaderMenu by remember(tab.id) {
                             mutableStateOf(false)
                         }
-                        var lastClickTime by remember(tab.id) {
-                            mutableLongStateOf(0L)
+
+                        LaunchedEffect(isDragged, isDraggingAnyTab, draggedItem) {
+                            if (isDragged || isDraggingAnyTab || draggedItem != -1) {
+                                showTabHeaderMenu = false
+                            }
                         }
 
                         Row(
@@ -1373,6 +1317,9 @@ fun InlineLandscapeTabBar(
                                 .defaultMinSize(minWidth = 76.dp)
                                 .fillMaxHeight()
                                 .padding(end = 4.dp)
+                                .onGloballyPositioned { coords ->
+                                    mainActivityManager.registerTabDropTarget(index, coords)
+                                }
                                 .background(
                                     color = backgroundColorAnim.value,
                                     shape = tabShape
@@ -1383,31 +1330,47 @@ fun InlineLandscapeTabBar(
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
                                         val currentTime = android.os.SystemClock.uptimeMillis()
-                                        if (currentTime - lastClickTime < 300L) {
-                                            lastClickTime = 0L
+                                        if (isDragged || isDraggingAnyTab || draggedItem != -1 ||
+                                            (currentTime - lastDragFinishedTime) < 400L
+                                        ) {
                                             showTabHeaderMenu = false
-                                            if (!tab.isPinned) {
-                                                if (tabs.size > 1) {
-                                                    mainActivityManager.removeTabAt(index)
-                                                } else if (tab !is HomeTab) {
-                                                    mainActivityManager.replaceCurrentTabWith(HomeTab())
-                                                }
-                                            }
+                                            return@combinedClickable
+                                        }
+                                        if (!isSelected) {
+                                            mainActivityManager.selectTabAt(index)
                                         } else {
-                                            lastClickTime = currentTime
-                                            if (!isSelected) {
-                                                mainActivityManager.selectTabAt(index)
-                                            } else {
-                                                showTabHeaderMenu = true
-                                            }
+                                            showTabHeaderMenu = true
                                         }
                                     },
                                     onLongClick = {
-                                        showTabHeaderMenu = true
+                                        if (!isDragged && !isDraggingAnyTab && draggedItem == -1) {
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index, true)
+                                            }
+                                            showTabHeaderMenu = true
+                                        }
                                     }
                                 )
                                 .padding(horizontal = 12.dp)
-                                .longPressDraggableHandle()
+                                .longPressDraggableHandle(
+                                    onDragStarted = {
+                                        isDraggingAnyTab = true
+                                        showTabHeaderMenu = false
+                                    },
+                                    onDragStopped = {
+                                        val didReorder = from > -1 && to > -1 && from != to
+                                        isDraggingAnyTab = false
+                                        lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
+                                        if (!didReorder) {
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index, true)
+                                            }
+                                            showTabHeaderMenu = true
+                                        } else {
+                                            showTabHeaderMenu = false
+                                        }
+                                    }
+                                )
                                 .then(
                                     if (!globalClass.preferencesManager.disableNavigationGestures && !tab.isPinned) {
                                         Modifier.detectVerticalSwipe(
@@ -1455,7 +1418,7 @@ fun InlineLandscapeTabBar(
                                 fontWeight = if (isSelected || isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
                                 color = textColorAnim.value
                             )
-                            if (showTabHeaderMenu) {
+                            if (showTabHeaderMenu && !isDragged && !isDraggingAnyTab && draggedItem == -1) {
                                 OptionsMenu(
                                     tab = tab,
                                     index = index,
@@ -1466,6 +1429,19 @@ fun InlineLandscapeTabBar(
                         }
                     }
                 }
+            }
+        }
+
+        if (!plusOnLeft) {
+            IconButton(
+                onClick = onAddNewTab,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "New Tab",
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -1517,7 +1493,7 @@ fun InlineToolbarBreadcrumb(
                 return Offset(available.x, 0f)
             }
 
-            override suspend fun onPreFling(available: Velocity): Velocity {
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 return Velocity(available.x, 0f)
             }
         }
@@ -1533,6 +1509,8 @@ fun InlineToolbarBreadcrumb(
 
         Box(
             modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
                 .onGloballyPositioned { coordinates ->
                     if (!isHomeCurrentFolder) {
                         tab.registerDropTarget(tab.homeDir, coordinates)
@@ -1549,17 +1527,17 @@ fun InlineToolbarBreadcrumb(
                             .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
                     } else Modifier
                 )
+                .combinedClickable(
+                    onClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeTap() },
+                    onLongClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeLongPress(tab) }
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            IconButton(
-                onClick = { tab.openFolder(tab.homeDir, false) },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Home,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
+            Icon(
+                imageVector = Icons.Rounded.Home,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
         }
 
         LazyRow(

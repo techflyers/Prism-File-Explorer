@@ -19,12 +19,17 @@ object NetworkConnectionsService {
         }
     }
 
+    fun getConnectionById(context: Context, id: String): NetworkConnectionModel? {
+        return getConnections(context).firstOrNull { it.id == id }
+    }
+
     fun saveConnection(context: Context, conn: NetworkConnectionModel) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = getConnections(context).toMutableList()
         val index = current.indexOfFirst { it.id == conn.id }
         if (index >= 0) {
             current[index] = conn
+            RemoteConnectionPool.release(conn.id)
         } else {
             current.add(conn)
         }

@@ -9,5 +9,6 @@ data class ClosedTabEntry(
     val subtitle: String = "",
     val originalIndex: Int = -1,
     val timestamp: Long = System.currentTimeMillis(),
-    val createTab: () -> Tab
+    val createTab: () -> Tab,
+    val onReopen: (() -> Unit)? = null
 )

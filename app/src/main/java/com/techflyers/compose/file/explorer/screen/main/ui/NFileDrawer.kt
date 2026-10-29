@@ -77,7 +77,7 @@ fun NFileDrawerContent(
     val mainActivityState by manager.state.collectAsState()
     val storageList = mainActivityState.storageDevices
     var remoteConnections by remember {
-        mutableStateOf(NetworkConnectionsService.getConnections(context))
+        mutableStateOf(emptyList<NetworkConnectionModel>())
     }
     var isRefreshing by remember { mutableStateOf(false) }
     val editingSections = remember { mutableStateMapOf<String, Boolean>() }
@@ -104,7 +104,7 @@ fun NFileDrawerContent(
                 manager.updateStorageDevices()
             }
             while (isActive && drawerState.isOpen) {
-                delay(3000)
+                delay(15_000)
                 manager.updateStorageDevices()
             }
         }
@@ -476,7 +476,10 @@ fun NFileDrawerContent(
                             isHiddenItem = webShareHidden,
                             onToggleVisibility = { toggleItemHidden("tool_web_share") }
                         ) {
-                            manager.openToolInNewTab(WebSharingTab())
+                            val currentDir = ((manager.getActiveTab() as? FilesTab)?.activeFolder as? LocalFileHolder)?.file?.let {
+                                if (it.isDirectory) it.absolutePath else it.parentFile?.absolutePath
+                            }
+                            manager.openToolInNewTab(WebSharingTab(initialDirectoryPath = currentDir))
                             onNavigate()
                         }
                     }
@@ -577,16 +580,31 @@ fun NFileDrawerContent(
                                 }
                                 IconButton(
                                     onClick = {
+                                        manager.openToolInNewTab(NetworkConnectionWizardTab(editingConnection = conn))
+                                        onNavigate()
+                                    },
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Edit,
+                                        contentDescription = "Edit Connection",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = {
                                         NetworkConnectionsService.deleteConnection(context, conn.id)
                                         remoteConnections = NetworkConnectionsService.getConnections(context)
                                     },
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(26.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Delete,
                                         contentDescription = "Delete Connection",
                                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }

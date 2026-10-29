@@ -91,6 +91,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
+import com.techflyers.compose.file.explorer.common.toFormattedDate
 import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
@@ -118,6 +119,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -161,33 +163,68 @@ fun ColumnScope.FilesList(tab: FilesTab) {
         }
     }
 
-    // Resolve parent folder once for the `..` entry
-    var parentFolder by remember(tab.activeFolder.uniquePath) {
-        mutableStateOf<ContentHolder?>(null)
-    }
-    var parentFolderResolved by remember(tab.activeFolder.uniquePath) {
-        mutableStateOf(false)
-    }
-    LaunchedEffect(tab.activeFolder.uniquePath) {
-        parentFolder = withContext(IO) {
-            if (preferencesManager.showParentDirectoryEntry
-                && tab.activeFolder !is VirtualFileHolder
-            ) {
-                val p = tab.activeFolder.getParent()
-                if (p != null && p.isValid() && p.canRead) p else null
-            } else null
-        }
-        parentFolderResolved = true
-    }
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    // Use pre-resolved parent folder on tab so `..` entry and scroll state are available synchronously on the very first frame
+    val hideParentBecauseLandscapeBreadcrumb = isLandscape && preferencesManager.showPathBar
+    val parentFolder: ContentHolder? = if (preferencesManager.showParentDirectoryEntry
+        && !hideParentBecauseLandscapeBreadcrumb
+        && tab.activeFolder !is VirtualFileHolder
+    ) {
+        tab.activeParentFolder
+    } else null
+    val parentFolderResolved = true
 
     val areaSwipeDensity = LocalDensity.current
     val areaSwipeThresholdPx = with(areaSwipeDensity) { 56.dp.toPx() }
     val areaSwipeTouchSlop = LocalViewConfiguration.current.touchSlop
     val middleZonePercent = preferencesManager.middleSwipeZoneWidthPercent
 
+    val subCategoryOffsetAnim = remember { androidx.compose.animation.core.Animatable(0f) }
+    val subCategoryAlphaAnim = remember { androidx.compose.animation.core.Animatable(1f) }
+    var isDraggingSubCategory by remember { mutableStateOf(false) }
+
+    fun applySubCategoryTension(rawAbs: Float, limit: Float): Float {
+        return if (rawAbs < limit) {
+            rawAbs * 0.55f
+        } else {
+            val excess = rawAbs - limit
+            val decay = kotlin.math.exp(-excess / limit * 1.8f)
+            (limit * 0.55f) + (excess * 0.28f * decay)
+        }
+    }
+
+    // Trigger quick sweeping slide animation when sub-category is switched via CategoriesRow tap/swipe
+    LaunchedEffect(tab.subCategoryTransitionVersion) {
+        if (tab.subCategoryTransitionVersion > 0 && !isDraggingSubCategory) {
+            val dir = tab.subCategoryTransitionDirection
+            val slideDist = with(areaSwipeDensity) { 72.dp.toPx() }
+            subCategoryOffsetAnim.snapTo(if (dir >= 0) slideDist else -slideDist)
+            subCategoryAlphaAnim.snapTo(0.65f)
+            launch {
+                subCategoryAlphaAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = androidx.compose.animation.core.tween(180)
+                )
+            }
+            subCategoryOffsetAnim.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
     Box(
         Modifier
             .weight(1f)
+            .graphicsLayer {
+                translationX = subCategoryOffsetAnim.value
+                alpha = subCategoryAlphaAnim.value
+            }
             .then(
                 if (!preferencesManager.disableNavigationGestures && tab.showCategories && tab.categories.isNotEmpty()) {
                     Modifier.pointerInput(
@@ -206,6 +243,8 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                             var totalDx = 0f
                             var totalDy = 0f
                             var lockedHorizontal = false
+                            val currentIdx = tab.selectedCategory?.let { tab.categories.indexOf(it) + 1 } ?: 0
+                            val maxIdx = tab.categories.size
 
                             do {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -221,25 +260,79 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                                     }
                                     if (kotlin.math.abs(totalDx) > areaSwipeTouchSlop && kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy) * 1.2f) {
                                         lockedHorizontal = true
+                                        isDraggingSubCategory = true
                                     }
                                 }
 
                                 if (lockedHorizontal) {
                                     change.consume()
+                                    val atLowerBound = currentIdx == 0 && totalDx > 0f
+                                    val atUpperBound = currentIdx == maxIdx && totalDx < 0f
+                                    val visualOffset = if (atLowerBound || atUpperBound) {
+                                        val sign = if (totalDx >= 0f) 1f else -1f
+                                        sign * applySubCategoryTension(kotlin.math.abs(totalDx), areaSwipeThresholdPx * 1.2f)
+                                    } else {
+                                        (totalDx * 0.65f).coerceIn(-size.width * 0.45f, size.width * 0.45f)
+                                    }
+                                    coroutineScope.launch {
+                                        subCategoryOffsetAnim.snapTo(visualOffset)
+                                    }
                                 }
                             } while (event.changes.any { it.pressed })
 
-                            if (lockedHorizontal && kotlin.math.abs(totalDx) >= areaSwipeThresholdPx) {
-                                val currentIdx = tab.selectedCategory?.let { tab.categories.indexOf(it) + 1 } ?: 0
-                                val maxIdx = tab.categories.size
-                                val nextIdx = if (totalDx < 0f) {
-                                    (currentIdx + 1).coerceAtMost(maxIdx)
+                            if (lockedHorizontal) {
+                                val atLowerBound = currentIdx == 0 && totalDx > 0f
+                                val atUpperBound = currentIdx == maxIdx && totalDx < 0f
+                                if (!atLowerBound && !atUpperBound && kotlin.math.abs(totalDx) >= areaSwipeThresholdPx) {
+                                    val nextIdx = if (totalDx < 0f) {
+                                        (currentIdx + 1).coerceAtMost(maxIdx)
+                                    } else {
+                                        (currentIdx - 1).coerceAtLeast(0)
+                                    }
+                                    if (nextIdx != currentIdx) {
+                                        val dir = if (nextIdx > currentIdx) 1 else -1
+                                        tab.selectedCategory = if (nextIdx == 0) null else tab.categories.getOrNull(nextIdx - 1)
+                                        tab.reloadFiles()
+                                        val incomingOffset = if (dir > 0) size.width * 0.28f else -size.width * 0.28f
+                                        coroutineScope.launch {
+                                            subCategoryOffsetAnim.snapTo(incomingOffset)
+                                            subCategoryAlphaAnim.snapTo(0.65f)
+                                            launch {
+                                                subCategoryAlphaAnim.animateTo(1f, androidx.compose.animation.core.tween(180))
+                                            }
+                                            subCategoryOffsetAnim.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                            isDraggingSubCategory = false
+                                        }
+                                    } else {
+                                        coroutineScope.launch {
+                                            subCategoryOffsetAnim.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                            isDraggingSubCategory = false
+                                        }
+                                    }
                                 } else {
-                                    (currentIdx - 1).coerceAtLeast(0)
-                                }
-                                if (nextIdx != currentIdx) {
-                                    tab.selectedCategory = if (nextIdx == 0) null else tab.categories.getOrNull(nextIdx - 1)
-                                    tab.reloadFiles()
+                                    // Bouncy snap-back when bounds are reached or swipe is below threshold
+                                    coroutineScope.launch {
+                                        subCategoryOffsetAnim.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                        isDraggingSubCategory = false
+                                    }
                                 }
                             }
                         }
@@ -262,6 +355,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 isRefreshing = isRefreshing,
                 onRefresh = {
                     isRefreshing = true
+                    tab.invalidateFolderListingCache(tab.activeFolder.uniquePath)
                     tab.openFolder(tab.activeFolder, true, true)
                     coroutineScope.launch {
                         delay(100)
@@ -285,6 +379,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 isRefreshing = isRefreshing,
                 onRefresh = {
                     isRefreshing = true
+                    tab.invalidateFolderListingCache(tab.activeFolder.uniquePath)
                     tab.openFolder(tab.activeFolder, true, true)
                     coroutineScope.launch {
                         delay(100)
@@ -638,11 +733,11 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                     if (tab.selectedFiles.isNotEmpty() && copyHereTarget.uniquePath != tab.activeFolder.uniquePath) {
                         ExtendedFloatingActionButton(
                             onClick = {
-                                taskManager.addTaskAndRun(
-                                    CopyTask(tab.selectedFiles.values.toList(), deleteSourceFiles = false),
-                                    CopyTaskParameters(copyHereTarget)
+                                tab.requestCopyHereTransfer(
+                                    items = tab.selectedFiles.values.toList(),
+                                    targetFolder = copyHereTarget,
+                                    deleteSourceFiles = null
                                 )
-                                tab.unselectAllFiles()
                             },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -857,92 +952,146 @@ fun FilesListColumns(
     val viewConfiguration = LocalViewConfiguration.current
 
     val density = LocalDensity.current
+    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
-    DisposableEffect(tab.activeFolder.uniquePath, listStates) {
-        tab.onRequestScrollAboveRibbon = { itemIndex ->
-            if (itemIndex in 0 until totalItems) {
-                val colIndex = (itemIndex / chunkSize).coerceIn(0, listStates.lastIndex)
-                val sliceIndex = itemIndex % chunkSize
-                val listState = listStates[colIndex]
-                coroutineScope.launch {
-                    val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
-                    val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar
-                    val ribbonHeightPx = with(density) { (if (isTwoRows) 112.dp else 56.dp).toPx() }
-                    val toolbarHeightPx = with(density) { (if (enableBottomToolbar) 56.dp else 0.dp).toPx() }
-                    val bottomBarExpansionPx = (ribbonHeightPx - toolbarHeightPx).coerceAtLeast(0f)
-                    val marginPx = with(density) { 36.dp.toPx() }
+    val taskManager = globalClass.taskManager
+    val hasPendingCopyTask = remember(taskManager.pendingTasksVersion, tab.activeFolder.uniquePath) {
+        taskManager.pendingTasks.filterIsInstance<CopyTask>().isNotEmpty() &&
+                tab.activeFolder.canAddNewContent &&
+                tab.activeFolder !is VirtualFileHolder
+    }
+    val hasCopyHereFab = tab.copyHereTargetFolder != null ||
+            globalClass.mainActivityManager.state.value.tabs.any { (it as? FilesTab)?.copyHereTargetFolder != null }
+    val bottomContentPadding = if (hasPendingCopyTask || hasCopyHereFab) 88.dp else 0.dp
 
-                    val initialVisible = listState.layoutInfo.visibleItemsInfo.find { it.index == sliceIndex }
-                    val initialViewport = listState.layoutInfo.viewportSize.height.toFloat()
-                    val precomputedOverlap = if (initialVisible != null && initialViewport > 0f) {
-                        val itemBottom = (initialVisible.offset + initialVisible.size).toFloat()
-                        val safeBottom = initialViewport - bottomBarExpansionPx - marginPx
-                        (itemBottom - safeBottom).coerceAtLeast(0f)
-                    } else 0f
+    val currentRequestScrollAboveRibbon by androidx.compose.runtime.rememberUpdatedState<(Int) -> Unit> { itemIndex ->
+        if (!globalClass.preferencesManager.disableAutoScrollOnBottomSelection && itemIndex in 0 until totalItems) {
+            val colIndex = (itemIndex / chunkSize).coerceIn(0, listStates.lastIndex)
+            val sliceIndex = itemIndex % chunkSize
+            val slice = columnSlices.getOrNull(colIndex) ?: return@rememberUpdatedState
+            val listState = listStates[colIndex]
 
-                    // Wait 60 ms for layout measurements and toolbar/ribbon resize to settle before measuring overlap
-                    delay(60)
+            val beforeLayout = listState.layoutInfo
+            val beforeViewportEnd = beforeLayout.viewportEndOffset
+            val beforeItem = beforeLayout.visibleItemsInfo.find { it.index == sliceIndex }
+            val beforeItemBottom = beforeItem?.let { it.offset + it.size }
+            val beforeItemSize = beforeItem?.size
 
-                    val visibleItem = listState.layoutInfo.visibleItemsInfo.find { it.index == sliceIndex }
-                    val currentViewport = listState.layoutInfo.viewportSize.height.toFloat()
-                    val effectiveSafeBottom = if (currentViewport > 0f) {
-                        if (currentViewport < initialViewport) {
-                            currentViewport - marginPx
-                        } else {
-                            currentViewport - bottomBarExpansionPx - marginPx
-                        }
-                    } else 0f
+            autoScrollJob?.cancel()
+            autoScrollJob = coroutineScope.launch {
+                // Wait for selection state and BottomOptionsBar layout measurement to settle
+                androidx.compose.runtime.withFrameNanos { }
+                androidx.compose.runtime.withFrameNanos { }
 
-                    val actualOverlap = if (visibleItem != null && effectiveSafeBottom > 0f) {
-                        val itemBottom = (visibleItem.offset + visibleItem.size).toFloat()
-                        (itemBottom - effectiveSafeBottom).coerceAtLeast(0f)
-                    } else 0f
+                val afterLayout = listState.layoutInfo
+                val afterViewportEnd = afterLayout.viewportEndOffset
+                if (afterViewportEnd <= 0) return@launch
 
-                    val finalOverlap = maxOf(precomputedOverlap, actualOverlap)
+                val afterItem = afterLayout.visibleItemsInfo.find { it.index == sliceIndex }
+                val lastVisible = afterLayout.visibleItemsInfo.lastOrNull()
 
-                    if (finalOverlap > 0f) {
-                        try {
-                            listState.animateScrollBy(finalOverlap)
-                        } catch (_: Exception) {}
-                    } else if (visibleItem == null && initialVisible == null) {
-                        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-                        if (lastVisible != null && sliceIndex > lastVisible.index) {
-                            val itemsAway = sliceIndex - lastVisible.index
-                            val itemHeight = lastVisible.size.toFloat().coerceAtLeast(100f)
-                            val scrollDelta = itemsAway * itemHeight + bottomBarExpansionPx + marginPx
-                            try {
-                                listState.animateScrollBy(scrollDelta)
-                            } catch (_: Exception) {}
-                        }
+                val itemSize: Int
+                val itemBottom: Int
+                when {
+                    afterItem != null -> {
+                        itemSize = afterItem.size
+                        itemBottom = afterItem.offset + afterItem.size
                     }
+                    beforeItemBottom != null && afterViewportEnd < beforeViewportEnd -> {
+                        itemSize = beforeItemSize ?: 0
+                        itemBottom = beforeItemBottom
+                    }
+                    lastVisible != null && sliceIndex > lastVisible.index -> {
+                        itemSize = lastVisible.size
+                        itemBottom = lastVisible.offset + lastVisible.size +
+                                (sliceIndex - lastVisible.index) * lastVisible.size
+                    }
+                    else -> return@launch
+                }
+
+                val hasMoreRowsBelow = sliceIndex < slice.lastIndex
+                val scrollDelta = if (!hasMoreRowsBelow) {
+                    (itemBottom - afterViewportEnd).toFloat()
+                } else {
+                    val triggerZonePx = with(density) { 12.dp.toPx() }
+                    val peekPx = minOf(itemSize * 0.35f, with(density) { 24.dp.toPx() })
+                    if (itemBottom > afterViewportEnd - triggerZonePx) {
+                        itemBottom - (afterViewportEnd - peekPx)
+                    } else {
+                        0f
+                    }
+                }
+
+                if (scrollDelta > 1f) {
+                    try {
+                        listState.animateScrollBy(
+                            value = scrollDelta,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                    } catch (_: Exception) {}
                 }
             }
         }
+    }
+
+    DisposableEffect(tab) {
+        tab.onRequestScrollAboveRibbon = { index -> currentRequestScrollAboveRibbon(index) }
+        tab.onCancelAutoScroll = { autoScrollJob?.cancel() }
         onDispose {
+            autoScrollJob?.cancel()
             tab.onRequestScrollAboveRibbon = null
+            tab.onCancelAutoScroll = null
         }
     }
 
-    fun findColumnItemIndex(offset: Offset, viewportWidth: Float): Int? {
-        if (tab.activeFolderContent.isEmpty()) return null
+    fun findColumnItemIndex(offset: Offset, viewportWidth: Float, clampToVisible: Boolean = false): Int? {
+        if (snapshot.isEmpty()) return null
         val x = offset.x
-        val y = offset.y.toInt()
+        val rawY = offset.y.toInt()
         val colWidth = if (cols > 0) viewportWidth / cols else viewportWidth
         val colIndex = (x / colWidth).toInt().coerceIn(0, cols - 1)
         val listState = listStates.getOrNull(colIndex) ?: return null
         val slice = columnSlices.getOrNull(colIndex) ?: return null
         if (slice.isEmpty()) return null
 
-        val exact = listState.layoutInfo.visibleItemsInfo.find { info ->
-            y >= info.offset && y <= info.offset + info.size
+        val visibleItems = listState.layoutInfo.visibleItemsInfo
+        if (visibleItems.isEmpty()) return null
+
+        val y = if (clampToVisible) {
+            val minY = visibleItems.first().offset
+            val maxY = (visibleItems.last().offset + visibleItems.last().size - 1).coerceAtLeast(minY)
+            rawY.coerceIn(minY, maxY)
+        } else {
+            rawY
+        }
+
+        val exact = visibleItems.find { info ->
+            y >= info.offset && y < info.offset + info.size
         }
         val tolerance = 24
-        val itemInfo = exact ?: listState.layoutInfo.visibleItemsInfo.find { info ->
+        val itemInfo = exact ?: visibleItems.find { info ->
             y >= info.offset - tolerance && y <= info.offset + info.size + tolerance
-        } ?: return null
+        } ?: if (clampToVisible) {
+            visibleItems.minByOrNull { info ->
+                val center = info.offset + info.size / 2
+                kotlin.math.abs(y - center)
+            }
+        } else null
+        if (itemInfo == null) return null
 
+        val itemKey = itemInfo.key as? String
         val sliceIndex = itemInfo.index
         val globalIndex = colIndex * chunkSize + sliceIndex
+        if (itemKey != null) {
+            if (snapshot.getOrNull(globalIndex)?.uniquePath == itemKey) {
+                return globalIndex
+            }
+            val resolved = snapshot.indexOfFirst { it.uniquePath == itemKey }
+            if (resolved >= 0) return resolved
+        }
         return if (globalIndex in 0 until totalItems) globalIndex else null
     }
 
@@ -1003,7 +1152,7 @@ fun FilesListColumns(
                     viewConfiguration = viewConfiguration,
                     haptic = haptic,
                     coroutineScope = coroutineScope,
-                    findItemIndexAt = { offset, size -> findColumnItemIndex(offset, size.width.toFloat()) },
+                    findItemIndexAt = { offset, size, clamp -> findColumnItemIndex(offset, size.width.toFloat(), clamp) },
                     scrollBy = { delta, offset, size -> getScrollStateForOffset(offset, size.width.toFloat())?.scrollBy(delta) },
                     onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) }
                 )
@@ -1016,7 +1165,7 @@ fun FilesListColumns(
                         .fillMaxHeight()
                         .fastScrollbar(listState),
                     state = listState,
-                    contentPadding = PaddingValues(bottom = 128.dp)
+                    contentPadding = PaddingValues(bottom = bottomContentPadding)
                 ) {
                     itemsIndexed(
                         slice,
@@ -1050,6 +1199,16 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val viewConfiguration = LocalViewConfiguration.current
+
+    val taskManager = globalClass.taskManager
+    val hasPendingCopyTask = remember(taskManager.pendingTasksVersion, tab.activeFolder.uniquePath) {
+        taskManager.pendingTasks.filterIsInstance<CopyTask>().isNotEmpty() &&
+                tab.activeFolder.canAddNewContent &&
+                tab.activeFolder !is VirtualFileHolder
+    }
+    val hasCopyHereFab = tab.copyHereTargetFolder != null ||
+            globalClass.mainActivityManager.state.value.tabs.any { (it as? FilesTab)?.copyHereTargetFolder != null }
+    val bottomContentPadding = if (hasPendingCopyTask || hasCopyHereFab) 88.dp else 0.dp
 
     LaunchedEffect(
         tab.pendingLocateFilePath,
@@ -1089,94 +1248,151 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
         }
     }
 
-    fun findGridItemIndex(offset: Offset): Int? {
-        if (tab.contentSnapshot.isEmpty()) return null
+    fun findGridItemIndex(offset: Offset, clampToVisible: Boolean = false): Int? {
+        val snapshot = tab.contentSnapshot
+        if (snapshot.isEmpty()) return null
         val x = offset.x.toInt()
-        val y = offset.y.toInt()
-        val exact = tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
-            x >= info.offset.x && x <= info.offset.x + info.size.width &&
-            y >= info.offset.y && y <= info.offset.y + info.size.height
+        val rawY = offset.y.toInt()
+        val visibleItems = tab.activeListState.layoutInfo.visibleItemsInfo
+        val fileVisibleItems = if (clampToVisible) {
+            visibleItems.filter { it.key != "parent_directory_item" }
+        } else {
+            visibleItems
+        }
+        if (fileVisibleItems.isEmpty()) return null
+
+        val y = if (clampToVisible) {
+            val minY = fileVisibleItems.first().offset.y
+            val maxY = (fileVisibleItems.last().offset.y + fileVisibleItems.last().size.height - 1).coerceAtLeast(minY)
+            rawY.coerceIn(minY, maxY)
+        } else {
+            rawY
+        }
+
+        val exact = fileVisibleItems.find { info ->
+            x >= info.offset.x && x < info.offset.x + info.size.width &&
+            y >= info.offset.y && y < info.offset.y + info.size.height
         }
         val tolerance = 24
-        val itemInfo = exact ?: tab.activeListState.layoutInfo.visibleItemsInfo.find { info ->
+        val itemInfo = exact ?: fileVisibleItems.find { info ->
             x >= info.offset.x - tolerance && x <= info.offset.x + info.size.width + tolerance &&
             y >= info.offset.y - tolerance && y <= info.offset.y + info.size.height + tolerance
-        } ?: return null
+        } ?: if (clampToVisible) {
+            val rowCandidates = fileVisibleItems.filter { info ->
+                y >= info.offset.y - tolerance && y <= info.offset.y + info.size.height + tolerance
+            }.ifEmpty { fileVisibleItems }
+            rowCandidates.minByOrNull { info ->
+                val centerX = info.offset.x + info.size.width / 2
+                val centerY = info.offset.y + info.size.height / 2
+                kotlin.math.abs(y - centerY) * 4 + kotlin.math.abs(x - centerX)
+            }
+        } else null
+        if (itemInfo == null) return null
 
+        val itemKey = itemInfo.key as? String
+        if (itemKey == "parent_directory_item") return null
         val contentIndex = if (parentFolder != null) itemInfo.index - 1 else itemInfo.index
-        return if (contentIndex in 0 until tab.contentSnapshot.size) contentIndex else null
+        if (itemKey != null) {
+            if (snapshot.getOrNull(contentIndex)?.uniquePath == itemKey) {
+                return contentIndex
+            }
+            val resolved = snapshot.indexOfFirst { it.uniquePath == itemKey }
+            if (resolved >= 0) return resolved
+        }
+        return if (contentIndex in snapshot.indices) contentIndex else null
     }
 
     val density = LocalDensity.current
+    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
-    DisposableEffect(tab.activeFolder.uniquePath, tab.activeListState) {
-        tab.onRequestScrollAboveRibbon = { itemIndex ->
-            if (itemIndex in 0 until tab.contentSnapshot.size) {
-                val gridIndex = itemIndex + if (parentFolder != null) 1 else 0
-                coroutineScope.launch {
-                    val isTwoRows = globalClass.preferencesManager.selectionRibbonTwoRows
-                    val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar
-                    val ribbonHeightPx = with(density) { (if (isTwoRows) 112.dp else 56.dp).toPx() }
-                    val toolbarHeightPx = with(density) { (if (enableBottomToolbar) 56.dp else 0.dp).toPx() }
-                    val bottomBarExpansionPx = (ribbonHeightPx - toolbarHeightPx).coerceAtLeast(0f)
-                    val marginPx = with(density) { 36.dp.toPx() }
+    val currentRequestScrollAboveRibbon by androidx.compose.runtime.rememberUpdatedState<(Int) -> Unit> { itemIndex ->
+        val snapshot = tab.contentSnapshot
+        if (!globalClass.preferencesManager.disableAutoScrollOnBottomSelection && itemIndex in snapshot.indices) {
+            val gridIndex = itemIndex + if (parentFolder != null) 1 else 0
+            val gridState = tab.activeListState
 
-                    val initialVisible = tab.activeListState.layoutInfo.visibleItemsInfo.find { it.index == gridIndex }
-                    val initialViewport = tab.activeListState.layoutInfo.viewportSize.height.toFloat()
-                    val precomputedOverlap = if (initialVisible != null && initialViewport > 0f) {
-                        val itemBottom = (initialVisible.offset.y + initialVisible.size.height).toFloat()
-                        val safeBottom = initialViewport - bottomBarExpansionPx - marginPx
-                        (itemBottom - safeBottom).coerceAtLeast(0f)
-                    } else 0f
+            val beforeLayout = gridState.layoutInfo
+            val beforeViewportEnd = beforeLayout.viewportEndOffset
+            val beforeItem = beforeLayout.visibleItemsInfo.find { it.index == gridIndex }
+            val beforeItemBottom = beforeItem?.let { it.offset.y + it.size.height }
+            val beforeItemSize = beforeItem?.size?.height
 
-                    // Wait 60 ms for layout measurements and toolbar/ribbon resize to settle before measuring overlap
-                    delay(60)
+            autoScrollJob?.cancel()
+            autoScrollJob = coroutineScope.launch {
+                // Wait for selection state and BottomOptionsBar layout measurement to settle
+                androidx.compose.runtime.withFrameNanos { }
+                androidx.compose.runtime.withFrameNanos { }
 
-                    val visibleItem = tab.activeListState.layoutInfo.visibleItemsInfo.find { it.index == gridIndex }
-                    val currentViewport = tab.activeListState.layoutInfo.viewportSize.height.toFloat()
-                    val effectiveSafeBottom = if (currentViewport > 0f) {
-                        if (currentViewport < initialViewport) {
-                            currentViewport - marginPx
-                        } else {
-                            currentViewport - bottomBarExpansionPx - marginPx
-                        }
-                    } else 0f
+                val afterLayout = gridState.layoutInfo
+                val afterViewportEnd = afterLayout.viewportEndOffset
+                if (afterViewportEnd <= 0) return@launch
 
-                    val actualOverlap = if (visibleItem != null && effectiveSafeBottom > 0f) {
-                        val itemBottom = (visibleItem.offset.y + visibleItem.size.height).toFloat()
-                        (itemBottom - effectiveSafeBottom).coerceAtLeast(0f)
-                    } else 0f
+                val afterItem = afterLayout.visibleItemsInfo.find { it.index == gridIndex }
+                val lastVisible = afterLayout.visibleItemsInfo.lastOrNull()
+                val cols = maxOf(1, tab.viewConfig.columnCount)
 
-                    val finalOverlap = maxOf(precomputedOverlap, actualOverlap)
-
-                    if (finalOverlap > 0f) {
-                        try {
-                            tab.activeListState.animateScrollBy(finalOverlap)
-                        } catch (_: Exception) {}
-                    } else if (visibleItem == null && initialVisible == null) {
-                        val lastVisible = tab.activeListState.layoutInfo.visibleItemsInfo.lastOrNull()
-                        if (lastVisible != null && gridIndex > lastVisible.index) {
-                            val cols = maxOf(1, tab.viewConfig.columnCount)
-                            val rowsAway = (gridIndex - lastVisible.index + cols - 1) / cols
-                            val rowHeight = lastVisible.size.height.toFloat().coerceAtLeast(100f)
-                            val scrollDelta = rowsAway * rowHeight + bottomBarExpansionPx + marginPx
-                            try {
-                                tab.activeListState.animateScrollBy(scrollDelta)
-                            } catch (_: Exception) {}
-                        }
+                val itemSize: Int
+                val itemBottom: Int
+                when {
+                    afterItem != null -> {
+                        itemSize = afterItem.size.height
+                        itemBottom = afterItem.offset.y + afterItem.size.height
                     }
+                    beforeItemBottom != null && afterViewportEnd < beforeViewportEnd -> {
+                        itemSize = beforeItemSize ?: 0
+                        itemBottom = beforeItemBottom
+                    }
+                    lastVisible != null && gridIndex > lastVisible.index -> {
+                        val rowsAway = (gridIndex - lastVisible.index + cols - 1) / cols
+                        itemSize = lastVisible.size.height
+                        itemBottom = lastVisible.offset.y + lastVisible.size.height +
+                                rowsAway * lastVisible.size.height
+                    }
+                    else -> return@launch
+                }
+
+                val hasMoreRowsBelow = (itemIndex / cols) < (snapshot.lastIndex / cols)
+                val scrollDelta = if (!hasMoreRowsBelow) {
+                    (itemBottom - afterViewportEnd).toFloat()
+                } else {
+                    val triggerZonePx = with(density) { 12.dp.toPx() }
+                    val peekPx = minOf(itemSize * 0.35f, with(density) { 24.dp.toPx() })
+                    if (itemBottom > afterViewportEnd - triggerZonePx) {
+                        itemBottom - (afterViewportEnd - peekPx)
+                    } else {
+                        0f
+                    }
+                }
+
+                if (scrollDelta > 1f) {
+                    try {
+                        gridState.animateScrollBy(
+                            value = scrollDelta,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                    } catch (_: Exception) {}
                 }
             }
         }
+    }
+
+    DisposableEffect(tab) {
+        tab.onRequestScrollAboveRibbon = { index -> currentRequestScrollAboveRibbon(index) }
+        tab.onCancelAutoScroll = { autoScrollJob?.cancel() }
         onDispose {
+            autoScrollJob?.cancel()
             tab.onRequestScrollAboveRibbon = null
+            tab.onCancelAutoScroll = null
         }
     }
 
     LazyVerticalGrid(
         state = tab.activeListState,
         columns = GridCells.Fixed(tab.viewConfig.columnCount),
-        contentPadding = PaddingValues(bottom = 128.dp),
+        contentPadding = PaddingValues(bottom = bottomContentPadding),
         modifier = Modifier
             .fillMaxSize()
             .fastScrollbar(tab.activeListState)
@@ -1185,7 +1401,7 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
                 viewConfiguration = viewConfiguration,
                 haptic = haptic,
                 coroutineScope = coroutineScope,
-                findItemIndexAt = { offset, _ -> findGridItemIndex(offset) },
+                findItemIndexAt = { offset, _, clamp -> findGridItemIndex(offset, clamp) },
                 scrollBy = { delta, _, _ -> tab.activeListState.scrollBy(delta) },
                 onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) }
             )
@@ -1235,20 +1451,24 @@ private fun ColumnFileItem(
 ) {
     val currentItemPath = item.uniquePath
     val isSelected = tab.dragSelectionVersion >= 0 && tab.selectedFiles.containsKey(currentItemPath)
+    val isHighlighted = tab.highlightedFiles.contains(currentItemPath)
     val sizeTintEnabled = globalClass.preferencesManager.sizeTintEnabled
 
     fun toggleSelection() {
+        val selecting = !isSelected
         if (isSelected) {
             tab.selectedFiles.remove(currentItemPath)
             tab.lastSelectedFileIndex = -1
         } else {
             tab.selectedFiles[currentItemPath] = item
             tab.lastSelectedFileIndex = index
-            tab.scrollItemAboveRibbon(index)
         }
         tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
+        if (selecting) {
+            tab.scrollItemAboveRibbon(index)
+        }
     }
 
     val showSourceBadge = tab.activeFolder is VirtualFileHolder && globalClass.preferencesManager.showSourceBadges
@@ -1258,17 +1478,38 @@ private fun ColumnFileItem(
         }
     } else null
 
+    val activeDragSession = tab.dragDropSession ?: globalClass.mainActivityManager.activeDragSourceTab?.dragDropSession
+    val isDropHovered = item.isFolder && activeDragSession?.hoveredTargetDirectory == currentItemPath
+    val isDropValid = item.isFolder && activeDragSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+    if (item.isFolder) {
+        DisposableEffect(currentItemPath) {
+            onDispose {
+                tab.unregisterDropTarget(currentItemPath)
+            }
+        }
+    }
+
     val tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     Column(
         Modifier
             .fillMaxWidth()
+            .then(
+                if (item.isFolder) {
+                    Modifier.onGloballyPositioned { coords ->
+                        tab.registerDropTarget(item, coords)
+                    }
+                } else Modifier
+            )
             .background(
-                color = if (isSelected) {
+                color = if (isDropHovered && isDropValid) {
+                    colorScheme.primaryContainer.copy(alpha = 0.7f)
+                } else if (isDropHovered && !isDropValid) {
+                    colorScheme.errorContainer.copy(alpha = 0.45f)
+                } else if (isSelected) {
                     selectionHighlightColor
                 } else if (tab.transientPressHighlightPath == currentItemPath) {
                     colorScheme.primary.copy(alpha = 0.12f)
-                } else if (tab.highlightedFiles.contains(currentItemPath)) {
-                    highlightColor
                 } else {
                     Color.Unspecified
                 }
@@ -1325,11 +1566,13 @@ private fun ColumnFileItem(
                 MiddleEllipsisText(
                     text = displayText,
                     isFolder = item.isFolder || (prefs.hideFileExtensions && item.isFile()),
-                    isSelected = isSelected || tab.highlightedFiles.contains(currentItemPath),
+                    isSelected = isSelected,
                     fontSize = fontSize.sp,
+                    fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
+                    fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
                     lineHeight = (fontSize + 2).sp,
                     maxLines = viewConfigs.filenameMaxLines,
-                    color = if (isSelected || tab.highlightedFiles.contains(currentItemPath)) {
+                    color = if (isSelected) {
                         colorScheme.primary
                     } else {
                         Color.Unspecified
@@ -1340,7 +1583,7 @@ private fun ColumnFileItem(
                     item = item,
                     currentItemPath = currentItemPath,
                     fontSize = fontSize,
-                    isHighlighted = isSelected || tab.highlightedFiles.contains(currentItemPath),
+                    isHighlighted = isSelected,
                     sourceInfo = sourceInfo
                 )
             }
@@ -1370,19 +1613,23 @@ private fun GridFileItem(
     maxSiblingSize: Long = 1L
 ) {
     val isSelected = tab.dragSelectionVersion >= 0 && tab.selectedFiles.containsKey(itemPath)
+    val isHighlighted = tab.highlightedFiles.contains(itemPath)
 
     fun toggleSelection() {
+        val selecting = !isSelected
         if (isSelected) {
             tab.selectedFiles.remove(itemPath)
             tab.lastSelectedFileIndex = -1
         } else {
             tab.selectedFiles[itemPath] = item
             tab.lastSelectedFileIndex = index
-            tab.scrollItemAboveRibbon(index)
         }
         tab.dragSelectionVersion++
         tab.selectedFilesCount = tab.selectedFiles.size
         tab.onSelectionChange()
+        if (selecting) {
+            tab.scrollItemAboveRibbon(index)
+        }
     }
 
     val showSourceBadge = tab.activeFolder is VirtualFileHolder && globalClass.preferencesManager.showSourceBadges
@@ -1392,12 +1639,31 @@ private fun GridFileItem(
         }
     } else null
 
+    val activeDragSession = tab.dragDropSession ?: globalClass.mainActivityManager.activeDragSourceTab?.dragDropSession
+    val isDropHovered = item.isFolder && activeDragSession?.hoveredTargetDirectory == itemPath
+    val isDropValid = item.isFolder && activeDragSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+    if (item.isFolder) {
+        DisposableEffect(itemPath) {
+            onDispose {
+                tab.unregisterDropTarget(itemPath)
+            }
+        }
+    }
+
     val sizeTintEnabled = globalClass.preferencesManager.sizeTintEnabled
     val tintColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (viewConfigs.galleryMode) Modifier.aspectRatio(1f) else Modifier)
+            .then(
+                if (item.isFolder) {
+                    Modifier.onGloballyPositioned { coords ->
+                        tab.registerDropTarget(item, coords)
+                    }
+                } else Modifier
+            )
             .clickable {
                 if (tab.selectedFiles.isNotEmpty()) {
                     toggleSelection()
@@ -1412,12 +1678,14 @@ private fun GridFileItem(
                 }
             }
             .background(
-                color = if (isSelected) {
+                color = if (isDropHovered && isDropValid) {
+                    colorScheme.primaryContainer.copy(alpha = 0.7f)
+                } else if (isDropHovered && !isDropValid) {
+                    colorScheme.errorContainer.copy(alpha = 0.45f)
+                } else if (isSelected) {
                     selectionHighlightColor
                 } else if (tab.transientPressHighlightPath == itemPath) {
                     colorScheme.primary.copy(alpha = 0.12f)
-                } else if (tab.highlightedFiles.contains(itemPath)) {
-                    highlightColor
                 } else {
                     Color.Unspecified
                 }
@@ -1494,13 +1762,14 @@ private fun GridFileItem(
                         MiddleEllipsisText(
                             text = item.displayName,
                             isFolder = item.isFolder,
-                            isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
+                            isSelected = isSelected,
                             fontSize = fontSize.sp,
-                            fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                            fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else FontWeight.Normal,
+                            fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
                             maxLines = viewConfigs.filenameMaxLines,
                             lineHeight = (fontSize + 2).sp,
                             textAlign = TextAlign.Center,
-                            color = if (tab.highlightedFiles.contains(itemPath)) {
+                            color = if (isSelected) {
                                 colorScheme.primary
                             } else {
                                 colorScheme.onSurfaceVariant
@@ -1515,11 +1784,13 @@ private fun GridFileItem(
                 MiddleEllipsisText(
                     text = item.displayName,
                     isFolder = item.isFolder,
-                    isSelected = isSelected || tab.highlightedFiles.contains(itemPath),
+                    isSelected = isSelected,
                     fontSize = (FileItemSizeMap.getFontSize(viewConfigs.itemSize) - 3).sp,
+                    fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
+                    fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
                     maxLines = viewConfigs.filenameMaxLines,
                     textAlign = TextAlign.Center,
-                    color = if (isSelected || tab.highlightedFiles.contains(itemPath)) {
+                    color = if (isSelected) {
                         colorScheme.primary
                     } else {
                         colorScheme.onSurface
@@ -1644,7 +1915,12 @@ private fun FileDetails(
         if (item is LocalFileHolder && item.details.isNotEmpty()) {
             item.details
         } else if (item is LocalFileHolder) {
-            LocalFileHolder.getCachedDetails(item.file, item.lastModified).orEmpty()
+            LocalFileHolder.getCachedDetails(item.file, item.lastModified)
+                ?: if (item.isFile()) {
+                    "${item.size.toFormattedSize()}\t${item.lastModified.toFormattedDate()}"
+                } else {
+                    "\t${item.lastModified.toFormattedDate()}"
+                }
         } else {
             emptyString
         }
@@ -1653,7 +1929,7 @@ private fun FileDetails(
     var details by remember(detailsKey) { mutableStateOf(initialDetails) }
 
     LaunchedEffect(detailsKey) {
-        if (details.isEmpty()) {
+        if (details.isEmpty() || (item.isFolder && details.startsWith("\t"))) {
             val det = withContext(IO) {
                 item.getDetails()
             }
@@ -1664,12 +1940,18 @@ private fun FileDetails(
     // Parse dual-aligned format: "leftInfo\trightDate"
     val parts = details.split("\t", limit = 2)
     val rawLeftText = parts.getOrNull(0)?.trim().orEmpty()
-    val leftText = if (sourceInfo != null && rawLeftText.isNotEmpty()) {
-        "${sourceInfo.folderName} • $rawLeftText"
+    val securityBadge = if (item.isFolder) FolderLockStore.getFolderSecurityBadgeText(item.uniquePath) else null
+    val baseLeft = when {
+        securityBadge != null && rawLeftText.isNotEmpty() -> "$securityBadge • $rawLeftText"
+        securityBadge != null -> securityBadge
+        else -> rawLeftText
+    }
+    val leftText = if (sourceInfo != null && baseLeft.isNotEmpty()) {
+        "${sourceInfo.folderName} • $baseLeft"
     } else if (sourceInfo != null) {
         sourceInfo.folderName
     } else {
-        rawLeftText
+        baseLeft
     }
     val rightText = parts.getOrNull(1)?.trim().orEmpty()
     val smallFontSize = (fontSize - 4).sp
@@ -1678,8 +1960,10 @@ private fun FileDetails(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = (fontSize + 2).dp)
             .alpha(0.7f),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         if (leftText.isNotEmpty()) {
             FileDetailsText(
@@ -1688,6 +1972,8 @@ private fun FileDetails(
                 color = textColor,
                 modifier = Modifier.weight(1f, fill = false)
             )
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
         }
         if (rightText.isNotEmpty()) {
             val isItalic = DeleteTimestampJournal.shouldItalicize(item.uniquePath, item.lastModified)
@@ -1802,9 +2088,31 @@ private fun FileDetailsText(
 // `..` parent directory navigation row
 @Composable
 fun ParentDirectoryItem(tab: FilesTab, parentFolder: ContentHolder) {
+    val activeDragSession = tab.dragDropSession ?: globalClass.mainActivityManager.activeDragSourceTab?.dragDropSession
+    val isDropHovered = activeDragSession?.hoveredTargetDirectory == parentFolder.uniquePath
+    val isDropValid = activeDragSession?.isValidDropTarget(parentFolder, tab.activeFolder) == true
+
+    DisposableEffect(parentFolder.uniquePath) {
+        onDispose {
+            tab.unregisterDropTarget(parentFolder.uniquePath)
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                tab.registerDropTarget(parentFolder, coords)
+            }
+            .background(
+                color = if (isDropHovered && isDropValid) {
+                    colorScheme.primaryContainer.copy(alpha = 0.7f)
+                } else if (isDropHovered && !isDropValid) {
+                    colorScheme.errorContainer.copy(alpha = 0.45f)
+                } else {
+                    Color.Unspecified
+                }
+            )
             .clickable {
                 val current = tab.activeFolder
                 tab.highlightedFiles.apply {
@@ -1814,7 +2122,7 @@ fun ParentDirectoryItem(tab: FilesTab, parentFolder: ContentHolder) {
                 tab.openFolder(parentFolder, rememberListState = true)
             }
             .padding(horizontal = 12.dp, vertical = 10.dp)
-            .alpha(0.55f),
+            .alpha(if (isDropHovered) 1f else 0.55f),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -1861,17 +2169,20 @@ private fun FileDetailsCompact(
             }
         }
 
-                    FileDetailsText(
-                modifier = Modifier.alpha(0.6f),
-                details = details,
-                fontSize = 10.sp,
-                maxLines = 1,
-                textAlign = TextAlign.Center,
-                color = if (isHighlighted) {
-                    colorScheme.primary
-                } else {
-                    colorScheme.onSurfaceVariant
-                }
-            )
+        val displayDetails = details.ifEmpty { if (item.isFile()) item.size.toFormattedSize() else " " }
+        FileDetailsText(
+            modifier = Modifier
+                .heightIn(min = 14.dp)
+                .alpha(0.6f),
+            details = displayDetails,
+            fontSize = 10.sp,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+            color = if (isHighlighted) {
+                colorScheme.primary
+            } else {
+                colorScheme.onSurfaceVariant
+            }
+        )
     }
 }
