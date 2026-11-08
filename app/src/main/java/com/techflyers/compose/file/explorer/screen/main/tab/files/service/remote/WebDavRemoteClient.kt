@@ -2,13 +2,15 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.service.remot
 
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.w3c.dom.Element
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.StringReader
+import java.net.URI
 import java.net.URLDecoder
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -55,9 +57,9 @@ class WebDavRemoteClient(
     private val baseUrl: String
         get() {
             var hostStr = conn.host.trim()
-            if (hostStr.startsWith("http://")) {
+            if (hostStr.startsWith("http://", ignoreCase = true)) {
                 hostStr = hostStr.substring(7)
-            } else if (hostStr.startsWith("https://")) {
+            } else if (hostStr.startsWith("https://", ignoreCase = true)) {
                 hostStr = hostStr.substring(8)
             }
             if (hostStr.contains("/")) {
@@ -78,20 +80,31 @@ class WebDavRemoteClient(
         }
     }
 
-    private fun getFullUrl(path: String): String {
-        var cleanPath = path
-        if (!cleanPath.startsWith("/")) {
-            cleanPath = "/$cleanPath"
+    private fun getFullUrl(path: String, isDirectory: Boolean = false): String {
+        val rawSegments = path.trim().split('/').filter { it.isNotEmpty() }
+        val encodedPath = rawSegments.joinToString("/") { seg ->
+            try {
+                URI(null, null, seg, null).rawPath ?: seg
+            } catch (_: Exception) {
+                seg
+            }
         }
-        return baseUrl + cleanPath
+        val suffix = if (isDirectory && encodedPath.isNotEmpty()) "/" else ""
+        return if (encodedPath.isEmpty()) "$baseUrl/" else "$baseUrl/$encodedPath$suffix"
+    }
+
+    private fun decodeUrlPath(rawHref: String): String {
+        return try {
+            // Preserve '+' characters when URL-decoding WebDAV href paths
+            URLDecoder.decode(rawHref.replace("+", "%2B"), conn.effectiveEncoding)
+        } catch (_: Exception) {
+            rawHref
+        }
     }
 
     override fun connect() {
-        var cleanRoot = conn.rootPath
-        if (!cleanRoot.startsWith("/")) cleanRoot = "/$cleanRoot"
-        if (!cleanRoot.endsWith("/")) cleanRoot = "$cleanRoot/"
-
-        val url = baseUrl + cleanRoot
+        val cleanRoot = conn.rootPath.ifBlank { "/" }
+        val url = getFullUrl(cleanRoot, isDirectory = true)
         val builder = Request.Builder()
             .url(url)
             .method("PROPFIND", "".toRequestBody("text/xml".toMediaType()))
@@ -110,7 +123,8 @@ class WebDavRemoteClient(
     }
 
     override fun listDirectory(path: String): List<RemoteFileItem> {
-        val url = getFullUrl(path)
+        val targetPath = path.ifBlank { conn.rootPath.ifBlank { "/" } }
+        val url = getFullUrl(targetPath, isDirectory = true)
         val builder = Request.Builder()
             .url(url)
             .method("PROPFIND", "".toRequestBody("text/xml".toMediaType()))
@@ -124,12 +138,12 @@ class WebDavRemoteClient(
             }
 
             val body = response.body?.string() ?: return emptyList()
-            return parsePropfindXml(body, path)
+            return parsePropfindXml(body, targetPath)
         }
     }
 
     override fun createDirectory(path: String) {
-        val url = getFullUrl(path)
+        val url = getFullUrl(path, isDirectory = true)
         val builder = Request.Builder()
             .url(url)
             .method("MKCOL", "".toRequestBody("text/xml".toMediaType()))
@@ -137,14 +151,14 @@ class WebDavRemoteClient(
         authHeader()?.let { builder.addHeader("Authorization", it) }
 
         client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) {
+            if (!response.isSuccessful && response.code != 405) {
                 throw Exception("WebDAV MKCOL failed: ${response.code} ${response.message}")
             }
         }
     }
 
     override fun delete(path: String, isDir: Boolean) {
-        val url = getFullUrl(path)
+        val url = getFullUrl(path, isDirectory = isDir)
         val builder = Request.Builder()
             .url(url)
             .delete()
@@ -152,14 +166,14 @@ class WebDavRemoteClient(
         authHeader()?.let { builder.addHeader("Authorization", it) }
 
         client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) {
+            if (!response.isSuccessful && response.code != 404) {
                 throw Exception("WebDAV DELETE failed: ${response.code} ${response.message}")
             }
         }
     }
 
     override fun downloadFile(remotePath: String, localPath: String, onProgress: (Double) -> Unit) {
-        val url = getFullUrl(remotePath)
+        val url = getFullUrl(remotePath, isDirectory = false)
         val builder = Request.Builder()
             .url(url)
             .get()
@@ -171,12 +185,23 @@ class WebDavRemoteClient(
                 throw Exception("WebDAV GET failed: ${response.code} ${response.message}")
             }
             val body = response.body ?: throw Exception("Response body is null")
+            val totalSize = body.contentLength()
             val localFile = File(localPath)
             localFile.parentFile?.mkdirs()
 
+            onProgress(0.0)
+            var bytesCopied = 0L
             body.byteStream().use { input ->
                 FileOutputStream(localFile).use { output ->
-                    input.copyTo(output)
+                    val buffer = ByteArray(64 * 1024)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        bytesCopied += read
+                        if (totalSize > 0) {
+                            onProgress((bytesCopied.toDouble() / totalSize).coerceIn(0.0, 1.0))
+                        }
+                    }
                 }
             }
             onProgress(1.0)
@@ -184,12 +209,40 @@ class WebDavRemoteClient(
     }
 
     override fun uploadFile(localPath: String, remotePath: String, onProgress: (Double) -> Unit) {
-        val url = getFullUrl(remotePath)
         val localFile = File(localPath)
-        if (!localFile.exists()) throw FileNotFoundException("Local file not found")
+        if (!localFile.exists()) throw FileNotFoundException("Local file not found: $localPath")
+        val totalSize = localFile.length()
 
-        val contentType = if (conn.effectiveTransferMode == "ASCII") "text/plain" else "application/octet-stream"
-        val requestBody = localFile.asRequestBody(contentType.toMediaType())
+        val parent = RemotePaths.parent(remotePath)
+        if (parent != null && parent.isNotEmpty() && parent != "/") {
+            try {
+                ensureDirectory(parent)
+            } catch (_: Exception) {}
+        }
+
+        val url = getFullUrl(remotePath, isDirectory = false)
+        val contentType = (if (conn.effectiveTransferMode == "ASCII") "text/plain" else "application/octet-stream").toMediaType()
+
+        onProgress(0.0)
+        val requestBody = object : RequestBody() {
+            override fun contentType(): MediaType = contentType
+            override fun contentLength(): Long = totalSize
+            override fun writeTo(sink: BufferedSink) {
+                val buffer = ByteArray(64 * 1024)
+                var uploaded = 0L
+                FileInputStream(localFile).use { fis ->
+                    var read: Int
+                    while (fis.read(buffer).also { read = it } != -1) {
+                        sink.write(buffer, 0, read)
+                        uploaded += read
+                        if (totalSize > 0) {
+                            onProgress((uploaded.toDouble() / totalSize).coerceIn(0.0, 1.0))
+                        }
+                    }
+                }
+            }
+        }
+
         val builder = Request.Builder()
             .url(url)
             .put(requestBody)
@@ -205,7 +258,13 @@ class WebDavRemoteClient(
     }
 
     override fun createFile(path: String) {
-        val url = getFullUrl(path)
+        val parent = RemotePaths.parent(path)
+        if (parent != null && parent.isNotEmpty() && parent != "/") {
+            try {
+                ensureDirectory(parent)
+            } catch (_: Exception) {}
+        }
+        val url = getFullUrl(path, isDirectory = false)
         val builder = Request.Builder()
             .url(url)
             .put(ByteArray(0).toRequestBody("application/octet-stream".toMediaType()))
@@ -243,8 +302,12 @@ class WebDavRemoteClient(
 
         authHeader()?.let { builder.addHeader("Authorization", it) }
 
-        client.newCall(builder.build()).execute().use { response ->
-            return response.isSuccessful
+        return try {
+            client.newCall(builder.build()).execute().use { response ->
+                response.isSuccessful
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -296,18 +359,18 @@ class WebDavRemoteClient(
             val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
 
             var skipFirst = true
+            val normalizedCurrent = "/" + currentDir.trim('/')
 
             for (i in 0 until length) {
                 val element = responses[i]
                 val hrefNode = getElementsByLocalName(element, "href").firstOrNull() ?: continue
-                var href = hrefNode.textContent
-                href = URLDecoder.decode(href, conn.effectiveEncoding)
+                val href = decodeUrlPath(hrefNode.textContent ?: "")
 
                 if (skipFirst) {
                     skipFirst = false
-                    val decodedPath = URLDecoder.decode(href, conn.effectiveEncoding).removeSuffix("/")
-                    val decodedCurrent = currentDir.removeSuffix("/")
-                    if (decodedPath.endsWith(decodedCurrent)) {
+                    val decodedPath = href.removeSuffix("/")
+                    val decodedCurrent = normalizedCurrent.removeSuffix("/")
+                    if (decodedPath.endsWith(decodedCurrent) || (decodedCurrent.isEmpty() && decodedPath.isEmpty())) {
                         continue
                     }
                 }
@@ -341,7 +404,7 @@ class WebDavRemoteClient(
                     } catch (_: Exception) {}
                 }
 
-                val fullPath = if (currentDir.endsWith("/")) "$currentDir$name" else "$currentDir/$name"
+                val fullPath = RemotePaths.join(currentDir, name)
 
                 list.add(
                     RemoteFileItem(

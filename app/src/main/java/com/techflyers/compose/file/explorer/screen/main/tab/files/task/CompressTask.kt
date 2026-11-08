@@ -5,6 +5,7 @@ import com.techflyers.compose.file.explorer.App.Companion.logger
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.toFormattedDate
+import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import net.lingala.zip4j.ZipFile
@@ -25,7 +26,7 @@ class CompressTask(
             subtitle = globalClass.resources.getString(R.string.task_subtitle, sourceContent.size),
             displayDetails = sourceContent.joinToString(", ") { it.displayName },
             fullDetails = buildString {
-                sourceContent.forEachIndexed { index, source ->
+                sourceContent.forEachIndexed { _, source ->
                     append(source.displayName)
                     append("\n")
                 }
@@ -92,7 +93,7 @@ class CompressTask(
         val basePath = sourceContent[0].getParent()?.uniquePath ?: emptyString
 
         if (pendingContent.isEmpty()) {
-            sourceContent.forEachIndexed { index, content ->
+            sourceContent.forEach { content ->
                 pendingContent.add(
                     TaskContentItem(
                         content = content,
@@ -113,9 +114,12 @@ class CompressTask(
         // Determine the output extension to decide which engine to use
         val destPath = parameters!!.destPath
         val destExt = destPath.substringAfterLast('.', "").lowercase()
+        val splitVolumeSize = parameters?.splitVolumeSize?.takeIf { it.isNotBlank() }
 
-        // lib7za handles all formats including zip
-        val useNativeCompression = ArchiveManager.isNativeCompressFormat(destExt)
+        // lib7za handles all formats including zip and split archives
+        val useNativeCompression = ArchiveManager.isNativeCompressFormat(destExt) ||
+                ArchiveManager.isCompoundArchive(destPath) ||
+                splitVolumeSize != null
 
         try {
             if (aborted) {
@@ -124,7 +128,6 @@ class CompressTask(
             }
 
             if (useNativeCompression) {
-                // Native compression via lib7za
                 val parentPath = sourceContent.firstOrNull()?.getParent()?.uniquePath?.takeIf {
                     it.isNotEmpty() && File(it).isDirectory
                 }
@@ -143,6 +146,7 @@ class CompressTask(
                     archivePath = destPath,
                     password = parameters?.password,
                     compressionLevel = parameters?.compressionLevel ?: 5,
+                    splitVolumeSize = splitVolumeSize,
                     workingDir = parentPath,
                     isAborted = { aborted },
                     onProgress = { subPercent, currentFile ->
@@ -242,6 +246,16 @@ class CompressTask(
                 return
             }
             logger.logError(e)
+            if (e is ArchiveManager.ArchiveOperationException) {
+                val activeTab = globalClass.mainActivityManager.getActiveTab() as? FilesTab
+                activeTab?.showArchiveErrorDialog(
+                    archiveName = File(destPath).name,
+                    summary = e.summary,
+                    diagnosticLog = e.diagnosticLog
+                )
+                markAsFailed("${e.summary}\n\n${e.diagnosticLog}")
+                return
+            }
             val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
                 targetFile = File(destPath),
                 throwable = e

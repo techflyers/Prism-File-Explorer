@@ -454,21 +454,22 @@ object PdfOperations {
         try {
             imageUris.forEachIndexed { index, uri ->
                 val bitmap = decodeBitmap(context, uri) ?: return@forEachIndexed
+                val finalBitmap = flattenAlphaToWhite(bitmap)
                 try {
-                    val pdImage = JPEGFactory.createFromImage(doc, bitmap, jpegQuality / 100f)
+                    val pdImage = JPEGFactory.createFromImage(doc, finalBitmap, jpegQuality / 100f)
                     val page = if (fitToA4) {
                         PDPage(PDRectangle.A4)
                     } else {
-                        PDPage(PDRectangle(bitmap.width.toFloat(), bitmap.height.toFloat()))
+                        PDPage(PDRectangle(finalBitmap.width.toFloat(), finalBitmap.height.toFloat()))
                     }
                     doc.addPage(page)
 
                     PDPageContentStream(doc, page).use { content ->
                         val box = page.mediaBox
                         if (fitToA4) {
-                            val scale = minOf(box.width / bitmap.width, box.height / bitmap.height)
-                            val w = bitmap.width * scale
-                            val h = bitmap.height * scale
+                            val scale = minOf(box.width / finalBitmap.width, box.height / finalBitmap.height)
+                            val w = finalBitmap.width * scale
+                            val h = finalBitmap.height * scale
                             val x = (box.width - w) / 2f
                             val y = (box.height - h) / 2f
                             content.drawImage(pdImage, x, y, w, h)
@@ -479,6 +480,9 @@ object PdfOperations {
                     pagesAdded++
                     onProgress?.invoke(index + 1, imageUris.size)
                 } finally {
+                    if (finalBitmap !== bitmap) {
+                        finalBitmap.recycle()
+                    }
                     bitmap.recycle()
                 }
             }
@@ -496,6 +500,20 @@ object PdfOperations {
     }
 
     /**
+     * If the bitmap has alpha/transparency and target format does not support it (e.g. JPEG),
+     * composite it over a solid white background so transparent areas do not become black.
+     */
+    fun flattenAlphaToWhite(bitmap: Bitmap): Bitmap {
+        if (!bitmap.hasAlpha()) return bitmap
+        val whiteBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(whiteBitmap)
+        canvas.drawColor(AndroidColor.WHITE)
+        val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(bitmap, 0f, 0f, paint)
+        return whiteBitmap
+    }
+
+    /**
      * Convert an image from one format to another (JPEG, PNG, WEBP).
      */
     suspend fun convertImageFormat(
@@ -506,9 +524,14 @@ object PdfOperations {
         quality: Int = 90
     ): Boolean = withContext(Dispatchers.IO) {
         val bitmap = decodeBitmap(context, sourceUri) ?: return@withContext false
+        val finalBitmap = if (targetFormat == TargetImageFormat.JPEG) {
+            flattenAlphaToWhite(bitmap)
+        } else {
+            bitmap
+        }
         try {
             FileOutputStream(destinationFile).use { out ->
-                bitmap.compress(targetFormat.compressFormat, quality.coerceIn(10, 100), out)
+                finalBitmap.compress(targetFormat.compressFormat, quality.coerceIn(10, 100), out)
                 out.flush()
             }
             true
@@ -517,6 +540,9 @@ object PdfOperations {
             destinationFile.delete()
             false
         } finally {
+            if (finalBitmap !== bitmap) {
+                finalBitmap.recycle()
+            }
             bitmap.recycle()
         }
     }

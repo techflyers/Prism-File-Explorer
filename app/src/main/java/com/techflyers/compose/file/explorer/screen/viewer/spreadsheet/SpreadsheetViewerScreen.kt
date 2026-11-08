@@ -42,7 +42,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Print
@@ -150,6 +152,7 @@ fun SpreadsheetViewerScreen(
     var dropdownState by remember { mutableStateOf<DropdownState?>(null) }
     var showUnsavedDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var exitAfterSave by remember { mutableStateOf(false) }
 
     // Filter & Sort
@@ -719,6 +722,15 @@ fun SpreadsheetViewerScreen(
                             )
 
                             DropdownMenuItem(
+                                text = { Text(stringResource(R.string.extended_metadata)) },
+                                leadingIcon = { Icon(Icons.Rounded.Info, contentDescription = null) },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    showMetadataSheet = true
+                                }
+                            )
+
+                            DropdownMenuItem(
                                 text = { Text("Open with…") },
                                 leadingIcon = { Icon(Icons.Rounded.OpenWith, contentDescription = null) },
                                 onClick = {
@@ -739,6 +751,14 @@ fun SpreadsheetViewerScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+            if (showMetadataSheet) {
+                ExtendedMetadataSheet(
+                    uri = instance.uri,
+                    extraFilePath = instance.extraFilePath,
+                    displayNameHint = uiState.fileName,
+                    onDismiss = { showMetadataSheet = false }
+                )
+            }
         }
     ) { innerPadding ->
         Box(

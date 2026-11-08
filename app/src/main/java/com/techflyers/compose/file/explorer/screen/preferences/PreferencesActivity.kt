@@ -76,7 +76,7 @@ class PreferencesActivity : BaseActivity() {
         setContent {
             FileExplorerTheme {
                 SafeSurface {
-                    val prefsScroll = rememberScrollState()
+                    val prefsListState = androidx.compose.foundation.lazy.rememberLazyListState()
                     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
                     var searchQuery by rememberSaveable { mutableStateOf("") }
 
@@ -169,22 +169,22 @@ class PreferencesActivity : BaseActivity() {
                     SingleChoiceDialog()
 
                     CompositionLocalProvider(LocalPreferenceSearchQuery provides searchQuery) {
-                        Column(
-                            Modifier
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            state = prefsListState,
+                            modifier = Modifier
                                 .fillMaxSize()
-                                .verticalScroll(prefsScroll)
-                                .fastScrollbar(prefsScroll),
+                                .fastScrollbar(prefsListState),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            AppearanceContainer()
-                            FileListContainer()
-                            FileOperationContainer()
-                            BehaviorContainer()
-                            ShizukuContainer()
-                            RecentFilesContainer()
-                            TextEditorContainer()
-                            TerminalContainer()
-                            AppInfoContainer()
+                            item(key = "appearance") { AppearanceContainer() }
+                            item(key = "file_list") { FileListContainer() }
+                            item(key = "file_operation") { FileOperationContainer() }
+                            item(key = "behavior") { BehaviorContainer() }
+                            item(key = "shizuku") { ShizukuContainer() }
+                            item(key = "recent_files") { RecentFilesContainer() }
+                            item(key = "text_editor") { TextEditorContainer() }
+                            item(key = "terminal") { TerminalContainer() }
+                            item(key = "app_info") { AppInfoContainer() }
                         }
                     }
                 }

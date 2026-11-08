@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -61,6 +62,7 @@ import com.techflyers.compose.file.explorer.common.icons.Pin
 import com.techflyers.compose.file.explorer.common.icons.PrismIcons
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeLayout
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionConfig
+import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionIds
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionType
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.getDefaultHomeLayout
 import kotlinx.coroutines.Dispatchers
@@ -181,6 +183,9 @@ fun HomeLayoutSettingsScreen(
                                 onToggle = { enabled ->
                                     val index = sections.indexOf(section)
                                     sections[index] = section.copy(isEnabled = enabled)
+                                    if (section.id == HomeSectionIds.SEARCH_BAR) {
+                                        globalClass.preferencesManager.hideHomeSearchBar = !enabled
+                                    }
                                 }
                             )
                         }
@@ -277,6 +282,7 @@ fun HomeSectionItem(
 
 fun HomeSectionType.getIcon(): ImageVector {
     return when (this) {
+        HomeSectionType.SEARCH_BAR -> Icons.Rounded.Search
         HomeSectionType.RECENT_FILES -> Icons.Rounded.History
         HomeSectionType.CATEGORIES -> Icons.Rounded.Category
         HomeSectionType.STORAGE -> Icons.Rounded.Storage
@@ -289,6 +295,7 @@ fun HomeSectionType.getIcon(): ImageVector {
 
 fun HomeSectionType.getDescription(): String {
     return when (this) {
+        HomeSectionType.SEARCH_BAR -> globalClass.getString(R.string.search_bar_description)
         HomeSectionType.RECENT_FILES -> globalClass.getString(R.string.recently_modified_files)
         HomeSectionType.CATEGORIES -> globalClass.getString(R.string.quick_access_categories)
         HomeSectionType.STORAGE -> globalClass.getString(R.string.storage_devices_and_locations)

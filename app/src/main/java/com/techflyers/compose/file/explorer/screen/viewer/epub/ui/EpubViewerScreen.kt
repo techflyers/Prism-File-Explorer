@@ -44,7 +44,9 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FormatAlignJustify
 import androidx.compose.material.icons.rounded.FormatAlignLeft
 import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.List
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Search
@@ -159,6 +161,7 @@ fun EpubViewerScreen(
     var showTocSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var tocSelectedTab by remember { mutableIntStateOf(0) } // 0 = Contents, 1 = Bookmarks
 
     val currentChapter = instance.currentChapter ?: return
@@ -464,6 +467,15 @@ fun EpubViewerScreen(
                                 )
                             }
 
+                            // Extended Metadata Info
+                            IconButton(onClick = { showMetadataSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Info,
+                                    contentDescription = "Extended Metadata",
+                                    tint = contentColor
+                                )
+                            }
+
                             // Open With
                             IconButton(onClick = {
                                 val openIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -481,6 +493,13 @@ fun EpubViewerScreen(
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                     )
+                    if (showMetadataSheet) {
+                        ExtendedMetadataSheet(
+                            uri = instance.uri,
+                            displayNameHint = book.title,
+                            onDismiss = { showMetadataSheet = false }
+                        )
+                    }
 
                     // In-Book Search Bar
                     AnimatedVisibility(visible = instance.isSearchActive) {

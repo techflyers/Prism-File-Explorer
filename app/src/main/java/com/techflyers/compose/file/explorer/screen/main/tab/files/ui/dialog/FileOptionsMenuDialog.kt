@@ -370,7 +370,12 @@ fun FileOptionsMenuDialog(
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         onDismissRequest()
-                                        if (hasFolders) {
+                                        if (tab.selectedFiles.isEmpty()) {
+                                            tab.selectedFiles[targetContentHolder.uniquePath] = targetContentHolder
+                                            tab.selectedFilesCount = 1
+                                        }
+                                        val foldersPresent = hasFolders || targetContentHolder.isFolder || tab.selectedFiles.values.any { it.isFolder }
+                                        if (foldersPresent) {
                                             tab.toggleShareFolderCompressDialog(true)
                                         } else {
                                             tab.shareSelectedFiles(context)
@@ -674,6 +679,14 @@ fun FileOptionsMenuDialog(
                     tab.unselectAllFiles()
                 }
 
+                if (com.techflyers.compose.file.explorer.screen.textEditor.FileRunner.isRunnable(targetContentHolder.file)) {
+                    FileOption(Icons.Rounded.Terminal, "Run (${com.techflyers.compose.file.explorer.screen.textEditor.FileRunner.getRunnerLabel(targetContentHolder.file)})") {
+                        onDismissRequest()
+                        com.techflyers.compose.file.explorer.screen.textEditor.FileRunner.runFile(context, targetContentHolder.file)
+                        tab.unselectAllFiles()
+                    }
+                }
+
                 if (apkBundleFileType.contains(targetContentHolder.file.extension)) {
                     FileOption(Icons.Rounded.Merge, stringResource(R.string.convert_to_apk)) {
                         onDismissRequest()
@@ -699,33 +712,47 @@ fun FileOptionsMenuDialog(
                 }
 
                 val isArchive = targetFiles.isNotEmpty() && targetFiles.all {
-                    it is LocalFileHolder && (
-                        it.file.extension.lowercase() == "zip" ||
-                        it.file.extension.lowercase() == "rar" ||
-                        it.file.extension.lowercase() == "7z" ||
-                        com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isNativeArchive(it.file.extension.lowercase())
-                    )
+                    it is LocalFileHolder &&
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isSupportedArchiveFile(it.file)
                 }
 
                 if (isArchive) {
                     var showPasswordPrompt by remember { mutableStateOf(false) }
+                    var pendingExtractInParentDirect by remember { mutableStateOf(false) }
 
-                    FileOption(Icons.Rounded.Merge, "Extract") {
+                    fun triggerExtraction(extractInParentDirect: Boolean) {
                         val hasEncryptedZip = targetFiles.any { file ->
-                            file is LocalFileHolder && file.file.extension.lowercase() == "zip" && try {
-                                net.lingala.zip4j.ZipFile(file.file).isEncrypted
+                            if (file !is LocalFileHolder) return@any false
+                            val resolved = com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
+                                .resolveMultiPartArchive(file.file).primaryFile
+                            resolved.extension.lowercase() == "zip" && try {
+                                net.lingala.zip4j.ZipFile(resolved).isEncrypted
                             } catch (e: Exception) {
                                 false
                             }
                         }
                         if (hasEncryptedZip) {
+                            pendingExtractInParentDirect = extractInParentDirect
                             showPasswordPrompt = true
                         } else {
                             onDismissRequest()
                             val task = com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
-                            globalClass.taskManager.addTaskAndRun(task, com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters())
+                            globalClass.taskManager.addTaskAndRun(
+                                task,
+                                com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters(
+                                    extractInParentDirect = extractInParentDirect
+                                )
+                            )
                             tab.unselectAllFiles()
                         }
+                    }
+
+                    FileOption(Icons.Rounded.Merge, "Extract to Folder") {
+                        triggerExtraction(extractInParentDirect = false)
+                    }
+
+                    FileOption(Icons.Rounded.FolderOpen, "Extract Here (in Parent Folder)") {
+                        triggerExtraction(extractInParentDirect = true)
                     }
 
                     if (showPasswordPrompt) {
@@ -734,7 +761,13 @@ fun FileOptionsMenuDialog(
                                 showPasswordPrompt = false
                                 onDismissRequest()
                                 val task = com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTask(targetFiles)
-                                globalClass.taskManager.addTaskAndRun(task, com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters(password))
+                                globalClass.taskManager.addTaskAndRun(
+                                    task,
+                                    com.techflyers.compose.file.explorer.screen.main.tab.files.task.ExtractTaskParameters(
+                                        password = password,
+                                        extractInParentDirect = pendingExtractInParentDirect
+                                    )
+                                )
                                 tab.unselectAllFiles()
                             },
                             onDismiss = {

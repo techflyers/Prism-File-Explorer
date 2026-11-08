@@ -44,7 +44,17 @@ class AudioPlayerActivity : ViewerActivity() {
             FileExplorerTheme {
                 MusicPlayerScreen(
                     audioPlayerInstance = instance as AudioPlayerInstance,
-                    onClosed = { onBackPressedDispatcher.onBackPressed() }
+                    onClosed = { onBackPressedDispatcher.onBackPressed() },
+                    onDelete = { uri ->
+                        val path = resolveFilePath(this, uri, intent.getStringExtra("extra_file_path"))
+                        val deleted = if (path != null) {
+                            File(path).delete()
+                        } else {
+                            runCatching { contentResolver.delete(uri, null, null) }.getOrDefault(0) > 0
+                        }
+                        if (deleted) onFileDeleted(path)
+                        deleted
+                    }
                 )
             }
         }
@@ -89,72 +99,77 @@ class AudioPlayerActivity : ViewerActivity() {
      * Tries multiple strategies in order of reliability.
      */
     private fun resolveFilePath(uri: Uri): String? {
-        // 1. Check if the caller provided the real path directly (via "extra_file_path" Intent extra)
-        val extraPath = intent.getStringExtra("extra_file_path")
-        if (!extraPath.isNullOrEmpty() && File(extraPath).exists()) {
-            android.util.Log.d("AudioPlayerActivity", "Path resolved from Intent extra: $extraPath")
-            return extraPath
-        }
+        return resolveFilePath(this, uri, intent.getStringExtra("extra_file_path"))
+    }
 
-        // 2. file:// scheme — path is directly in the URI
-        if (uri.scheme == "file") {
-            val path = uri.path
-            android.util.Log.d("AudioPlayerActivity", "Path resolved from file URI: $path")
-            return path
-        }
+    companion object {
+        fun resolveFilePath(context: android.content.Context, uri: Uri, extraPath: String? = null): String? {
+            // 1. Check if the caller provided the real path directly (via "extra_file_path" Intent extra)
+            if (!extraPath.isNullOrEmpty() && File(extraPath).exists()) {
+                android.util.Log.d("AudioPlayerActivity", "Path resolved from Intent extra: $extraPath")
+                return extraPath
+            }
 
-        // 3. content:// scheme — try MediaStore _data column
-        if (uri.scheme == "content") {
-            try {
-                contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
-                    val pathIndex = cursor.getColumnIndex("_data")
-                    if (pathIndex >= 0 && cursor.moveToFirst()) {
-                        val path = cursor.getString(pathIndex)
-                        if (!path.isNullOrEmpty() && File(path).exists()) {
-                            android.util.Log.d("AudioPlayerActivity", "Path resolved from MediaStore: $path")
-                            return path
+            // 2. file:// scheme — path is directly in the URI
+            if (uri.scheme == "file") {
+                val path = uri.path
+                android.util.Log.d("AudioPlayerActivity", "Path resolved from file URI: $path")
+                return path
+            }
+
+            // 3. content:// scheme — try MediaStore _data column
+            if (uri.scheme == "content") {
+                try {
+                    context.contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
+                        val pathIndex = cursor.getColumnIndex("_data")
+                        if (pathIndex >= 0 && cursor.moveToFirst()) {
+                            val path = cursor.getString(pathIndex)
+                            if (!path.isNullOrEmpty() && File(path).exists()) {
+                                android.util.Log.d("AudioPlayerActivity", "Path resolved from MediaStore: $path")
+                                return path
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("AudioPlayerActivity", "MediaStore query failed: ${e.message}")
+                }
+
+                // 4. FileProvider URI — parse the path segment
+                val uriPath = uri.path ?: return null
+                val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
+
+                // FileProvider paths configured in provider_paths.xml:
+                // <root-path path="." name="storage_root" />
+                val prefixMappings = listOf(
+                    "/storage_root/" to "",
+                    "/root_path/" to "",
+                    "/package_root/" to externalStorage,
+                    "/external_files_path/" to externalStorage,
+                    "/external-path/" to externalStorage,
+                    "/files/" to externalStorage,
+                    "/storage/" to "/storage"
+                )
+
+                for ((prefix, basePath) in prefixMappings) {
+                    val idx = uriPath.indexOf(prefix)
+                    if (idx >= 0) {
+                        val relativePart = uriPath.substring(idx + prefix.length)
+                        val candidate = if (basePath.isEmpty()) {
+                            if (relativePart.startsWith("/")) relativePart else "/$relativePart"
+                        } else {
+                            "$basePath/$relativePart"
+                        }
+                        if (File(candidate).exists()) {
+                            android.util.Log.d("AudioPlayerActivity", "Path resolved from FileProvider heuristic: $candidate")
+                            return candidate
                         }
                     }
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("AudioPlayerActivity", "MediaStore query failed: ${e.message}")
+
+                android.util.Log.w("AudioPlayerActivity", "Could not resolve path for URI: $uri")
             }
 
-            // 4. FileProvider URI — parse the path segment
-            val uriPath = uri.path ?: return null
-            val externalStorage = android.os.Environment.getExternalStorageDirectory().absolutePath
-
-            // FileProvider paths configured in provider_paths.xml:
-            // <root-path path="." name="storage_root" />
-            val prefixMappings = listOf(
-                "/storage_root/" to "",
-                "/root_path/" to "",
-                "/package_root/" to externalStorage,
-                "/external_files_path/" to externalStorage,
-                "/external-path/" to externalStorage,
-                "/files/" to externalStorage,
-                "/storage/" to "/storage"
-            )
-
-            for ((prefix, basePath) in prefixMappings) {
-                val idx = uriPath.indexOf(prefix)
-                if (idx >= 0) {
-                    val relativePart = uriPath.substring(idx + prefix.length)
-                    val candidate = if (basePath.isEmpty()) {
-                        if (relativePart.startsWith("/")) relativePart else "/$relativePart"
-                    } else {
-                        "$basePath/$relativePart"
-                    }
-                    if (File(candidate).exists()) {
-                        android.util.Log.d("AudioPlayerActivity", "Path resolved from FileProvider heuristic: $candidate")
-                        return candidate
-                    }
-                }
-            }
-
-            android.util.Log.w("AudioPlayerActivity", "Could not resolve path for URI: $uri")
+            return null
         }
-
-        return null
     }
 }

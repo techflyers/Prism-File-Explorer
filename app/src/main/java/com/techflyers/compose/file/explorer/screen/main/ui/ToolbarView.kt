@@ -79,6 +79,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
@@ -88,6 +89,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -112,6 +114,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -182,6 +185,7 @@ fun TooltipIconButton(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Toolbar(
     title: String,
@@ -190,215 +194,321 @@ fun Toolbar(
     hasNewUpdate: Boolean
 ) {
     val mainActivityManager = globalClass.mainActivityManager
+    val prefs = globalClass.preferencesManager
     val state by mainActivityManager.state.collectAsState()
     val activeTab = state.tabs.getOrNull(state.selectedTabIndex)
     val isFilesTab = activeTab is FilesTab
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     // In landscape, force single-row mode (disable tab bar) and disable bottom toolbar
-    val disableTabBar = globalClass.preferencesManager.disableTabBar || isLandscape
+    val disableTabBar = prefs.disableTabBar || isLandscape
     val buttonModifier = if (disableTabBar) Modifier.size(44.dp) else Modifier
+    var showToolbarSettingsDialog by remember { mutableStateOf(false) }
+
+    val buttonConfigs = remember(prefs.topToolbarButtonsConfig) {
+        TopToolbarConfigUtils.parseButtonConfigs(prefs.topToolbarButtonsConfig)
+    }
+    val showSubtitle = prefs.showToolbarSubtitle
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(
                 color = MaterialTheme.colorScheme.surfaceContainer
+            )
+            .combinedClickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = {},
+                onLongClick = { showToolbarSettingsDialog = true }
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box {
-            TooltipIconButton(
-                tooltip = stringResource(R.string.navigation_drawer),
-                onClick = { onToggleAppInfoDialog(true) },
-                modifier = buttonModifier
-            ) {
-                if (hasNewUpdate) {
-                    Icon(
-                        imageVector = PrismIcons.Upgrade,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                } else {
-                    Icon(imageVector = Icons.Rounded.Menu, contentDescription = null)
-                }
-            }
-        }
-
-        if (isFilesTab) {
-            val filesTab = activeTab as FilesTab
-            val isSelectionActive = filesTab.selectedFiles.isNotEmpty() || filesTab.selectedFilesCount > 0
-            if (isSelectionActive) {
-                TooltipIconButton(
-                    tooltip = stringResource(R.string.deselect_all),
-                    onClick = { filesTab.unselectAllFiles() },
-                    modifier = buttonModifier
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = stringResource(R.string.deselect_all),
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            } else if (filesTab.canGoForward()) {
-                TooltipIconButton(
-                    tooltip = stringResource(R.string.forward),
-                    onClick = { filesTab.goForward() },
-                    modifier = buttonModifier
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                        contentDescription = stringResource(R.string.forward),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-
-        if (isLandscape) {
-            val isTabBarDisabledPref = globalClass.preferencesManager.disableTabBar
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (isTabBarDisabledPref) {
-                    SingleRowTabsControl(state.tabs, state.selectedTabIndex)
-                } else {
-                    InlineLandscapeTabBar(
-                        tabLayoutState = state.tabLayoutState,
-                        tabs = state.tabs,
-                        selectedTabIndex = state.selectedTabIndex,
-                        onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
-                        onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() }
-                    )
-                }
-                if (isFilesTab) {
-                    FilesTabSubtitleIndicator(activeTab as FilesTab)
-                } else {
-                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
-                        Text(
-                            modifier = Modifier.alpha(0.7f),
-                            text = subtitle,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            lineHeight = 16.sp,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (disableTabBar) {
-                    SingleRowTabsControl(state.tabs, state.selectedTabIndex)
-                } else {
-                    Text(
-                        text = title,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        lineHeight = 20.sp,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (isFilesTab) {
-                    FilesTabSubtitleIndicator(activeTab as FilesTab)
-                } else {
-                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
-                        Text(
-                            modifier = Modifier.alpha(0.7f),
-                            text = subtitle,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            lineHeight = 16.sp,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-
-        if (isFilesTab) {
-            val filesTab = activeTab as FilesTab
-            val enableBottomToolbar = globalClass.preferencesManager.enableBottomToolbar && !isLandscape
-
-            if (!enableBottomToolbar) {
-                // Dedicated search button
-                TooltipIconButton(
-                    tooltip = stringResource(R.string.search),
-                    onClick = { filesTab.toggleSearchPenal(true) },
-                    modifier = buttonModifier
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = stringResource(R.string.search)
-                    )
-                }
-
-                // Normal plus create button (moves into overflow when disableTabBar is true)
-                if (!disableTabBar) {
-                    TooltipIconButton(
-                        tooltip = stringResource(R.string.create_new),
-                        onClick = { filesTab.toggleCreateNewFileDialog(true) },
-                        modifier = buttonModifier
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = stringResource(R.string.create)
-                        )
-                    }
-                }
-            }
-
-            if (filesTab.activeFolder !is VirtualFileHolder) {
-                val prefs = globalClass.preferencesManager
-                TooltipIconButton(
-                    tooltip = stringResource(R.string.show_directory_type_filter_ribbon),
-                    onClick = {
-                        prefs.showDirectoryTypeFilterRibbon = !prefs.showDirectoryTypeFilterRibbon
-                    },
-                    modifier = buttonModifier
-                ) {
-                    Icon(
-                        imageVector = if (prefs.showDirectoryTypeFilterRibbon) {
-                            Icons.Rounded.FilterList
-                        } else {
-                            Icons.Rounded.FilterListOff
-                        },
-                        contentDescription = stringResource(R.string.show_directory_type_filter_ribbon),
-                        tint = if (prefs.showDirectoryTypeFilterRibbon) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+        buttonConfigs.forEach { itemConfig ->
+            when (itemConfig.id) {
+                TopToolbarButtonItem.HAMBURGER_MENU.id -> {
+                    if (itemConfig.isEnabled) {
+                        Box {
+                            TooltipIconButton(
+                                tooltip = stringResource(R.string.navigation_drawer),
+                                onClick = { onToggleAppInfoDialog(true) },
+                                modifier = buttonModifier
+                            ) {
+                                if (hasNewUpdate) {
+                                    Icon(
+                                        imageVector = PrismIcons.Upgrade,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                } else {
+                                    Icon(imageVector = Icons.Rounded.Menu, contentDescription = null)
+                                }
+                            }
                         }
-                    )
+                    }
+                }
+
+                TopToolbarButtonItem.CONTEXT_NAVIGATION.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        val isSelectionActive = filesTab.selectedFiles.isNotEmpty() || filesTab.selectedFilesCount > 0
+                        val compactNavModifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .size(30.dp)
+                        if (isSelectionActive) {
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                                TooltipIconButton(
+                                    tooltip = stringResource(R.string.deselect_all),
+                                    onClick = { filesTab.unselectAllFiles() },
+                                    modifier = compactNavModifier
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.deselect_all),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        } else if (filesTab.canGoForward()) {
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                                TooltipIconButton(
+                                    tooltip = stringResource(R.string.forward),
+                                    onClick = { filesTab.goForward() },
+                                    modifier = compactNavModifier
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                        contentDescription = stringResource(R.string.forward),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.TITLE_AND_TABS.id -> {
+                    if (!itemConfig.isEnabled) {
+                        Box(modifier = Modifier.weight(1f))
+                    } else if (isLandscape) {
+                        val isTabBarDisabledPref = prefs.disableTabBar
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            if (isTabBarDisabledPref) {
+                                SingleRowTabsControl(state.tabs, state.selectedTabIndex)
+                            } else {
+                                InlineLandscapeTabBar(
+                                    tabLayoutState = state.tabLayoutState,
+                                    tabs = state.tabs,
+                                    selectedTabIndex = state.selectedTabIndex,
+                                    onReorder = { from, to -> mainActivityManager.reorderTabs(from, to) },
+                                    onAddNewTab = { mainActivityManager.addDefaultOrOverriddenNewTab() }
+                                )
+                            }
+                            if (showSubtitle) {
+                                if (isFilesTab) {
+                                    FilesTabSubtitleIndicator(activeTab as FilesTab)
+                                } else {
+                                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+                                        Text(
+                                            modifier = Modifier.alpha(0.7f),
+                                            text = subtitle,
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                            lineHeight = 16.sp,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            if (disableTabBar) {
+                                SingleRowTabsControl(state.tabs, state.selectedTabIndex)
+                            } else {
+                                Text(
+                                    text = title,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    lineHeight = 20.sp,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (showSubtitle) {
+                                if (isFilesTab) {
+                                    FilesTabSubtitleIndicator(activeTab as FilesTab)
+                                } else {
+                                    AnimatedVisibility(visible = subtitle.isNotEmpty()) {
+                                        Text(
+                                            modifier = Modifier.alpha(0.7f),
+                                            text = subtitle,
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                            lineHeight = 16.sp,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.SEARCH.id -> {
+                    if (itemConfig.isEnabled) {
+                        if (isFilesTab) {
+                            val filesTab = activeTab as FilesTab
+                            val enableBottomToolbar = prefs.enableBottomToolbar && !isLandscape
+                            if (!enableBottomToolbar) {
+                                TooltipIconButton(
+                                    tooltip = stringResource(R.string.search),
+                                    onClick = { filesTab.toggleSearchPenal(true) },
+                                    modifier = buttonModifier
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = stringResource(R.string.search)
+                                    )
+                                }
+                            }
+                        } else if (activeTab is HomeTab && prefs.hideHomeSearchBar) {
+                            TooltipIconButton(
+                                tooltip = stringResource(R.string.search),
+                                onClick = { activeTab.showSearchDialog = true },
+                                modifier = buttonModifier
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = stringResource(R.string.search)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.CREATE_NEW.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        val enableBottomToolbar = prefs.enableBottomToolbar && !isLandscape
+                        if (!enableBottomToolbar && !disableTabBar) {
+                            TooltipIconButton(
+                                tooltip = stringResource(R.string.create_new),
+                                onClick = { filesTab.toggleCreateNewFileDialog(true) },
+                                modifier = buttonModifier
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = stringResource(R.string.create)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.FILTER_RIBBON.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        if (filesTab.activeFolder !is VirtualFileHolder) {
+                            TooltipIconButton(
+                                tooltip = stringResource(R.string.show_directory_type_filter_ribbon),
+                                onClick = {
+                                    prefs.showDirectoryTypeFilterRibbon = !prefs.showDirectoryTypeFilterRibbon
+                                },
+                                modifier = buttonModifier
+                            ) {
+                                Icon(
+                                    imageVector = if (prefs.showDirectoryTypeFilterRibbon) {
+                                        Icons.Rounded.FilterList
+                                    } else {
+                                        Icons.Rounded.FilterListOff
+                                    },
+                                    contentDescription = stringResource(R.string.show_directory_type_filter_ribbon),
+                                    tint = if (prefs.showDirectoryTypeFilterRibbon) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.SORT.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        QuickSortButton(activeTab as FilesTab, modifier = buttonModifier)
+                    }
+                }
+
+                TopToolbarButtonItem.TASKS.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        TooltipIconButton(
+                            tooltip = stringResource(R.string.tasks),
+                            onClick = { filesTab.toggleTasksPanel(true) },
+                            modifier = buttonModifier
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AddTask,
+                                contentDescription = stringResource(R.string.tasks)
+                            )
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.BOOKMARKS.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        TooltipIconButton(
+                            tooltip = stringResource(R.string.bookmarks),
+                            onClick = { filesTab.toggleBookmarksDialog(true) },
+                            modifier = buttonModifier
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Bookmark,
+                                contentDescription = stringResource(R.string.bookmarks)
+                            )
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.VIEW_TYPE.id -> {
+                    if (itemConfig.isEnabled && isFilesTab) {
+                        val filesTab = activeTab as FilesTab
+                        TooltipIconButton(
+                            tooltip = stringResource(R.string.view_type),
+                            onClick = { filesTab.toggleViewConfigDialog(true) },
+                            modifier = buttonModifier
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ViewComfy,
+                                contentDescription = stringResource(R.string.view_type)
+                            )
+                        }
+                    }
+                }
+
+                TopToolbarButtonItem.MORE_OPTIONS.id -> {
+                    if (itemConfig.isEnabled) {
+                        MoreOptionsButton(modifier = buttonModifier)
+                    }
                 }
             }
-
-            // Keep quick-sort popup in the top toolbar at all times
-            QuickSortButton(filesTab, modifier = buttonModifier)
-
-            // Overflow menu
-            MoreOptionsButton(modifier = buttonModifier)
-        } else {
-            if (activeTab is HomeTab && globalClass.preferencesManager.hideHomeSearchBar) {
-                TooltipIconButton(
-                    tooltip = stringResource(R.string.search),
-                    onClick = { activeTab.showSearchDialog = true },
-                    modifier = buttonModifier
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = stringResource(R.string.search)
-                    )
-                }
-            }
-            MoreOptionsButton(modifier = buttonModifier)
         }
+    }
+
+    if (showToolbarSettingsDialog) {
+        TopToolbarSettingsDialog(onDismiss = { showToolbarSettingsDialog = false })
     }
 }
 
@@ -480,7 +590,7 @@ fun SingleRowTabsControl(
                                 )
                             }
                         } else null,
-                        trailingIcon = if (tabs.size > 1) {
+                        trailingIcon = if (!tabItem.isPinned && (tabs.size > 1 || tabItem !is HomeTab)) {
                             {
                                 IconButton(
                                     onClick = {
@@ -521,304 +631,368 @@ fun SingleRowTabsControl(
 @Composable
 fun MoreOptionsButton(modifier: Modifier = Modifier) {
     val mainActivityManager = globalClass.mainActivityManager
+    val prefs = globalClass.preferencesManager
     val context = LocalContext.current
 
     var showOptionsMenu by remember { mutableStateOf(false) }
+
+    val overflowConfigs = remember(prefs.topToolbarOverflowConfig) {
+        TopToolbarConfigUtils.parseOverflowConfigs(prefs.topToolbarOverflowConfig)
+    }
+    val buttonConfigs = remember(prefs.topToolbarButtonsConfig) {
+        TopToolbarConfigUtils.parseButtonConfigs(prefs.topToolbarButtonsConfig)
+    }
+    val isHamburgerDisabledOnToolbar = buttonConfigs.find { it.id == TopToolbarButtonItem.HAMBURGER_MENU.id }?.isEnabled == false
 
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(stringResource(R.string.more_options)) } },
         state = rememberTooltipState()
     ) {
-    Box {
-        IconButton(
-            onClick = { showOptionsMenu = true },
-            modifier = modifier
-        ) {
-            Icon(imageVector = Icons.Rounded.MoreVert, contentDescription = null)
-        }
-
-        DropdownMenu(
-            expanded = showOptionsMenu,
-            onDismissRequest = { showOptionsMenu = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            val state by mainActivityManager.state.collectAsState()
-            val activeTab = mainActivityManager.getActiveTab()
-
-            val taskManager = globalClass.taskManager
-            val version = taskManager.pendingTasksVersion
-            val mostRecentCopyTask = remember(version) {
-                taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+        Box {
+            IconButton(
+                onClick = { showOptionsMenu = true },
+                modifier = modifier
+            ) {
+                Icon(imageVector = Icons.Rounded.MoreVert, contentDescription = null)
             }
 
-            if (state.hasNewUpdate && globalClass.preferencesManager.hideToolbar) {
-                DropdownMenuItem(
-                    text = {
-                        Text(text = stringResource(R.string.new_update_available))
-                    },
-                    onClick = {
-                        mainActivityManager.toggleAppInfoDialog(true)
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = PrismIcons.Upgrade,
-                            contentDescription = null
-                        )
-                    }
-                )
-            }
+            DropdownMenu(
+                expanded = showOptionsMenu,
+                onDismissRequest = { showOptionsMenu = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                val state by mainActivityManager.state.collectAsState()
+                val activeTab = mainActivityManager.getActiveTab()
 
-            if (activeTab is FilesTab) {
-                if (activeTab.canGoForward()) {
+                val taskManager = globalClass.taskManager
+                val version = taskManager.pendingTasksVersion
+                val mostRecentCopyTask = remember(version) {
+                    taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+                }
+
+                if (state.hasNewUpdate && (prefs.hideToolbar || isHamburgerDisabledOnToolbar)) {
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.forward)) },
+                        text = {
+                            Text(text = stringResource(R.string.new_update_available))
+                        },
                         onClick = {
-                            activeTab.goForward()
+                            mainActivityManager.toggleAppInfoDialog(true)
                             showOptionsMenu = false
                         },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+                                imageVector = PrismIcons.Upgrade,
+                                contentDescription = null
                             )
                         }
                     )
                 }
 
-                val isRecycleBin = activeTab.activeFolder is LocalFileHolder &&
+                val isRecycleBin = activeTab is FilesTab && activeTab.activeFolder is LocalFileHolder &&
                         ((activeTab.activeFolder as LocalFileHolder).hasParent(globalClass.recycleBinDir) ||
                                 activeTab.activeFolder.uniquePath == globalClass.recycleBinDir.uniquePath)
-
-                val isAllSelected = activeTab.activeFolderContent.isNotEmpty() &&
-                        activeTab.selectedFiles.size == activeTab.activeFolderContent.size
-                DropdownMenuItem(
-                    text = {
-                        Text(text = stringResource(if (isAllSelected) R.string.deselect_all else R.string.select_all))
-                    },
-                    onClick = {
-                        if (isAllSelected) {
-                            activeTab.unselectAllFiles()
-                        } else {
-                            activeTab.unselectAllFiles(false)
-                            activeTab.activeFolderContent.forEach {
-                                activeTab.selectedFiles[it.uniquePath] = it
-                            }
-                            activeTab.quickReloadFiles()
-                        }
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.SelectAll,
-                            contentDescription = null
-                        )
-                    }
-                )
-
-                if (isRecycleBin) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = stringResource(R.string.empty),
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        },
-                        onClick = {
-                            activeTab.unselectAllFiles(false)
-                            activeTab.activeFolderContent.forEach {
-                                activeTab.selectedFiles[it.uniquePath] = it
-                            }
-                            activeTab.quickReloadFiles()
-                            activeTab.toggleDeleteConfirmationDialog(true)
-                            showOptionsMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteSweep,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    )
-                }
-
-                if (mostRecentCopyTask != null) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = stringResource(
-                                    if (mostRecentCopyTask.deleteSourceFiles) R.string.move_here else R.string.paste_here
-                                )
-                            )
-                        },
-                        onClick = {
-                            taskManager.runTask(
-                                mostRecentCopyTask.id,
-                                CopyTaskParameters(activeTab.activeFolder)
-                            )
-                            activeTab.unselectAllFiles()
-                            showOptionsMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.ContentPaste,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                }
-
-                // If single row navigation mode is active, Create New File moves into overflow
                 val isLandscapeMenu = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-                if ((globalClass.preferencesManager.disableTabBar || isLandscapeMenu) && !isRecycleBin) {
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.create_new)) },
-                        onClick = {
-                            activeTab.toggleCreateNewFileDialog(true)
-                            showOptionsMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = null
+
+                overflowConfigs.forEach { itemConfig ->
+                    val shouldForceDrawer = itemConfig.id == TopToolbarOverflowItem.DRAWER_MENU.id && isHamburgerDisabledOnToolbar
+                    if (!itemConfig.isEnabled && !shouldForceDrawer) return@forEach
+
+                    when (itemConfig.id) {
+                        TopToolbarOverflowItem.DRAWER_MENU.id -> {
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(R.string.navigation_drawer)) },
+                                onClick = {
+                                    mainActivityManager.toggleAppInfoDialog(true)
+                                    showOptionsMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(imageVector = Icons.Rounded.Menu, contentDescription = null)
+                                }
                             )
                         }
-                    )
-                }
 
-                val bottomToolbarVisible = globalClass.preferencesManager.enableBottomToolbar
-                val inSelection = activeTab.selectedFiles.isNotEmpty()
-                val showTasksBookmarksInOverflow = !bottomToolbarVisible || inSelection || isRecycleBin
-                if (showTasksBookmarksInOverflow) {
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.tasks)) },
-                        onClick = {
-                            activeTab.toggleTasksPanel(true)
-                            showOptionsMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(imageVector = Icons.Rounded.AddTask, contentDescription = null)
+                        TopToolbarOverflowItem.FORWARD.id -> {
+                            if (activeTab is FilesTab && activeTab.canGoForward()) {
+                                DropdownMenuItem(
+                                    text = { Text(text = stringResource(R.string.forward)) },
+                                    onClick = {
+                                        activeTab.goForward()
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                )
+                            }
                         }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.bookmarks)) },
-                        onClick = {
-                            activeTab.toggleBookmarksDialog(true)
-                            showOptionsMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(imageVector = Icons.Rounded.Bookmark, contentDescription = null)
+
+                        TopToolbarOverflowItem.SELECT_ALL.id -> {
+                            if (activeTab is FilesTab) {
+                                val isAllSelected = activeTab.activeFolderContent.isNotEmpty() &&
+                                        activeTab.selectedFiles.size == activeTab.activeFolderContent.size
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(text = stringResource(if (isAllSelected) R.string.deselect_all else R.string.select_all))
+                                    },
+                                    onClick = {
+                                        if (isAllSelected) {
+                                            activeTab.unselectAllFiles()
+                                        } else {
+                                            activeTab.unselectAllFiles(false)
+                                            activeTab.activeFolderContent.forEach {
+                                                activeTab.selectedFiles[it.uniquePath] = it
+                                            }
+                                            activeTab.quickReloadFiles()
+                                        }
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SelectAll,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
                         }
-                    )
+
+                        TopToolbarOverflowItem.EMPTY_RECYCLE_BIN.id -> {
+                            if (activeTab is FilesTab && isRecycleBin) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.empty),
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        activeTab.unselectAllFiles(false)
+                                        activeTab.activeFolderContent.forEach {
+                                            activeTab.selectedFiles[it.uniquePath] = it
+                                        }
+                                        activeTab.quickReloadFiles()
+                                        activeTab.toggleDeleteConfirmationDialog(true)
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteSweep,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.PASTE_HERE.id -> {
+                            if (activeTab is FilesTab && mostRecentCopyTask != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(
+                                                if (mostRecentCopyTask.deleteSourceFiles) R.string.move_here else R.string.paste_here
+                                            )
+                                        )
+                                    },
+                                    onClick = {
+                                        taskManager.runTask(
+                                            mostRecentCopyTask.id,
+                                            CopyTaskParameters(activeTab.activeFolder)
+                                        )
+                                        activeTab.unselectAllFiles()
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ContentPaste,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.CREATE_NEW.id -> {
+                            val isCreateDisabledOnToolbar = buttonConfigs.find { it.id == TopToolbarButtonItem.CREATE_NEW.id }?.isEnabled == false
+                            if (activeTab is FilesTab && (prefs.disableTabBar || isLandscapeMenu || isCreateDisabledOnToolbar) && !isRecycleBin) {
+                                DropdownMenuItem(
+                                    text = { Text(text = stringResource(R.string.create_new)) },
+                                    onClick = {
+                                        activeTab.toggleCreateNewFileDialog(true)
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Add,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.TASKS.id -> {
+                            if (activeTab is FilesTab) {
+                                val bottomToolbarVisible = prefs.enableBottomToolbar
+                                val inSelection = activeTab.selectedFiles.isNotEmpty()
+                                val showTasksInOverflow = !bottomToolbarVisible || inSelection || isRecycleBin
+                                if (showTasksInOverflow) {
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(R.string.tasks)) },
+                                        onClick = {
+                                            activeTab.toggleTasksPanel(true)
+                                            showOptionsMenu = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(imageVector = Icons.Rounded.AddTask, contentDescription = null)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        TopToolbarOverflowItem.BOOKMARKS.id -> {
+                            if (activeTab is FilesTab) {
+                                val bottomToolbarVisible = prefs.enableBottomToolbar
+                                val inSelection = activeTab.selectedFiles.isNotEmpty()
+                                val showBookmarksInOverflow = !bottomToolbarVisible || inSelection || isRecycleBin
+                                if (showBookmarksInOverflow) {
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(R.string.bookmarks)) },
+                                        onClick = {
+                                            activeTab.toggleBookmarksDialog(true)
+                                            showOptionsMenu = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(imageVector = Icons.Rounded.Bookmark, contentDescription = null)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        TopToolbarOverflowItem.SHOW_HIDDEN_FILES.id -> {
+                            if (activeTab is FilesTab) {
+                                val showHiddenFiles = prefs.showHiddenFiles
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.show_hidden_files)
+                                        )
+                                    },
+                                    onClick = {
+                                        prefs.showHiddenFiles = !showHiddenFiles
+                                        activeTab.onTabResumed()
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.RemoveRedEye,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = if (showHiddenFiles)
+                                                Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.VIEW_TYPE.id -> {
+                            if (activeTab is FilesTab) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(text = stringResource(R.string.view_type))
+                                    },
+                                    onClick = {
+                                        activeTab.toggleViewConfigDialog(true)
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ViewComfy,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.CUSTOMIZE_HOME_TAB.id -> {
+                            if (activeTab is HomeTab) {
+                                DropdownMenuItem(
+                                    text = { Text(text = stringResource(R.string.customize_home_tab)) },
+                                    onClick = {
+                                        activeTab.showCustomizeHomeTabDialog = true
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.EditAttributes,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        TopToolbarOverflowItem.MANAGE_STARTUP_TABS.id -> {
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(R.string.manage_startup_tabs)) },
+                                onClick = {
+                                    mainActivityManager.toggleStartupTabsDialog(true)
+                                    showOptionsMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.AutoAwesomeMotion,
+                                        contentDescription = null
+                                    )
+                                }
+                            )
+                        }
+
+                        TopToolbarOverflowItem.PREFERENCES.id -> {
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(R.string.preferences)) },
+                                onClick = {
+                                    context.startActivity(Intent(context, PreferencesActivity::class.java))
+                                    showOptionsMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(imageVector = Icons.Rounded.Settings, contentDescription = null)
+                                }
+                            )
+                        }
+
+                        TopToolbarOverflowItem.ABOUT.id -> {
+                            if (prefs.hideToolbar || isHamburgerDisabledOnToolbar) {
+                                DropdownMenuItem(
+                                    text = { Text(text = stringResource(R.string.about)) },
+                                    onClick = {
+                                        mainActivityManager.toggleAppInfoDialog(true)
+                                        showOptionsMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
-
-                HorizontalDivider()
-
-                val showHiddenFiles = globalClass.preferencesManager.showHiddenFiles
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = stringResource(R.string.show_hidden_files)
-                        )
-                    },
-                    onClick = {
-                        globalClass.preferencesManager.showHiddenFiles =
-                            !showHiddenFiles
-                        activeTab.onTabResumed()
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.RemoveRedEye,
-                            contentDescription = null
-                        )
-                    },
-                    trailingIcon = {
-                        Icon(
-                            imageVector = if (showHiddenFiles)
-                                Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                            contentDescription = null
-                        )
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text(text = stringResource(R.string.view_type))
-                    },
-                    onClick = {
-                        activeTab.toggleViewConfigDialog(true)
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.ViewComfy,
-                            contentDescription = null
-                        )
-                    }
-                )
-
-                HorizontalDivider()
-            }
-
-            if (activeTab is HomeTab) {
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(R.string.customize_home_tab)) },
-                    onClick = {
-                        activeTab.showCustomizeHomeTabDialog = true
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.EditAttributes,
-                            contentDescription = null
-                        )
-                    }
-                )
-            }
-
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.manage_startup_tabs)) },
-                onClick = {
-                    mainActivityManager.toggleStartupTabsDialog(true)
-                    showOptionsMenu = false
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoAwesomeMotion,
-                        contentDescription = null
-                    )
-                }
-            )
-
-            DropdownMenuItem(
-                text = { Text(text = stringResource(R.string.preferences)) },
-                onClick = {
-                    context.startActivity(Intent(context, PreferencesActivity::class.java))
-                    showOptionsMenu = false
-                },
-                leadingIcon = {
-                    Icon(imageVector = Icons.Rounded.Settings, contentDescription = null)
-                }
-            )
-
-            if (globalClass.preferencesManager.hideToolbar) {
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(R.string.about)) },
-                    onClick = {
-                        mainActivityManager.toggleAppInfoDialog(true)
-                        showOptionsMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Rounded.Info, contentDescription = null)
-                    }
-                )
             }
         }
-    }
     } // end TooltipBox
 }
 
@@ -1188,21 +1362,20 @@ fun InlineLandscapeTabBar(
     var from by remember { mutableIntStateOf(-1) }
     var to by remember { mutableIntStateOf(-1) }
     var draggedItem by remember { mutableIntStateOf(-1) }
-    var isDraggingAnyTab by remember { mutableStateOf(false) }
     var lastDragFinishedTime by remember { mutableLongStateOf(0L) }
     val list = remember { mutableStateListOf<Int>() }
     var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
 
     val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
-        if (draggedItem > -1 || isDraggingAnyTab) {
+        if (draggedItem > -1) {
             if (from < 0) from = old.index
             to = new.index
             list.add(new.index, list.removeAt(old.index))
         }
     }
 
-    LaunchedEffect(draggedItem, isDraggingAnyTab) {
-        if (draggedItem < 0 && !isDraggingAnyTab && from > -1 && to > -1) {
+    LaunchedEffect(draggedItem) {
+        if (draggedItem < 0 && from > -1 && to > -1) {
             lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
             onReorder(from, to)
             from = -1
@@ -1210,16 +1383,16 @@ fun InlineLandscapeTabBar(
         }
     }
 
-    if (!isDraggingAnyTab && draggedItem < 0) {
+    LaunchedEffect(tabs) {
         if (list.size == tabs.size) {
             tabs.forEachIndexed { idx, tab ->
-                if (list[idx] != tab.slotId) {
-                    list[idx] = tab.slotId
+                if (list[idx] != tab.id) {
+                    list[idx] = tab.id
                 }
             }
         } else {
             list.clear()
-            list.addAll(tabs.map { it.slotId })
+            list.addAll(tabs.map { it.id })
         }
     }
 
@@ -1248,19 +1421,16 @@ fun InlineLandscapeTabBar(
             state = tabLayoutState,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(list, key = { _, item -> item }) { index, slotId ->
-                tabs.find { it.slotId == slotId }?.let { tab ->
-                    ReorderableItem(reorderableLazyListState, key = tab.slotId) { isDragged ->
-                        if (isDragged && draggedItem != slotId) {
-                            draggedItem = slotId
-                            isDraggingAnyTab = true
-                        } else if (!isDragged && draggedItem == slotId) {
+            itemsIndexed(list, key = { _, item -> item }) { index, id ->
+                tabs.find { it.id == id }?.let { tab ->
+                    ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
+                        if (isDragged && draggedItem != id) {
+                            draggedItem = id
+                        } else if (!isDragged && draggedItem == id) {
                             draggedItem = -1
-                            isDraggingAnyTab = false
-                            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                         }
 
-                        val isSelected = selectedTabIndex == index
+                        val isSelected = index == selectedTabIndex
                         val isCopyHereDestination = (tab as? FilesTab)?.copyHereTargetFolder != null
                         val isDragHovered = mainActivityManager.activeDragSourceTab != null &&
                                 mainActivityManager.hoveredTabDropIndex == index
@@ -1305,9 +1475,12 @@ fun InlineLandscapeTabBar(
                         var showTabHeaderMenu by remember(tab.id) {
                             mutableStateOf(false)
                         }
+                        var lastClickTime by remember(tab.id) {
+                            mutableLongStateOf(0L)
+                        }
 
-                        LaunchedEffect(isDragged, isDraggingAnyTab, draggedItem) {
-                            if (isDragged || isDraggingAnyTab || draggedItem != -1) {
+                        LaunchedEffect(isDragged, draggedItem, reorderableLazyListState.isAnyItemDragging) {
+                            if (isDragged || draggedItem != -1 || reorderableLazyListState.isAnyItemDragging) {
                                 showTabHeaderMenu = false
                             }
                         }
@@ -1330,36 +1503,35 @@ fun InlineLandscapeTabBar(
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
                                         val currentTime = android.os.SystemClock.uptimeMillis()
-                                        if (isDragged || isDraggingAnyTab || draggedItem != -1 ||
-                                            (currentTime - lastDragFinishedTime) < 400L
+                                        if (isDragged || draggedItem != -1 || reorderableLazyListState.isAnyItemDragging ||
+                                            (currentTime - lastDragFinishedTime) < 350L
                                         ) {
                                             showTabHeaderMenu = false
                                             return@combinedClickable
                                         }
-                                        if (!isSelected) {
-                                            mainActivityManager.selectTabAt(index)
-                                        } else {
-                                            showTabHeaderMenu = true
-                                        }
-                                    },
-                                    onLongClick = {
-                                        if (!isDragged && !isDraggingAnyTab && draggedItem == -1) {
-                                            if (!isSelected) {
-                                                mainActivityManager.selectTabAt(index, true)
+                                        if (currentTime - lastClickTime < 300L) {
+                                            lastClickTime = 0L
+                                            showTabHeaderMenu = false
+                                            if (!tab.isPinned) {
+                                                mainActivityManager.removeTabAt(index)
                                             }
-                                            showTabHeaderMenu = true
+                                        } else {
+                                            lastClickTime = currentTime
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index)
+                                            } else {
+                                                showTabHeaderMenu = true
+                                            }
                                         }
                                     }
                                 )
                                 .padding(horizontal = 12.dp)
                                 .longPressDraggableHandle(
                                     onDragStarted = {
-                                        isDraggingAnyTab = true
                                         showTabHeaderMenu = false
                                     },
                                     onDragStopped = {
                                         val didReorder = from > -1 && to > -1 && from != to
-                                        isDraggingAnyTab = false
                                         lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                                         if (!didReorder) {
                                             if (!isSelected) {
@@ -1418,7 +1590,7 @@ fun InlineLandscapeTabBar(
                                 fontWeight = if (isSelected || isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
                                 color = textColorAnim.value
                             )
-                            if (showTabHeaderMenu && !isDragged && !isDraggingAnyTab && draggedItem == -1) {
+                            if (showTabHeaderMenu && !isDragged && draggedItem == -1 && !reorderableLazyListState.isAnyItemDragging) {
                                 OptionsMenu(
                                     tab = tab,
                                     index = index,
@@ -1499,144 +1671,152 @@ fun InlineToolbarBreadcrumb(
         }
     }
 
-    Row(
-        modifier = modifier.padding(horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val fastViewConfig = com.techflyers.compose.file.explorer.screen.main.tab.files.ui.rememberFastBreadcrumbViewConfiguration()
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalViewConfiguration provides fastViewConfig
     ) {
-        val isHomeCurrentFolder = tab.homeDir.uniquePath == tab.activeFolder.uniquePath
-        val isHomeHovered = tab.dragDropSession?.hoveredTargetDirectory == tab.homeDir.uniquePath
-        val isHomeValid = tab.dragDropSession?.isValidDropTarget(tab.homeDir, tab.activeFolder) == true
-
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .onGloballyPositioned { coordinates ->
-                    if (!isHomeCurrentFolder) {
-                        tab.registerDropTarget(tab.homeDir, coordinates)
-                    }
-                }
-                .then(
-                    if (isHomeHovered && isHomeValid) {
-                        Modifier
-                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
-                            .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                    } else if (isHomeHovered && !isHomeValid) {
-                        Modifier
-                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
-                    } else Modifier
-                )
-                .combinedClickable(
-                    onClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeTap() },
-                    onLongClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeLongPress(tab) }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Home,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-
-        LazyRow(
-            modifier = Modifier
-                .weight(1f)
-                .nestedScroll(consumeLeftoverScroll),
-            state = tab.currentPathSegmentsListState,
+        Row(
+            modifier = modifier.padding(horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
-                val isHighlighted = index == highlightedIndex ||
-                        (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
-                val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
-                val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
-                val isDropTarget = !isCurrentFolder
-                val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
-                val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
+            val isHomeCurrentFolder = tab.homeDir.uniquePath == tab.activeFolder.uniquePath
+            val isHomeHovered = tab.dragDropSession?.hoveredTargetDirectory == tab.homeDir.uniquePath
+            val isHomeValid = tab.dragDropSession?.isValidDropTarget(tab.homeDir, tab.activeFolder) == true
 
-                DisposableEffect(item.uniquePath) {
-                    onDispose {
-                        tab.unregisterDropTarget(item.uniquePath)
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .onGloballyPositioned { coordinates ->
+                        if (!isHomeCurrentFolder) {
+                            tab.registerDropTarget(tab.homeDir, coordinates)
+                        }
                     }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .alpha(if (isHistorySegment) 0.35f else 1f),
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    .then(
+                        if (isHomeHovered && isHomeValid) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                        } else if (isHomeHovered && !isHomeValid) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                        } else Modifier
                     )
-                    Box(
-                        modifier = Modifier
-                            .onGloballyPositioned { coordinates ->
-                                if (isDropTarget) {
-                                    tab.registerDropTarget(item, coordinates)
-                                }
-                            }
-                            .then(
-                                if (isHovered && isValidTarget) {
-                                    Modifier
-                                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
-                                        .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                                } else if (isHovered && !isValidTarget) {
-                                    Modifier
-                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                        .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
-                                } else Modifier
-                            )
-                    ) {
-                        Text(
+                    .combinedClickable(
+                        onClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeTap() },
+                        onLongClick = { com.techflyers.compose.file.explorer.screen.main.tab.files.ui.navigateBreadcrumbHomeLongPress(tab) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Home,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            LazyRow(
+                modifier = Modifier
+                    .weight(1f)
+                    .nestedScroll(consumeLeftoverScroll),
+                state = tab.currentPathSegmentsListState,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
+                    val isHighlighted = index == highlightedIndex ||
+                            (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
+                    val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
+                    val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
+                    val isDropTarget = !isCurrentFolder
+                    val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
+                    val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+                    DisposableEffect(item.uniquePath) {
+                        onDispose {
+                            tab.unregisterDropTarget(item.uniquePath)
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
                             modifier = Modifier
-                                .clip(CircleShape)
-                                .combinedClickable(
-                                    onClick = {
-                                        tab.scope.launch {
-                                            if (tab.isBreadcrumbSegmentValid(item)) {
-                                                tab.openFolderImpl(
-                                                    item = item,
-                                                    rememberSelectedFiles = true,
-                                                )
-                                            } else {
-                                                tab.pruneInvalidBreadcrumbSegments()
-                                                tab.reloadFiles()
-                                            }
-                                        }
-                                    },
-                                    onDoubleClick = {
-                                        if (item.canAddNewContent) {
-                                            tab.toggleCopyHereMode(item)
-                                        }
-                                    },
-                                    onLongClick = {
-                                        item.uniquePath.copyToClipboard()
-                                        showMsg(R.string.path_copied_to_clipboard)
-                                    }
-                                )
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                                .alpha(
-                                    when {
-                                        isHighlighted -> 1f
-                                        isHistorySegment -> 0.45f
-                                        else -> 0.85f
-                                    }
-                                ),
-                            text = item.displayName
-                                .orIf(stringResource(id = R.string.internal_storage)) {
-                                    item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
-                                }
-                                .orIf(stringResource(id = R.string.root)) {
-                                    item.uniquePath == File.separator
-                                },
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
-                            color = if (isHighlighted) highlightedColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                .size(12.dp)
+                                .alpha(if (isHistorySegment) 0.35f else 1f),
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
+                        Box(
+                            modifier = Modifier
+                                .onGloballyPositioned { coordinates ->
+                                    if (isDropTarget) {
+                                        tab.registerDropTarget(item, coordinates)
+                                    }
+                                }
+                                .then(
+                                    if (isHovered && isValidTarget) {
+                                        Modifier
+                                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                                            .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                    } else if (isHovered && !isValidTarget) {
+                                        Modifier
+                                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                            .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                                    } else Modifier
+                                )
+                        ) {
+                            Text(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (tab.breadcrumbSegmentKey(item) != tab.breadcrumbSegmentKey(tab.activeFolder)) {
+                                                tab.highlightedPathSegment = item
+                                            }
+                                            tab.scope.launch {
+                                                if (tab.isBreadcrumbSegmentValid(item)) {
+                                                    tab.openFolderImpl(
+                                                        item = item,
+                                                        rememberSelectedFiles = true,
+                                                    )
+                                                } else {
+                                                    tab.pruneInvalidBreadcrumbSegments()
+                                                    tab.reloadFiles()
+                                                }
+                                            }
+                                        },
+                                        onDoubleClick = {
+                                            if (item.canAddNewContent) {
+                                                tab.toggleCopyHereMode(item)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            item.uniquePath.copyToClipboard()
+                                            showMsg(R.string.path_copied_to_clipboard)
+                                        }
+                                    )
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    .alpha(
+                                        when {
+                                            isHighlighted -> 1f
+                                            isHistorySegment -> 0.45f
+                                            else -> 0.85f
+                                        }
+                                    ),
+                                text = item.displayName
+                                    .orIf(stringResource(id = R.string.internal_storage)) {
+                                        item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
+                                    }
+                                    .orIf(stringResource(id = R.string.root)) {
+                                        item.uniquePath == File.separator
+                                    },
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                fontWeight = if (isHighlighted) FontWeight.Medium else FontWeight.Normal,
+                                color = if (isHighlighted) highlightedColor else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

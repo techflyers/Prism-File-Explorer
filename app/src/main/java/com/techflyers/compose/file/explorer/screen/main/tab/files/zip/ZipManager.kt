@@ -2,11 +2,9 @@ package com.techflyers.compose.file.explorer.screen.main.tab.files.zip
 
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.common.isNot
-import com.techflyers.compose.file.explorer.common.removeIf
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
-import kotlinx.coroutines.runBlocking
 
 class ZipManager {
     val archiveList = hashMapOf<LocalFileHolder, ZipTree>()
@@ -65,33 +63,46 @@ class ZipManager {
     /**
      * Opens an archive, navigating into it as a virtual folder.
      *
-     * All formats are handled by lib7za via [ZipTree]. If the archive is encrypted,
-     * [ZipTree.build] throws [ZipTree.ArchivePasswordRequiredException] and the caller
-     * (ZipFileHolder) shows the password dialog automatically.
+     * If [archive] is a non-first part of a multi-part split archive (e.g., `.7z.002` or `.part2.rar`),
+     * automatically resolves the primary volume in the parent folder when present.
      *
      * @param archive The archive file to open.
      * @param password Optional password for encrypted archives.
      */
     fun openArchive(archive: LocalFileHolder, password: String? = null) {
-        android.util.Log.d("PrismArchive", "ZipManager: openArchive() archive=${archive.displayName}, path=${archive.uniquePath}, passwordProvided=${!password.isNullOrEmpty()}")
+        val multiPart = ArchiveManager.resolveMultiPartArchive(archive.file)
+        val effectiveArchive = if (
+            multiPart.isMultiPart &&
+            multiPart.missingParts.isEmpty() &&
+            multiPart.primaryFile.exists() &&
+            multiPart.primaryFile.absolutePath != archive.file.absolutePath
+        ) {
+            android.util.Log.d(
+                "PrismArchive",
+                "ZipManager: Redirecting split part ${archive.displayName} -> primary volume ${multiPart.primaryFile.name}"
+            )
+            LocalFileHolder(multiPart.primaryFile)
+        } else {
+            archive
+        }
 
-        // All archive formats are handled by lib7za via ZipTree.
-        // ZipTree.build() will throw ArchivePasswordRequiredException for all encrypted formats,
-        // which causes the password dialog to be shown automatically.
+        android.util.Log.d(
+            "PrismArchive",
+            "ZipManager: openArchive() archive=${effectiveArchive.displayName}, path=${effectiveArchive.uniquePath}, passwordProvided=${!password.isNullOrEmpty()}"
+        )
 
-        val existingTreeKey = archiveList.keys.find { archive.uniquePath == it.uniquePath }
+        val existingTreeKey = archiveList.keys.find { effectiveArchive.uniquePath == it.uniquePath }
 
         if (existingTreeKey != null) {
             archiveList[existingTreeKey]?.let { existingTree ->
                 android.util.Log.d("PrismArchive", "ZipManager: Found existing ZipTree for archive.")
-                // Update password if one was just entered
                 if (password != null) {
                     android.util.Log.d("PrismArchive", "ZipManager: Updating existing tree password and forcing rebuild.")
                     existingTree.password = password
-                    existingTree.invalidate() // FORCE REBUILD WITH NEW PASSWORD!
+                    existingTree.invalidate()
                 }
 
-                if (existingTree.timeStamp == archive.lastModified) {
+                if (existingTree.timeStamp == effectiveArchive.lastModified) {
                     android.util.Log.d("PrismArchive", "ZipManager: Existing tree is valid, navigating...")
                     navigateTo(existingTree)
                     return
@@ -103,13 +114,11 @@ class ZipManager {
         }
 
         android.util.Log.d("PrismArchive", "ZipManager: Creating fresh ZipTree...")
-        val newTree = ZipTree(archive).apply {
+        val newTree = ZipTree(effectiveArchive).apply {
             if (password != null) this.password = password
         }
 
-        // Register immediately and navigate — ZipFileHolder.listContent() will call
-        // prepare() asynchronously via the tab's loading coroutine, so we never block the main thread.
-        archiveList[archive] = newTree
+        archiveList[effectiveArchive] = newTree
         android.util.Log.d("PrismArchive", "PrismArchive: Registered ZipTree in archiveList. Navigating...")
         navigateTo(newTree)
     }

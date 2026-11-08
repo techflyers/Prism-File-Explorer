@@ -97,6 +97,7 @@ import androidx.pdf.ExperimentalPdfApi
 import androidx.pdf.view.PdfView
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import com.techflyers.compose.file.explorer.screen.viewer.document.core.PdfTextServiceImpl
 import com.techflyers.compose.file.explorer.screen.viewer.document.ui.DocumentAiSheet
 import com.techflyers.compose.file.explorer.screen.viewer.document.ui.DocumentSelectionToolbar
@@ -417,15 +418,10 @@ fun EnhancedPdfViewerContent(
 
     // ── Dialogs ───────────────────────────────────────────────────────────────
     if (showInfoDialog) {
-        val props = if (infoProperties.isNotEmpty()) infoProperties else listOf(
-            "File Name" to fileName,
-            "Total Pages" to totalPages.toString(),
-            "Renderer" to if (isOfficeConverted) "LibreOffice + AndroidX Native PDF" else "Google AndroidX Native PDF",
-            "Path" to (documentUri.path ?: documentUri.toString())
-        )
-        InfoDialog(
-            title = globalClass.getString(R.string.pdf_info),
-            properties = props,
+        val targetUri = originalSourceUri ?: documentUri
+        ExtendedMetadataSheet(
+            uri = targetUri,
+            displayNameHint = fileName,
             onDismiss = { showInfoDialog = false }
         )
     }

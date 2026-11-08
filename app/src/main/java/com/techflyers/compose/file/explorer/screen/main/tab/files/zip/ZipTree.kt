@@ -39,6 +39,9 @@ class ZipTree(
     var archivePathForNative: String = source.file.absolutePath
         private set
 
+    var lastError: ArchiveManager.ArchiveOperationException? = null
+        private set
+
     private val nodes = hashMapOf<String, ZipNode>()
 
     private val root = ZipNode(
@@ -75,7 +78,13 @@ class ZipTree(
     fun getExtractionDestinationFile(node: ZipNode): LocalFileHolder? {
         val file = File(createExtractionDestinationDirFor(node), node.name)
 
-        if (!file.exists()) return null
+        if (!file.exists()) {
+            val flatFile = File(cleanOnExitDir.file, node.name)
+            if (flatFile.exists()) return LocalFileHolder(flatFile)
+            val fullRelFile = File(cleanOnExitDir.file, node.path)
+            if (fullRelFile.exists()) return LocalFileHolder(fullRelFile)
+            return null
+        }
 
         return LocalFileHolder(file)
     }
@@ -98,6 +107,7 @@ class ZipTree(
      * on access failure.
      */
     fun prepare() {
+        lastError = null
         archivePathForNative = runBlocking {
             ArchiveManager.resolveAccessibleArchivePath(source.file.absolutePath)
         }
@@ -129,7 +139,7 @@ class ZipTree(
             )
             if (hasEncryptedEntries) {
                 if (password.isNullOrEmpty()) {
-                    throw ArchivePasswordRequiredException(source.displayName)
+                    throw ArchivePasswordRequiredException(source.displayName, isRetry = false)
                 }
 
                 val firstEncryptedFile = entries.firstOrNull { it.encrypted && !it.isDirectory }
@@ -145,36 +155,67 @@ class ZipTree(
                         )
                     }
                     if (!testResult.success) {
-                        throw ArchivePasswordRequiredException(source.displayName)
+                        if (ArchiveManager.isPasswordRequiredError(testResult.output)) {
+                            throw ArchivePasswordRequiredException(source.displayName, isRetry = true)
+                        } else {
+                            throw ArchiveManager.ArchiveOperationException(
+                                summary = ArchiveManager.parse7zaErrorSummary(testResult.output, testResult.exitCode),
+                                diagnosticLog = ArchiveManager.extract7zaErrorLog(
+                                    testResult.output,
+                                    testResult.exitCode,
+                                    "7za t $archivePathForNative"
+                                ),
+                                exitCode = testResult.exitCode,
+                                isPasswordError = false
+                            )
+                        }
                     }
                 }
             }
 
             buildTreeFromNativeEntries(entries)
+            isReady = true
+            android.util.Log.d("PrismArchive", "ZipTree: build() completed successfully.")
         } catch (e: Exception) {
             android.util.Log.e("PrismArchive", "ZipTree: Listing failed: ${e.message}", e)
             if (e is ArchivePasswordRequiredException) {
                 throw e
             }
-            val msg = e.message?.lowercase() ?: ""
-            val needsPassword = msg.contains("wrong password") ||
-                    msg.contains("encrypted") ||
-                    msg.contains("password") ||
-                    msg.contains("cannot open encrypted") ||
-                    msg.contains("incorrect password")
-            if (needsPassword) {
-                throw ArchivePasswordRequiredException(source.displayName)
+            if (e is ArchiveManager.ArchiveOperationException) {
+                if (e.isPasswordError) {
+                    throw ArchivePasswordRequiredException(
+                        archiveName = source.displayName,
+                        isRetry = !password.isNullOrEmpty()
+                    )
+                }
+                lastError = e
+                logger.logError(e)
+                throw e
             }
-            logger.logError(e)
-            globalClass.showMsg("Failed to open archive: ${e.message}")
-        }
 
-        isReady = true
-        android.util.Log.d("PrismArchive", "ZipTree: build() completed successfully.")
+            val rawMessage = e.message ?: "Unknown archive error"
+            if (ArchiveManager.isPasswordRequiredError(rawMessage)) {
+                throw ArchivePasswordRequiredException(
+                    archiveName = source.displayName,
+                    isRetry = !password.isNullOrEmpty()
+                )
+            }
+
+            val wrapped = ArchiveManager.ArchiveOperationException(
+                summary = rawMessage.lineSequence().firstOrNull() ?: "Failed to open archive",
+                diagnosticLog = e.stackTraceToString(),
+                cause = e
+            )
+            lastError = wrapped
+            logger.logError(e)
+            throw wrapped
+        }
     }
 
-    class ArchivePasswordRequiredException(val archiveName: String) :
-        Exception("Archive '$archiveName' is encrypted and requires a password")
+    class ArchivePasswordRequiredException(
+        val archiveName: String,
+        val isRetry: Boolean = false
+    ) : Exception("Archive '$archiveName' is encrypted and requires a password")
 
     private fun buildTreeFromNativeEntries(entries: List<ArchiveEntry>) {
         nodes.clear()

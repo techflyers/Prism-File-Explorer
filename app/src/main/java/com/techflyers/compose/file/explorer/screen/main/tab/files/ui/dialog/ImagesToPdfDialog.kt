@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.PictureAsPdf
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -177,64 +179,56 @@ fun ImagesToPdfDialog(
                         fontWeight = FontWeight.SemiBold
                     )
 
+                    val listState = rememberLazyListState()
+                    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+                        val m = orderedFiles.toMutableList()
+                        val item = m.removeAt(from.index)
+                        m.add(to.index, item)
+                        orderedFiles = m
+                    }
+
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 200.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        itemsIndexed(orderedFiles) { index, fileHolder ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                        itemsIndexed(orderedFiles, key = { _, fileHolder -> fileHolder.uniquePath }) { index, fileHolder ->
+                            ReorderableItem(reorderableState, key = fileHolder.uniquePath) { isDragging ->
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = "${index + 1}.",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.width(24.dp)
-                                    )
-                                    Text(
-                                        text = fileHolder.displayName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            if (index > 0) {
-                                                val m = orderedFiles.toMutableList()
-                                                val item = m.removeAt(index)
-                                                m.add(index - 1, item)
-                                                orderedFiles = m
-                                            }
-                                        },
-                                        enabled = index > 0,
-                                        modifier = Modifier.size(30.dp)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            if (index < orderedFiles.size - 1) {
-                                                val m = orderedFiles.toMutableList()
-                                                val item = m.removeAt(index)
-                                                m.add(index + 1, item)
-                                                orderedFiles = m
-                                            }
-                                        },
-                                        enabled = index < orderedFiles.size - 1,
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
+                                        Icon(
+                                            imageVector = Icons.Rounded.DragHandle,
+                                            contentDescription = "Reorder",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .draggableHandle()
+                                                .padding(end = 8.dp)
+                                                .size(20.dp)
+                                        )
+                                        Text(
+                                            text = "${index + 1}.",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.width(24.dp)
+                                        )
+                                        Text(
+                                            text = fileHolder.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     }
                                 }
                             }

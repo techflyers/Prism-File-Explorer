@@ -151,6 +151,7 @@ class PrismDocumentsProvider : DocumentsProvider() {
 
     private fun includeRemoteRoot(result: MatrixCursor, conn: NetworkConnectionModel) {
         val row = result.newRow()
+        val rootPath = conn.rootPath.ifBlank { "/" }
         row.set(Root.COLUMN_ROOT_ID, "remote_${conn.id}")
         row.set(
             Root.COLUMN_FLAGS,
@@ -161,7 +162,7 @@ class PrismDocumentsProvider : DocumentsProvider() {
         row.set(Root.COLUMN_ICON, R.mipmap.ic_launcher)
         row.set(Root.COLUMN_TITLE, "${conn.type}: ${conn.name}")
         row.set(Root.COLUMN_SUMMARY, "${conn.type} • ${conn.host}")
-        row.set(Root.COLUMN_DOCUMENT_ID, buildRemoteDocId(conn.id, "/"))
+        row.set(Root.COLUMN_DOCUMENT_ID, buildRemoteDocId(conn.id, rootPath))
         row.set(Root.COLUMN_MIME_TYPES, "*/*")
     }
 
@@ -562,7 +563,14 @@ class PrismDocumentsProvider : DocumentsProvider() {
             val (connId, remotePath) = parseRemoteDocId(documentId)
             val conn = getConnection(connId) ?: throw FileNotFoundException("Remote connection not found: $connId")
             val client = RemoteConnectionPool.clientFor(conn)
-            client.deleteRecursive(remotePath, isDir = true)
+            val parent = RemotePaths.parent(remotePath) ?: "/"
+            val name = RemotePaths.name(remotePath)
+            val isDir = try {
+                client.listDirectory(parent).firstOrNull { it.name == name }?.isDirectory ?: false
+            } catch (_: Exception) {
+                false
+            }
+            client.deleteRecursive(remotePath, isDir = isDir)
             return
         }
 

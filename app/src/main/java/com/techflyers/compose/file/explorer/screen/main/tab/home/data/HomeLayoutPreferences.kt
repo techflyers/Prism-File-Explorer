@@ -5,6 +5,7 @@ import com.techflyers.compose.file.explorer.R
 import kotlinx.serialization.Serializable
 
 object HomeSectionIds {
+    const val SEARCH_BAR = "search_bar"
     const val RECENT_FILES = "recent_files"
     const val CATEGORIES = "categories"
     const val STORAGE = "storage"
@@ -17,53 +18,60 @@ object HomeSectionIds {
 fun getDefaultHomeLayout(minimalLayout: Boolean = false) = HomeLayout(
     listOf(
         HomeSectionConfig(
+            id = HomeSectionIds.SEARCH_BAR,
+            type = HomeSectionType.SEARCH_BAR,
+            title = globalClass.getString(R.string.search),
+            isEnabled = true,
+            order = 0
+        ),
+        HomeSectionConfig(
             id = HomeSectionIds.RECENT_FILES,
             type = HomeSectionType.RECENT_FILES,
             title = globalClass.getString(R.string.recent_files),
             isEnabled = !minimalLayout,
-            order = 0
+            order = 1
         ),
         HomeSectionConfig(
             id = HomeSectionIds.CATEGORIES,
             type = HomeSectionType.CATEGORIES,
             title = globalClass.getString(R.string.categories),
             isEnabled = !minimalLayout,
-            order = 1
+            order = 2
         ),
         HomeSectionConfig(
             id = HomeSectionIds.STORAGE,
             type = HomeSectionType.STORAGE,
             title = globalClass.getString(R.string.storage),
             isEnabled = true,
-            order = 2
+            order = 3
         ),
         HomeSectionConfig(
             id = HomeSectionIds.BOOKMARKS,
             type = HomeSectionType.BOOKMARKS,
             title = globalClass.getString(R.string.bookmarks),
             isEnabled = !minimalLayout,
-            order = 3
+            order = 4
         ),
         HomeSectionConfig(
             id = HomeSectionIds.PINNED_FILES,
             type = HomeSectionType.PINNED_FILES,
             title = globalClass.getString(R.string.pinned_files),
             isEnabled = !minimalLayout,
-            order = 4
+            order = 5
         ),
         HomeSectionConfig(
             id = HomeSectionIds.RECYCLE_BIN,
             type = HomeSectionType.RECYCLE_BIN,
             title = globalClass.getString(R.string.recycle_bin),
             isEnabled = !minimalLayout,
-            order = 5
+            order = 6
         ),
         HomeSectionConfig(
             id = HomeSectionIds.JUMP_TO_PATH,
             type = HomeSectionType.JUMP_TO_PATH,
             title = globalClass.getString(R.string.jump_to_path),
             isEnabled = !minimalLayout,
-            order = 6
+            order = 7
         )
     )
 )
@@ -74,19 +82,32 @@ data class HomeLayout(
 ) {
     // Adds missing sections for backward compatibility with older saved layouts
     fun getSections(): List<HomeSectionConfig> {
+        var current = sections
         // Add Pinned Files if missing (for layouts saved before v1.3.2)
-        if (sections.find { it.id == HomeSectionIds.PINNED_FILES } == null) {
-            return sections.plus(
+        if (current.find { it.id == HomeSectionIds.PINNED_FILES } == null) {
+            current = current.plus(
                 HomeSectionConfig(
                     id = HomeSectionIds.PINNED_FILES,
                     type = HomeSectionType.PINNED_FILES,
                     title = globalClass.getString(R.string.pinned_files),
                     isEnabled = true,
-                    order = sections.maxOfOrNull { it.order }?.plus(1) ?: 0
+                    order = current.maxOfOrNull { it.order }?.plus(1) ?: 0
                 )
             )
         }
-        return sections
+        // Add Search Bar if missing
+        if (current.find { it.id == HomeSectionIds.SEARCH_BAR } == null) {
+            current = listOf(
+                HomeSectionConfig(
+                    id = HomeSectionIds.SEARCH_BAR,
+                    type = HomeSectionType.SEARCH_BAR,
+                    title = globalClass.getString(R.string.search),
+                    isEnabled = true,
+                    order = 0
+                )
+            ) + current.map { it.copy(order = it.order + 1) }
+        }
+        return current
     }
 }
 
@@ -101,6 +122,7 @@ data class HomeSectionConfig(
 
 @Serializable
 enum class HomeSectionType {
+    SEARCH_BAR,
     RECENT_FILES,
     CATEGORIES,
     STORAGE,

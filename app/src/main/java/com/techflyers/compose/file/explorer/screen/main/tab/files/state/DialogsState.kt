@@ -16,5 +16,6 @@ data class DialogsState(
     val showBookmarkDialog: Boolean = false,
     val showImportPrefsDialog: Boolean = false,
     val showArchivePasswordDialog: Boolean = false,
+    val showArchiveErrorDialog: Boolean = false,
     val showShareFolderCompressDialog: Boolean = false,
 )

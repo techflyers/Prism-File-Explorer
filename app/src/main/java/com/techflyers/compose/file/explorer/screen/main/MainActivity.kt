@@ -485,58 +485,64 @@ class MainActivity : BaseActivity() {
             val pagerState = rememberPagerState(initialPage = state.selectedTabIndex) {
                 state.tabs.size
             }
-            val activeTab = state.tabs.getOrNull(state.selectedTabIndex)
-            val activeTabId = activeTab?.id
-            val activeTabHeader = activeTab?.header
+            val activeTabId = state.tabs.getOrNull(state.selectedTabIndex)?.id
 
-            suspend fun ensureSelectedTabVisible(page: Int) {
-                if (globalClass.preferencesManager.disableTabBar || page !in state.tabs.indices) return
-                // Wait for TabLayout composition and measurement so layoutInfo has up-to-date tab bounds
-                androidx.compose.runtime.withFrameNanos { }
-                val tabListState = state.tabLayoutState
-                if (page == 0) {
-                    if (tabListState.firstVisibleItemIndex != 0 || tabListState.firstVisibleItemScrollOffset != 0) {
-                        tabListState.animateScrollToItem(0, 0)
-                    }
-                    return
-                }
-                val layoutInfo = tabListState.layoutInfo
-                val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
-                if (visibleItem == null) {
-                    tabListState.animateScrollToItem(page, 0)
-                    androidx.compose.runtime.withFrameNanos { }
-                    val updatedInfo = tabListState.layoutInfo
-                    val newlyVisible = updatedInfo.visibleItemsInfo.find { it.index == page }
-                    val endBound = updatedInfo.viewportEndOffset - updatedInfo.afterContentPadding
-                    if (newlyVisible != null && newlyVisible.offset + newlyVisible.size > endBound) {
-                        tabListState.animateScrollBy((newlyVisible.offset + newlyVisible.size - endBound).toFloat())
-                    }
-                } else {
-                    val startBound = 0
-                    val endBound = layoutInfo.viewportEndOffset - layoutInfo.afterContentPadding
-                    val itemStart = visibleItem.offset
-                    val itemEnd = visibleItem.offset + visibleItem.size
-                    if (itemStart < startBound) {
-                        tabListState.animateScrollBy((itemStart - startBound).toFloat())
-                    } else if (itemEnd > endBound) {
-                        tabListState.animateScrollBy((itemEnd - endBound).toFloat())
-                    }
-                }
-            }
-
-            LaunchedEffect(state.selectedTabIndex, activeTabId, activeTabHeader, state.tabs.size) {
-                if (state.selectedTabIndex in state.tabs.indices && pagerState.currentPage isNot state.selectedTabIndex) {
+            LaunchedEffect(state.selectedTabIndex, activeTabId) {
+                if (pagerState.currentPage isNot state.selectedTabIndex) {
                     pagerState.scrollToPage(state.selectedTabIndex)
                 }
-                ensureSelectedTabVisible(state.selectedTabIndex)
+                if (!globalClass.preferencesManager.disableTabBar) {
+                    val page = state.selectedTabIndex
+                    if (page == 0) {
+                        state.tabLayoutState.animateScrollToItem(0, 0)
+                    } else {
+                        val layoutInfo = state.tabLayoutState.layoutInfo
+                        val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
+                        if (visibleItem == null) {
+                            state.tabLayoutState.animateScrollToItem(page, 0)
+                        } else {
+                            val viewportStart = layoutInfo.viewportStartOffset
+                            val viewportEnd = layoutInfo.viewportEndOffset
+                            val itemStart = visibleItem.offset
+                            val itemEnd = visibleItem.offset + visibleItem.size
+                            if (itemStart < viewportStart) {
+                                state.tabLayoutState.animateScrollToItem(page, 0)
+                            } else if (itemEnd > viewportEnd) {
+                                val scrollDelta = (itemEnd - viewportEnd).toFloat()
+                                state.tabLayoutState.animateScrollBy(scrollDelta)
+                            }
+                        }
+                    }
+                }
             }
 
-            LaunchedEffect(pagerState) {
-                snapshotFlow { pagerState.settledPage }.collect { page ->
-                    if (page in state.tabs.indices && page isNot state.selectedTabIndex && !pagerState.isScrollInProgress) {
-                        manager.selectTabAt(page, false)
+            LaunchedEffect(pagerState.currentPage) {
+                snapshotFlow { pagerState.currentPage }.collect { page ->
+                    if (page isNot state.selectedTabIndex) {
+                        manager.selectTabAt(page, true)
                     }
-                    ensureSelectedTabVisible(page)
+                    if (!globalClass.preferencesManager.disableTabBar) {
+                        if (page == 0) {
+                            state.tabLayoutState.animateScrollToItem(0, 0)
+                        } else {
+                            val layoutInfo = state.tabLayoutState.layoutInfo
+                            val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == page }
+                            if (visibleItem == null) {
+                                state.tabLayoutState.animateScrollToItem(page, 0)
+                            } else {
+                                val viewportStart = layoutInfo.viewportStartOffset
+                                val viewportEnd = layoutInfo.viewportEndOffset
+                                val itemStart = visibleItem.offset
+                                val itemEnd = visibleItem.offset + visibleItem.size
+                                if (itemStart < viewportStart) {
+                                    state.tabLayoutState.animateScrollToItem(page, 0)
+                                } else if (itemEnd > viewportEnd) {
+                                    val scrollDelta = (itemEnd - viewportEnd).toFloat()
+                                    state.tabLayoutState.animateScrollBy(scrollDelta)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -623,7 +629,6 @@ class MainActivity : BaseActivity() {
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    beyondViewportPageCount = 1,
                     // Disable swipe-to-switch-tab when navigation gestures are off
                     userScrollEnabled = gesturesEnabled && manager.activeDragSourceTab == null,
                     modifier = Modifier
@@ -634,10 +639,9 @@ class MainActivity : BaseActivity() {
                                 Modifier.nestedScroll(extraNestedScrollConnection)
                             else Modifier
                         ),
-                    key = { state.tabs[it].slotId }
+                    key = { state.tabs[it].id }
                 ) { index ->
-                    val tabKey = state.tabs.getOrNull(index)?.id ?: index
-                    key(tabKey) {
+                    key(index) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()

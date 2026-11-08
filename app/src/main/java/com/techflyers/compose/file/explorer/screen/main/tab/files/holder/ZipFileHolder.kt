@@ -1,6 +1,7 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.holder
 
 import android.content.Context
+import android.content.Intent
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.App.Companion.logger
 import com.techflyers.compose.file.explorer.R
@@ -11,23 +12,21 @@ import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.common.toUuid
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ContentCount
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ZipTree
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.model.ZipNode
-import kotlinx.coroutines.runBlocking
-import net.lingala.zip4j.ZipFile
-import net.lingala.zip4j.model.ZipParameters
-import java.io.ByteArrayInputStream
-import java.io.File
-
-import android.content.Intent
-import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaItem
 import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
 import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
 import com.techflyers.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.image.ImageViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
+import kotlinx.coroutines.runBlocking
+import net.lingala.zip4j.ZipFile
+import net.lingala.zip4j.model.ZipParameters
+import java.io.ByteArrayInputStream
+import java.io.File
 
 class ZipFileHolder(
     val zipTree: ZipTree,
@@ -71,21 +70,38 @@ class ZipFileHolder(
                 zipTree.prepare()
                 android.util.Log.d("PrismArchive", "ZipFileHolder: zipTree preparation completed.")
             } catch (e: ZipTree.ArchivePasswordRequiredException) {
-                android.util.Log.w("PrismArchive", "ZipFileHolder: Caught ArchivePasswordRequiredException for ${e.archiveName}. Showing password dialog...")
-                val tab = globalClass.mainActivityManager.getActiveTab()
-                        as? com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
-                tab?.toggleArchivePasswordDialog(zipTree.source)
+                android.util.Log.w("PrismArchive", "ZipFileHolder: Caught ArchivePasswordRequiredException for ${e.archiveName} (isRetry=${e.isRetry}). Showing password dialog...")
+                val tab = globalClass.mainActivityManager.getActiveTab() as? FilesTab
+                tab?.toggleArchivePasswordDialog(zipTree.source, isRetry = e.isRetry)
                 return arrayListOf()
             } catch (e: Exception) {
                 android.util.Log.e("PrismArchive", "ZipFileHolder: Error preparing zipTree: ${e.message}", e)
+                val tab = globalClass.mainActivityManager.getActiveTab() as? FilesTab
+                val summary = (e as? ArchiveManager.ArchiveOperationException)?.summary
+                    ?: e.message
+                    ?: "Failed to open archive"
+                val diagnosticLog = (e as? ArchiveManager.ArchiveOperationException)?.diagnosticLog
+                    ?: e.stackTraceToString()
+
+                globalClass.zipManager.evictArchive(zipTree.source.uniquePath)
+                if (tab != null) {
+                    tab.showArchiveErrorDialog(
+                        archiveName = zipTree.source.displayName,
+                        summary = summary,
+                        diagnosticLog = diagnosticLog
+                    )
+                    // Navigate back to the archive's parent folder so the user is not stranded in an empty archive view
+                    val parentFolder = zipTree.source.getParent()
+                    if (parentFolder != null && tab.activeFolder is ZipFileHolder) {
+                        tab.openFolder(parentFolder, rememberListState = true)
+                    }
+                } else {
+                    globalClass.showMsg("Failed to open ${zipTree.source.displayName}: $summary")
+                }
                 return arrayListOf()
             }
         }
 
-        // In case the tab reloaded with new content, the `node` linked to this holder will have the
-        // old data, so we need to make sure that the content is up-to-date.
-        // This also somewhat apply to the LocalFileHolder, but that get the information of a 'File'
-        // which will show latest changes (except the cached stuff).
         val newNode = zipTree.findNodeByPath(uniquePath)
 
         if (newNode == null) {
@@ -99,7 +115,7 @@ class ZipFileHolder(
                     if (it.node.isDirectory) foldersCount++ else filesCount++
                 }
             }
-        
+
         android.util.Log.d("PrismArchive", "ZipFileHolder: listContent() finished. Found ${childrenList.size} children.")
         return ArrayList(childrenList).also {
             contentListCount = ContentCount(filesCount, foldersCount)
@@ -183,7 +199,11 @@ class ZipFileHolder(
             }
         }
 
-        zipTree.prepare()
+        try {
+            zipTree.prepare()
+        } catch (e: Exception) {
+            if (caughtError == null) caughtError = e
+        }
 
         zipTree.findNodeByPath(path)?.let {
             onCreated(ZipFileHolder(zipTree, it))
@@ -233,7 +253,11 @@ class ZipFileHolder(
             }
         }
 
-        zipTree.prepare()
+        try {
+            zipTree.prepare()
+        } catch (e: Exception) {
+            if (caughtError == null) caughtError = e
+        }
 
         zipTree.findNodeByPath(path.trimEnd('/'))?.let {
             onCreated(ZipFileHolder(zipTree, it))
@@ -317,8 +341,6 @@ class ZipFileHolder(
                         if (extracted != null) {
                             zipTree.addExtractedFile(node, extracted)
                             launchArchiveMediaViewer(context, extracted, session, initialIndex, targetClass)
-                        } else {
-                            showMsg(R.string.failed_to_extract_file)
                         }
                     }
                 }
@@ -334,12 +356,10 @@ class ZipFileHolder(
             (globalClass.mainActivityManager.getActiveTab() as? FilesTab)?.extractZipHolderForPreview(
                 this
             ) {
-                val file = zipTree.getExtractionDestinationFile(node)
-                if (file != null) {
-                    zipTree.addExtractedFile(node, file)
-                    file.open(context, anonymous, skipSupportedExtensions, customMimeType)
-                } else {
-                    showMsg(R.string.failed_to_extract_file)
+                val extracted = zipTree.getExtractionDestinationFile(node)
+                if (extracted != null) {
+                    zipTree.addExtractedFile(node, extracted)
+                    extracted.open(context, anonymous, skipSupportedExtensions, customMimeType)
                 }
             }
         }
@@ -400,7 +420,6 @@ class ZipFileHolder(
         try {
             val sourceName = zipTree.source.file.name
             val ext = zipTree.source.extension.lowercase()
-            // Prefer lib7za for everything it supports (including compound tar.* and pure xz/bz2/zst)
             if (ArchiveManager.isNativeArchivePath(sourceName) || ArchiveManager.isNativeArchive(ext)) {
                 android.util.Log.d("PrismArchive", "ZipFileHolder: Native archive type detected. Extracting via 7za...")
                 ArchiveManager.extractSingleFile(
@@ -427,12 +446,26 @@ class ZipFileHolder(
         } catch (e: Exception) {
             android.util.Log.e("PrismArchive", "ZipFileHolder: extractForPreview() failed: ${e.message}", e)
             logger.logError(e)
+            val tab = globalClass.mainActivityManager.getActiveTab() as? FilesTab
+            if (e is ArchiveManager.ArchiveOperationException && e.isPasswordError) {
+                tab?.toggleArchivePasswordDialog(zipTree.source, isRetry = !zipTree.password.isNullOrEmpty())
+            } else {
+                val summary = (e as? ArchiveManager.ArchiveOperationException)?.summary
+                    ?: e.message
+                    ?: globalClass.getString(R.string.failed_to_extract_file)
+                val log = (e as? ArchiveManager.ArchiveOperationException)?.diagnosticLog
+                    ?: e.stackTraceToString()
+                if (tab != null) {
+                    tab.showArchiveErrorDialog(zipTree.source.displayName, summary, log)
+                } else {
+                    showMsg(summary)
+                }
+            }
         }
         return destDir
     }
 
     private suspend fun createDetails(): String {
-        // Right side: date formatted as DD/MM/YY • HH:MM
         val rightSide = lastModified.toFormattedDate()
 
         val prefs = globalClass.preferencesManager

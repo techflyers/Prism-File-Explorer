@@ -125,13 +125,22 @@ class MainActivityManager {
                 ) {
                     "${folder.customItems?.size ?: 0} files • Comparison / Duplicates"
                 } else {
-                    folder.displayName
+                    folder.uniquePath.ifEmpty { folder.displayName }
                 }
+                val savedSegments = tab.currentPathSegments.toList()
+                val savedHighlighted = tab.highlightedPathSegment
                 ClosedTabEntry(
                     title = tab.header.ifEmpty { folder.displayName },
                     subtitle = subtitleText,
                     originalIndex = originalIndex,
-                    createTab = { FilesTab(source = folder) }
+                    createTab = {
+                        FilesTab(source = folder).apply {
+                            if (savedSegments.isNotEmpty()) {
+                                currentPathSegments = savedSegments
+                                highlightedPathSegment = savedHighlighted
+                            }
+                        }
+                    }
                 )
             }
             is HomeTab -> ClosedTabEntry(
@@ -264,7 +273,12 @@ class MainActivityManager {
             return true
         }
         val restoredTab = entry.createTab()
-        addTabAndSelect(restoredTab, entry.originalIndex)
+        val currentTabs = _state.value.tabs
+        if (currentTabs.size == 1 && currentTabs[0] is HomeTab && !currentTabs[0].isPinned && restoredTab !is HomeTab) {
+            replaceCurrentTabWith(restoredTab)
+        } else {
+            addTabAndSelect(restoredTab, entry.originalIndex)
+        }
         return true
     }
 
@@ -277,7 +291,12 @@ class MainActivityManager {
             return
         }
         val restoredTab = entry.createTab()
-        addTabAndSelect(restoredTab, entry.originalIndex)
+        val currentTabs = _state.value.tabs
+        if (currentTabs.size == 1 && currentTabs[0] is HomeTab && !currentTabs[0].isPinned && restoredTab !is HomeTab) {
+            replaceCurrentTabWith(restoredTab)
+        } else {
+            addTabAndSelect(restoredTab, entry.originalIndex)
+        }
     }
 
     fun duplicateTabAt(index: Int) {
@@ -719,10 +738,15 @@ class MainActivityManager {
             return false
         }
 
-        // Remove the active tab
-        if (tabs.size > 1 && selectedTabIndex isNot 0 && globalClass.preferencesManager.closeTabOnBackPress) {
+        // Remove the active tab when multiple tabs exist and closeTabOnBackPress is enabled
+        if (tabs.size > 1 && globalClass.preferencesManager.closeTabOnBackPress) {
             removeTabAt(selectedTabIndex)
             return false
+        }
+
+        // Record the single open non-Home tab when exiting via back press so it is in Closed Tabs history
+        if (tabs.size == 1 && activeForParent !is HomeTab) {
+            recordClosedTab(activeForParent, selectedTabIndex)
         }
 
         // Check TextEditor files

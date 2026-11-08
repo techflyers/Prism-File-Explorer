@@ -245,48 +245,50 @@ fun ColumnScope.HomeTabContentView(tab: HomeTab) {
                 .fastScrollbar(homeScroll),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (!preferencesManager.hideHomeSearchBar) {
-                // Quick Search Internal Storage bar on Home tab
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .padding(top = 12.dp)
-                        .background(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow
-                        )
-                        .border(
-                            width = 0.5.dp,
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { tab.showSearchDialog = true }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = stringResource(R.string.search),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = if (preferencesManager.searchExternalStorageFromHome) {
-                            "Search Internal & External Storage"
-                        } else {
-                            "Search Internal Storage"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
             enabledSections.forEach { section ->
                 when (section.type) {
+                    HomeSectionType.SEARCH_BAR -> {
+                        if (!preferencesManager.hideHomeSearchBar) {
+                            // Quick Search Internal Storage bar on Home tab
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp)
+                                    .padding(top = 4.dp)
+                                    .background(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                                    )
+                                    .border(
+                                        width = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { tab.showSearchDialog = true }
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = stringResource(R.string.search),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = if (preferencesManager.searchExternalStorageFromHome) {
+                                        "Search Internal & External Storage"
+                                    } else {
+                                        "Search Internal Storage"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
                     HomeSectionType.RECENT_FILES -> {
                         if (!tab.isRecentDisabledOnHome()) {
                             RecentFilesSection(tab = tab, mainActivityManager = mainActivityManager)
@@ -593,8 +595,14 @@ private fun RecentFilesSection(
     if (globalClass.preferencesManager.recentFilesLimit == 0) return
     val context = LocalContext.current
     val isUpdatingInBackground = (tab.isLoadingRecentFiles || StorageProvider.isIndexingRecentFiles) && tab.recentFiles.isNotEmpty()
+    val effectiveRecentProgress = when {
+        StorageProvider.isIndexingRecentFiles && tab.isLoadingRecentFiles ->
+            maxOf(tab.recentFilesLoadingProgress, StorageProvider.indexingProgress)
+        StorageProvider.isIndexingRecentFiles -> StorageProvider.indexingProgress
+        else -> tab.recentFilesLoadingProgress
+    }.coerceIn(0.05f, 1f)
 
-    // Recent files header + subtle refresh progress indicator
+    // Recent files header + percentage-based fluid circular progress pill
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -612,116 +620,28 @@ private fun RecentFilesSection(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
             AnimatedVisibility(visible = isUpdatingInBackground) {
-                Text(
-                    text = "Updating in background…",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                com.techflyers.compose.file.explorer.common.ui.FluidPercentProgressPill(
+                    progress = effectiveRecentProgress,
+                    label = "Updating"
                 )
             }
-        }
-        AnimatedVisibility(visible = isUpdatingInBackground) {
-            androidx.compose.material3.LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-            )
         }
     }
 
     if (tab.recentFiles.isEmpty() && tab.isLoadingRecentFiles) {
-        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "recentFilesFluidLoading")
-        val pulseAlpha by infiniteTransition.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 0.85f,
-            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(
-                    durationMillis = 850,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
-                ),
-                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-            ),
-            label = "recentFilesPulseAlpha"
-        )
-
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp),
-            verticalArrangement = Arrangement.Center
+                .height(140.dp)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
         ) {
-            androidx.compose.material3.LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            com.techflyers.compose.file.explorer.common.ui.FluidPercentProgressCircle(
+                progress = effectiveRecentProgress,
+                size = 56.dp,
+                strokeWidth = 4.5.dp,
+                label = "Loading recent files…"
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(4) {
-                    Column(
-                        modifier = Modifier
-                            .size(110.dp, 128.dp)
-                            .padding(horizontal = 6.dp)
-                            .background(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = pulseAlpha)
-                            )
-                            .border(
-                                width = 0.5.dp,
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .clip(RoundedCornerShape(8.dp))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(2f)
-                                .fillMaxWidth()
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulseAlpha * 0.65f)
-                                )
-                        )
-                        Column(
-                            modifier = Modifier
-                                .weight(1.2f)
-                                .fillMaxWidth()
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.82f)
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha * 0.35f)
-                                    )
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.55f)
-                                    .height(7.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha * 0.22f)
-                                    )
-                            )
-                        }
-                    }
-                }
-            }
         }
     } else if (tab.recentFiles.isEmpty()) {
         Text(
@@ -856,7 +776,7 @@ private fun CategoriesSection(
     tab: HomeTab
 ) {
     val prefs = globalClass.preferencesManager
-    // Quick access tiles header with Customize Categories icon
+    // Quick access tiles header with Customize Categories icon + optional indexing progress circle
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -870,15 +790,26 @@ private fun CategoriesSection(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
-        IconButton(
-            onClick = { tab.showCustomizeCategoriesDialog = true },
-            modifier = Modifier.size(28.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Tune,
-                contentDescription = "Customize Categories",
-                tint = MaterialTheme.colorScheme.primary
-            )
+            AnimatedVisibility(visible = StorageProvider.isIndexingRecentFiles) {
+                com.techflyers.compose.file.explorer.common.ui.FluidPercentProgressPill(
+                    progress = StorageProvider.indexingProgress,
+                    label = "Indexing"
+                )
+            }
+            IconButton(
+                onClick = { tab.showCustomizeCategoriesDialog = true },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Tune,
+                    contentDescription = "Customize Categories",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 

@@ -46,7 +46,9 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -130,6 +132,7 @@ private fun LatexViewerScreen(
     var sourceContent by remember { mutableStateOf("") }
 
     var searchVisible by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var activeMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
@@ -208,9 +211,10 @@ private fun LatexViewerScreen(
         }
     }
 
-    val context = globalClass
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val extraPath = (context as? android.app.Activity)?.intent?.getStringExtra("extra_file_path")
     val filePath = remember {
-        com.techflyers.compose.file.explorer.common.resolveUriToPath(context, instance.uri)
+        com.techflyers.compose.file.explorer.common.resolveUriToPath(context, instance.uri, extraPath)
     }
 
     val fileName = remember(instance.uri) {
@@ -239,36 +243,6 @@ private fun LatexViewerScreen(
     val targetTexName = "$baseName.tex"
     val targetPdfName = "$baseName.pdf"
 
-    // Load source
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            try {
-                val file = File(filePath)
-                if (file.exists()) {
-                    sourceContent = file.readText()
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    // Load / reload content on resume (e.g. after editing in TextEditorActivity)
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val file = File(filePath)
-                if (file.exists()) {
-                    val text = file.readText()
-                    withContext(Dispatchers.Main) { sourceContent = text }
-                } else {
-                    context.contentResolver.openInputStream(instance.uri)?.use { stream ->
-                        val text = stream.bufferedReader().readText()
-                        withContext(Dispatchers.Main) { sourceContent = text }
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
     // Compile function
     fun compile() {
         scope.launch {
@@ -287,9 +261,19 @@ private fun LatexViewerScreen(
 
                 // Copy source file to workDir/targetTexName to avoid scoped storage restrictions
                 val localTexFile = File(workDir, targetTexName)
-                context.contentResolver.openInputStream(instance.uri)?.use { input ->
-                    localTexFile.outputStream().use { output ->
-                        input.copyTo(output)
+                val realFile = File(filePath)
+                val tempTex = File(context.cacheDir, targetTexName)
+                if (realFile.exists()) {
+                    realFile.copyTo(localTexFile, overwrite = true)
+                } else if (tempTex.exists()) {
+                    tempTex.copyTo(localTexFile, overwrite = true)
+                } else if (sourceContent.isNotEmpty()) {
+                    localTexFile.writeText(sourceContent)
+                } else {
+                    context.contentResolver.openInputStream(instance.uri)?.use { input ->
+                        localTexFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
 
@@ -335,9 +319,54 @@ private fun LatexViewerScreen(
         }
     }
 
+    // Load source
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val file = File(filePath)
+                if (file.exists()) {
+                    sourceContent = file.readText()
+                } else {
+                    context.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                        sourceContent = stream.bufferedReader().readText()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     // Initial compilation
     LaunchedEffect(Unit) {
         compile()
+    }
+
+    // Load / reload content on resume (e.g. after editing in TextEditorActivity)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val file = File(filePath)
+                val tempFile = File(context.cacheDir, targetTexName)
+                val targetFile = if (file.exists()) file else if (tempFile.exists()) tempFile else null
+                val newText = when {
+                    targetFile != null && targetFile.exists() -> targetFile.readText()
+                    else -> context.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                        stream.bufferedReader().readText()
+                    }
+                }
+                if (newText != null && newText != sourceContent) {
+                    withContext(Dispatchers.Main) { sourceContent = newText }
+                    // Sync back to instance.uri if it's a content URI
+                    if (instance.uri.scheme == "content") {
+                        try {
+                            context.contentResolver.openOutputStream(instance.uri, "wt")?.use { out ->
+                                out.write(newText.toByteArray())
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    withContext(Dispatchers.Main) { compile() }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     Scaffold(
@@ -417,6 +446,9 @@ private fun LatexViewerScreen(
                     IconButton(onClick = { compile() }) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Recompile")
                     }
+                    IconButton(onClick = { showMetadataSheet = true }) {
+                        Icon(Icons.Rounded.Info, contentDescription = "Extended Metadata")
+                    }
                     // Open With
                     IconButton(onClick = {
                         val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
@@ -434,6 +466,14 @@ private fun LatexViewerScreen(
                     }
                 }
             )
+            if (showMetadataSheet) {
+                ExtendedMetadataSheet(
+                    uri = instance.uri,
+                    extraFilePath = filePath,
+                    displayNameHint = fileName,
+                    onDismiss = { showMetadataSheet = false }
+                )
+            }
         }
     ) { paddingValues ->
         Column(

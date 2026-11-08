@@ -7,31 +7,47 @@ object RemoteConnectionPool {
     private val sessions = mutableMapOf<String, PooledRemoteClient>()
 
     fun createRaw(connection: NetworkConnectionModel): RemoteClient {
-        return when (connection.type) {
-            "FTP" -> FtpRemoteClient(connection)
+        return when (connection.type.uppercase()) {
+            "FTP", "FTPS" -> FtpRemoteClient(connection)
             "SFTP" -> SftpRemoteClient(connection)
-            "WebDav" -> WebDavRemoteClient(connection)
+            "WEBDAV" -> WebDavRemoteClient(connection)
             else -> LanRemoteClient(globalClass, connection)
         }
     }
 
+    /**
+     * Returns a pooled [RemoteClient] for [connection] without performing synchronous
+     * network I/O on the calling thread (preventing NetworkOnMainThreadException when
+     * called from Compose UI state initialization). The underlying socket connection is
+     * established lazily on the first I/O call or explicit [RemoteClient.connect] call.
+     */
     fun clientFor(connection: NetworkConnectionModel): RemoteClient {
         synchronized(lock) {
-            sessions[connection.id]?.let { return it }
+            val existing = sessions[connection.id]
+            if (existing != null) {
+                if (existing.matchesConfig(connection)) {
+                    return existing
+                }
+                try {
+                    existing.disconnect()
+                } catch (_: Exception) {
+                }
+                sessions.remove(connection.id)
+            }
             val pooled = PooledRemoteClient(connection, createRaw(connection))
-            pooled.connect()
             sessions[connection.id] = pooled
             return pooled
         }
     }
 
     fun release(connectionId: String) {
-        synchronized(lock) {
-            sessions.remove(connectionId)?.let { client ->
-                try {
-                    client.disconnect()
-                } catch (_: Exception) {
-                }
+        val removed = synchronized(lock) {
+            sessions.remove(connectionId)
+        }
+        if (removed != null) {
+            try {
+                removed.disconnect()
+            } catch (_: Exception) {
             }
         }
     }
@@ -40,13 +56,34 @@ object RemoteConnectionPool {
         private val connection: NetworkConnectionModel,
         private var inner: RemoteClient
     ) : RemoteClient {
+        @Volatile
+        private var connected: Boolean = false
+
+        fun matchesConfig(other: NetworkConnectionModel): Boolean {
+            return connection.type == other.type &&
+                connection.host == other.host &&
+                connection.port == other.port &&
+                connection.username == other.username &&
+                connection.password == other.password &&
+                connection.protocol == other.protocol &&
+                connection.rootPath == other.rootPath &&
+                connection.authMethod == other.authMethod &&
+                connection.smbDomain == other.smbDomain &&
+                connection.smbEnableSmb2 == other.smbEnableSmb2 &&
+                connection.ftpSecurityMode == other.ftpSecurityMode &&
+                connection.ftpConnectionMode == other.ftpConnectionMode &&
+                connection.privateKeyPath == other.privateKeyPath
+        }
+
         @Synchronized
         override fun connect() {
             inner.connect()
+            connected = true
         }
 
         @Synchronized
         override fun disconnect() {
+            connected = false
             try {
                 inner.disconnect()
             } catch (_: Exception) {
@@ -92,20 +129,30 @@ object RemoteConnectionPool {
 
         private fun <T> withReconnect(block: RemoteClient.() -> T): T {
             return try {
+                if (!connected) {
+                    inner.connect()
+                    connected = true
+                }
                 inner.block()
             } catch (first: Exception) {
-                reconnect()
-                inner.block()
+                try {
+                    reconnect()
+                    inner.block()
+                } catch (second: Exception) {
+                    throw second
+                }
             }
         }
 
         private fun reconnect() {
+            connected = false
             try {
                 inner.disconnect()
             } catch (_: Exception) {
             }
             inner = createRaw(connection)
             inner.connect()
+            connected = true
         }
     }
 }

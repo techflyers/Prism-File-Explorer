@@ -340,7 +340,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 } else Modifier
             )
     ) {
-        if (tab.activeFolderContent.isEmpty() && !tab.isLoading) {
+        if (tab.activeFolderContent.isEmpty() && !tab.isLoading && !tab.isCategoryLoading) {
             EmptyFolderContent(tab)
         }
 
@@ -829,6 +829,56 @@ private fun EmptyFolderContent(tab: FilesTab) {
 
 @Composable
 private fun LoadingOverlay(tab: FilesTab) {
+    val isVirtual = tab.activeFolder is VirtualFileHolder
+    if (isVirtual) {
+        // Non-blocking fluid percentage progress indicator for Categories and Recent Files
+        // Never intercepts touches so UI navigation, swipes, and item clicks remain 100% responsive.
+        val isIndexing = (tab.activeFolder as? VirtualFileHolder)?.let {
+            it.type == VirtualFileHolder.RECENT || it.type == VirtualFileHolder.ALL_FILES
+        } == true && com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.isIndexingRecentFiles
+
+        val effectiveProgress = if (isIndexing) {
+            maxOf(
+                tab.categoryLoadingProgress,
+                com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.indexingProgress
+            )
+        } else {
+            tab.categoryLoadingProgress
+        }
+
+        if (tab.activeFolderContent.isEmpty() && (tab.isCategoryLoading || tab.isLoading)) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                com.techflyers.compose.file.explorer.common.ui.FluidPercentProgressCircle(
+                    progress = effectiveProgress,
+                    size = 64.dp,
+                    strokeWidth = 5.dp,
+                    label = "Loading ${tab.activeFolder.displayName}…"
+                )
+            }
+        } else {
+            AnimatedVisibility(
+                visible = tab.isCategoryLoading || isIndexing,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 10.dp, end = 14.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    com.techflyers.compose.file.explorer.common.ui.FluidPercentProgressPill(
+                        progress = effectiveProgress,
+                        label = "Loading"
+                    )
+                }
+            }
+        }
+        return
+    }
+
     AnimatedVisibility(
         modifier = Modifier.fillMaxSize(),
         visible = tab.isLoading
@@ -1915,7 +1965,7 @@ private fun FileDetails(
         if (item is LocalFileHolder && item.details.isNotEmpty()) {
             item.details
         } else if (item is LocalFileHolder) {
-            LocalFileHolder.getCachedDetails(item.file, item.lastModified)
+            LocalFileHolder.getCachedDetails(item.file, item.lastModified, item.size)
                 ?: if (item.isFile()) {
                     "${item.size.toFormattedSize()}\t${item.lastModified.toFormattedDate()}"
                 } else {
@@ -2152,7 +2202,7 @@ private fun FileDetailsCompact(
             if (item is LocalFileHolder && item.details.isNotEmpty()) {
                 item.details
             } else if (item is LocalFileHolder) {
-                LocalFileHolder.getCachedDetails(item.file, item.lastModified).orEmpty()
+                LocalFileHolder.getCachedDetails(item.file, item.lastModified, item.size).orEmpty()
             } else {
                 emptyString
             }

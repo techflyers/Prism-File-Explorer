@@ -28,7 +28,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.NavigateBefore
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material.icons.rounded.ZoomOut
@@ -112,6 +114,7 @@ fun DjvuViewerScreen(
     }
 
     var showControls by remember { mutableStateOf(true) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     val file = instance.localFile ?: return
@@ -343,6 +346,15 @@ fun DjvuViewerScreen(
                             )
                         }
 
+                        // Extended Metadata Info
+                        IconButton(onClick = { showMetadataSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Info,
+                                contentDescription = "Extended Metadata",
+                                tint = Color.White
+                            )
+                        }
+
                         // Open With
                         IconButton(onClick = {
                             val openIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -362,6 +374,14 @@ fun DjvuViewerScreen(
                     modifier = Modifier.statusBarsPadding()
                 )
             }
+        }
+        if (showMetadataSheet) {
+            ExtendedMetadataSheet(
+                uri = instance.uri,
+                extraFilePath = file.absolutePath,
+                displayNameHint = instance.fileName,
+                onDismiss = { showMetadataSheet = false }
+            )
         }
     }
 }

@@ -16,6 +16,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -96,9 +101,14 @@ fun NFileDrawerContent(
         }
     }
 
+    val drawerScroll = rememberScrollState()
+
     // Refresh connections & storage when drawer opens, and auto-update storage periodically while open
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen) {
+            if (preferencesManager.drawerAlwaysScrollToTop) {
+                drawerScroll.scrollTo(0)
+            }
             withContext(Dispatchers.IO) {
                 remoteConnections = NetworkConnectionsService.getConnections(context)
                 manager.updateStorageDevices()
@@ -114,6 +124,12 @@ fun NFileDrawerContent(
         val current = preferencesManager.drawerHiddenItems.toMutableSet()
         if (itemId in current) current.remove(itemId) else current.add(itemId)
         preferencesManager.drawerHiddenItems = current
+    }
+
+    fun toggleSectionPinned(sectionId: String) {
+        val current = preferencesManager.drawerPinnedSections.toMutableSet()
+        if (sectionId in current) current.remove(sectionId) else current.add(sectionId)
+        preferencesManager.drawerPinnedSections = current
     }
 
     fun moveSection(sectionId: String, delta: Int) {
@@ -132,24 +148,16 @@ fun NFileDrawerContent(
             .fillMaxHeight()
             .width(320.dp)
     ) {
-        val drawerScroll = rememberScrollState()
         val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
 
-        val drawerContent = @Composable {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(drawerScroll)
-            ) {
-                val sectionOrder = preferencesManager.drawerSectionsOrder
-                val hiddenItems = preferencesManager.drawerHiddenItems
+        val renderDrawerSection: @Composable (String, Int, Int) -> Unit = { sectionId, sectionIndex, totalSections ->
+            val isEditMode = editingSections[sectionId] == true
+            val canMoveUp = sectionIndex > 0
+            val canMoveDown = sectionIndex < totalSections - 1
+            val isPinned = sectionId in preferencesManager.drawerPinnedSections
+            val hiddenItems = preferencesManager.drawerHiddenItems
 
-                sectionOrder.forEachIndexed { sectionIndex, sectionId ->
-                    val isEditMode = editingSections[sectionId] == true
-                    val canMoveUp = sectionIndex > 0
-                    val canMoveDown = sectionIndex < sectionOrder.lastIndex
-
-                    when (sectionId) {
+            when (sectionId) {
                 "tabs" -> {
                 if (preferencesManager.showTabsInDrawer) {
                     val tabs = mainActivityState.tabs
@@ -160,6 +168,8 @@ fun NFileDrawerContent(
                         sectionId = "tabs",
                         title = "$tabsTitle (${tabs.size})",
                         isEditMode = isEditMode,
+                        isPinned = isPinned,
+                        onTogglePin = { toggleSectionPinned("tabs") },
                         onToggleEditMode = { editingSections["tabs"] = !isEditMode },
                         onMoveSectionUp = if (canMoveUp) ({ moveSection("tabs", -1) }) else null,
                         onMoveSectionDown = if (canMoveDown) ({ moveSection("tabs", 1) }) else null,
@@ -253,6 +263,8 @@ fun NFileDrawerContent(
                         sectionId = "bookmarks",
                         title = "$bookmarksTitle (${bookmarks.size})",
                         isEditMode = isEditMode,
+                        isPinned = isPinned,
+                        onTogglePin = { toggleSectionPinned("bookmarks") },
                         onToggleEditMode = { editingSections["bookmarks"] = !isEditMode },
                         onMoveSectionUp = if (canMoveUp) ({ moveSection("bookmarks", -1) }) else null,
                         onMoveSectionDown = if (canMoveDown) ({ moveSection("bookmarks", 1) }) else null,
@@ -308,6 +320,8 @@ fun NFileDrawerContent(
                     sectionId = "navigation",
                     title = "Navigation",
                     isEditMode = isEditMode,
+                    isPinned = isPinned,
+                    onTogglePin = { toggleSectionPinned("navigation") },
                     onToggleEditMode = { editingSections["navigation"] = !isEditMode },
                     onMoveSectionUp = if (canMoveUp) ({ moveSection("navigation", -1) }) else null,
                     onMoveSectionDown = if (canMoveDown) ({ moveSection("navigation", 1) }) else null
@@ -400,22 +414,48 @@ fun NFileDrawerContent(
 
                 "storage" -> {
                 if (storageList.isNotEmpty()) {
+                    val visibleExternalCount = storageList.count {
+                        it.type != INTERNAL_STORAGE && (isEditMode || "storage_${it.title}" !in hiddenItems)
+                    }
                     CollapsibleDrawerSection(
                         sectionId = "storage",
                         title = "Storage Devices",
                         isEditMode = isEditMode,
+                        isPinned = isPinned,
+                        onTogglePin = { toggleSectionPinned("storage") },
                         onToggleEditMode = { editingSections["storage"] = !isEditMode },
                         onMoveSectionUp = if (canMoveUp) ({ moveSection("storage", -1) }) else null,
-                        onMoveSectionDown = if (canMoveDown) ({ moveSection("storage", 1) }) else null
+                        onMoveSectionDown = if (canMoveDown) ({ moveSection("storage", 1) }) else null,
+                        action = if (isEditMode) {
+                            {
+                                IconButton(
+                                    onClick = {
+                                        preferencesManager.drawerCompactStorageView = !preferencesManager.drawerCompactStorageView
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (preferencesManager.drawerCompactStorageView) Icons.Rounded.ViewStream else Icons.Rounded.UnfoldLess,
+                                        contentDescription = stringResource(R.string.compact_storage_in_drawer),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (preferencesManager.drawerCompactStorageView) MaterialTheme.colorScheme.primary
+                                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        } else null
                     ) {
                         for (device in storageList) {
                             val itemId = "storage_${device.title}"
                             val isHidden = itemId in hiddenItems
                             if (isEditMode || !isHidden) {
+                                val shouldShowLabel = device.type != INTERNAL_STORAGE && visibleExternalCount > 1
                                 StorageDrawerItem(
                                     device = device,
                                     isEditMode = isEditMode,
                                     isHiddenItem = isHidden,
+                                    isCompact = preferencesManager.drawerCompactStorageView,
+                                    showLabel = shouldShowLabel,
                                     onToggleVisibility = { toggleItemHidden(itemId) }
                                 ) {
                                     manager.replaceCurrentTabWith(
@@ -435,6 +475,8 @@ fun NFileDrawerContent(
                     sectionId = "tools",
                     title = "Servers & Tools",
                     isEditMode = isEditMode,
+                    isPinned = isPinned,
+                    onTogglePin = { toggleSectionPinned("tools") },
                     onToggleEditMode = { editingSections["tools"] = !isEditMode },
                     onMoveSectionUp = if (canMoveUp) ({ moveSection("tools", -1) }) else null,
                     onMoveSectionDown = if (canMoveDown) ({ moveSection("tools", 1) }) else null
@@ -519,6 +561,8 @@ fun NFileDrawerContent(
                     sectionId = "remote",
                     title = "Remote Connections",
                     isEditMode = isEditMode,
+                    isPinned = isPinned,
+                    onTogglePin = { toggleSectionPinned("remote") },
                     onToggleEditMode = { editingSections["remote"] = !isEditMode },
                     onMoveSectionUp = if (canMoveUp) ({ moveSection("remote", -1) }) else null,
                     onMoveSectionDown = if (canMoveDown) ({ moveSection("remote", 1) }) else null
@@ -627,30 +671,84 @@ fun NFileDrawerContent(
                     }
                 }
                 }
+            }
+        }
+
+        val drawerContent = @Composable {
+            val sectionOrder = preferencesManager.drawerSectionsOrder
+            val pinnedSet = preferencesManager.drawerPinnedSections
+            val pinnedSections = sectionOrder.filter { it in pinnedSet }
+            val unpinnedSections = sectionOrder.filter { it !in pinnedSet }
+            val isAnySectionEditing = editingSections.values.any { it }
+            val hiddenItems = preferencesManager.drawerHiddenItems
+
+            val isSettingsHidden = "drawer_settings" in hiddenItems || !preferencesManager.showSettingsInDrawer
+            val isAboutHidden = "drawer_about" in hiddenItems || !preferencesManager.showAboutInDrawer
+
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (pinnedSections.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                    ) {
+                        pinnedSections.forEachIndexed { index, sectionId ->
+                            renderDrawerSection(sectionId, index, pinnedSections.size)
+                        }
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            thickness = 1.dp
+                        )
                     }
                 }
 
-                // Settings / Preferences button
-                DrawerItem(
-                    icon = Icons.Rounded.Settings,
-                    label = stringResource(R.string.preferences),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(drawerScroll)
                 ) {
-                    context.startActivity(Intent(context, PreferencesActivity::class.java))
-                    onNavigate()
-                }
+                    unpinnedSections.forEachIndexed { index, sectionId ->
+                        renderDrawerSection(sectionId, index, unpinnedSections.size)
+                    }
 
-                // About button
-                DrawerItem(
-                    icon = Icons.Rounded.Info,
-                    label = "About App",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                ) {
-                    manager.toggleAppInfoDialog(true)
-                    onNavigate()
-                }
+                    // Settings / Preferences button
+                    if (isAnySectionEditing || !isSettingsHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Settings,
+                            label = stringResource(R.string.preferences),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            isEditMode = isAnySectionEditing,
+                            isHiddenItem = isSettingsHidden,
+                            onToggleVisibility = {
+                                toggleItemHidden("drawer_settings")
+                                preferencesManager.showSettingsInDrawer = !isSettingsHidden
+                            }
+                        ) {
+                            context.startActivity(Intent(context, PreferencesActivity::class.java))
+                            onNavigate()
+                        }
+                    }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                    // About button
+                    if (isAnySectionEditing || !isAboutHidden) {
+                        DrawerItem(
+                            icon = Icons.Rounded.Info,
+                            label = "About App",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            isEditMode = isAnySectionEditing,
+                            isHiddenItem = isAboutHidden,
+                            onToggleVisibility = {
+                                toggleItemHidden("drawer_about")
+                                preferencesManager.showAboutInDrawer = !isAboutHidden
+                            }
+                        ) {
+                            manager.toggleAppInfoDialog(true)
+                            onNavigate()
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
             }
         }
 
@@ -692,6 +790,8 @@ private fun CollapsibleDrawerSection(
     sectionId: String,
     title: String,
     isEditMode: Boolean = false,
+    isPinned: Boolean = false,
+    onTogglePin: (() -> Unit)? = null,
     onToggleEditMode: (() -> Unit)? = null,
     onMoveSectionUp: (() -> Unit)? = null,
     onMoveSectionDown: (() -> Unit)? = null,
@@ -710,9 +810,16 @@ private fun CollapsibleDrawerSection(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                val current = prefs.drawerCollapsedSections.toMutableSet()
-                if (isCollapsed) current.remove(sectionId) else current.add(sectionId)
-                prefs.drawerCollapsedSections = current
+                if (isEditMode) {
+                    onToggleEditMode?.invoke()
+                    val current = prefs.drawerCollapsedSections.toMutableSet()
+                    current.add(sectionId)
+                    prefs.drawerCollapsedSections = current
+                } else {
+                    val current = prefs.drawerCollapsedSections.toMutableSet()
+                    if (isCollapsed) current.remove(sectionId) else current.add(sectionId)
+                    prefs.drawerCollapsedSections = current
+                }
             }
             .padding(horizontal = 24.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -725,33 +832,66 @@ private fun CollapsibleDrawerSection(
             modifier = Modifier.weight(1f)
         )
         if (isEditMode) {
-            IconButton(
-                onClick = { onMoveSectionUp?.invoke() },
-                enabled = onMoveSectionUp != null,
-                modifier = Modifier.size(22.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "Move section up",
-                    modifier = Modifier.size(16.dp),
-                    tint = if (onMoveSectionUp != null) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                )
+            onTogglePin?.let { togglePin ->
+                IconButton(
+                    onClick = togglePin,
+                    modifier = Modifier.size(22.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PushPin,
+                        contentDescription = if (isPinned) stringResource(R.string.unpin_section) else stringResource(R.string.pin_section),
+                        modifier = Modifier.size(16.dp),
+                        tint = if (isPinned) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    )
+                }
             }
-            IconButton(
-                onClick = { onMoveSectionDown?.invoke() },
-                enabled = onMoveSectionDown != null,
-                modifier = Modifier.size(22.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Move section down",
-                    modifier = Modifier.size(16.dp),
-                    tint = if (onMoveSectionDown != null) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                )
+            if (onMoveSectionUp != null || onMoveSectionDown != null) {
+                var isSectionDragging by remember { mutableStateOf(false) }
+                var dragAccumulator by remember { mutableFloatStateOf(0f) }
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .pointerInput(sectionId) {
+                            detectVerticalDragGestures(
+                                onDragStart = {
+                                    isSectionDragging = true
+                                    dragAccumulator = 0f
+                                },
+                                onDragEnd = {
+                                    isSectionDragging = false
+                                    dragAccumulator = 0f
+                                },
+                                onDragCancel = {
+                                    isSectionDragging = false
+                                    dragAccumulator = 0f
+                                },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragAccumulator += dragAmount
+                                    val threshold = 40f
+                                    if (dragAccumulator > threshold && onMoveSectionDown != null) {
+                                        onMoveSectionDown()
+                                        dragAccumulator = 0f
+                                    } else if (dragAccumulator < -threshold && onMoveSectionUp != null) {
+                                        onMoveSectionUp()
+                                        dragAccumulator = 0f
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.DragHandle,
+                        contentDescription = "Drag to reorder section",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (isSectionDragging) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
             }
-            Spacer(modifier = Modifier.width(4.dp))
         }
         if (action != null) {
             action()
@@ -760,23 +900,24 @@ private fun CollapsibleDrawerSection(
         if (onToggleEditMode != null) {
             IconButton(
                 onClick = onToggleEditMode,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(24.dp)
             ) {
                 Icon(
                     imageVector = if (isEditMode) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
                     contentDescription = "Edit section items and order",
-                    modifier = Modifier.size(15.dp),
+                    modifier = Modifier.size(16.dp),
                     tint = if (isEditMode) MaterialTheme.colorScheme.primary
                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                 )
             }
-            Spacer(modifier = Modifier.width(4.dp))
+            // Increased separation between the eye and arrow icons
+            Spacer(modifier = Modifier.width(14.dp))
         }
         Icon(
             imageVector = Icons.Rounded.ExpandMore,
             contentDescription = null,
             modifier = Modifier
-                .size(16.dp)
+                .size(18.dp)
                 .rotate(arrowRotation),
             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
         )
@@ -805,13 +946,24 @@ private fun DrawerTabItem(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit
 ) {
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { 44.dp.toPx() }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp)
+            .graphicsLayer {
+                translationY = dragOffsetY
+                shadowElevation = if (isDragging) 8f else 0f
+            }
+            .zIndex(if (isDragging) 10f else 1f)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                if (isDragging) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                else if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                 else Color.Transparent
             )
             .clickable { onSelect() }
@@ -842,35 +994,49 @@ private fun DrawerTabItem(
         )
 
         if (isReorderMode && totalTabs > 1) {
-            IconButton(
-                onClick = onMoveUp,
-                enabled = index > 0,
-                modifier = Modifier.size(28.dp)
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .pointerInput(index, totalTabs) {
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                                dragOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                                dragOffsetY = 0f
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                                dragOffsetY = 0f
+                            },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetY += dragAmount
+                                if (dragOffsetY > itemHeightPx * 0.6f && index < totalTabs - 1) {
+                                    onMoveDown()
+                                    dragOffsetY -= itemHeightPx
+                                } else if (dragOffsetY < -itemHeightPx * 0.6f && index > 0) {
+                                    onMoveUp()
+                                    dragOffsetY += itemHeightPx
+                                }
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = stringResource(R.string.move_tab_up),
+                    imageVector = Icons.Rounded.DragHandle,
+                    contentDescription = "Drag to reorder tab",
                     modifier = Modifier.size(18.dp),
-                    tint = if (index > 0) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                )
-            }
-            IconButton(
-                onClick = onMoveDown,
-                enabled = index < totalTabs - 1,
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = stringResource(R.string.move_tab_down),
-                    modifier = Modifier.size(18.dp),
-                    tint = if (index < totalTabs - 1) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    tint = if (isDragging) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                 )
             }
         }
 
-        if (totalTabs > 1 && !isPinned) {
+        if (!isPinned) {
             IconButton(
                 onClick = onClose,
                 modifier = Modifier.size(28.dp)
@@ -964,6 +1130,8 @@ private fun StorageDrawerItem(
     device: StorageDevice,
     isEditMode: Boolean = false,
     isHiddenItem: Boolean = false,
+    isCompact: Boolean = false,
+    showLabel: Boolean = false,
     onToggleVisibility: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
@@ -977,75 +1145,174 @@ private fun StorageDrawerItem(
     )
     val freeSize = (device.totalSize - device.usedSize).coerceAtLeast(0L)
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .alpha(if (isHiddenItem) 0.45f else 1f)
-            .clickable {
-                if (isEditMode && onToggleVisibility != null) {
-                    onToggleVisibility()
-                } else {
-                    onClick()
+    val deviceIcon = when (device.type) {
+        INTERNAL_STORAGE -> Icons.Rounded.Smartphone
+        ROOT -> Icons.Rounded.Dns
+        REMOTE_STORAGE -> Icons.Rounded.Cloud
+        else -> Icons.Rounded.SdStorage
+    }
+
+    if (isCompact) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = if (showLabel) 3.dp else 2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .alpha(if (isHiddenItem) 0.45f else 1f)
+                .clickable {
+                    if (isEditMode && onToggleVisibility != null) {
+                        onToggleVisibility()
+                    } else {
+                        onClick()
+                    }
                 }
-            }
-            .padding(vertical = 10.dp, horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = when (device.type) {
-                INTERNAL_STORAGE -> Icons.Rounded.FolderOpen
-                ROOT -> Icons.Rounded.Dns
-                REMOTE_STORAGE -> Icons.Rounded.Cloud
-                else -> Icons.Rounded.SdStorage
-            },
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = device.title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                .padding(vertical = if (showLabel) 4.dp else 4.dp, horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = deviceIcon,
+                contentDescription = device.title,
+                tint = if (device.type == INTERNAL_STORAGE) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
             )
-            if (device.totalSize > 0) {
-                Spacer(modifier = Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = { animatedProgress },
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                if (showLabel) {
+                    Text(
+                        text = device.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(5.dp),
-                    strokeCap = StrokeCap.Round,
-                    color = if (progress > 0.85f) {
-                        MaterialTheme.colorScheme.error
+                        .height(if (showLabel) 18.dp else 20.dp)
+                        .clip(RoundedCornerShape(if (showLabel) 9.dp else 10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (device.totalSize > 0) {
+                        LinearProgressIndicator(
+                            progress = { animatedProgress },
+                            modifier = Modifier.fillMaxSize(),
+                            strokeCap = StrokeCap.Round,
+                            color = if (progress > 0.85f) MaterialTheme.colorScheme.error
+                                   else MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
+                        Text(
+                            text = "${device.usedSize.toFormattedSize()} / ${device.totalSize.toFormattedSize()} • ${freeSize.toFormattedSize()} free",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = if (showLabel) 9.5.sp else 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (progress > 0.5f) Color.White else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
                     } else {
-                        MaterialTheme.colorScheme.primary
+                        Text(
+                            text = if (showLabel) "Unavailable" else device.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
                     }
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${device.usedSize.toFormattedSize()} used • ${freeSize.toFormattedSize()} free",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                }
+            }
+            if (isEditMode && onToggleVisibility != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = onToggleVisibility,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isHiddenItem) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                        contentDescription = if (isHiddenItem) "Show item" else "Hide item",
+                        tint = if (isHiddenItem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
-        if (isEditMode && onToggleVisibility != null) {
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = onToggleVisibility,
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .alpha(if (isHiddenItem) 0.45f else 1f)
+                .clickable {
+                    if (isEditMode && onToggleVisibility != null) {
+                        onToggleVisibility()
+                    } else {
+                        onClick()
+                    }
+                }
+                .padding(vertical = 10.dp, horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = deviceIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    imageVector = if (isHiddenItem) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                    contentDescription = if (isHiddenItem) "Show item" else "Hide item",
-                    tint = if (isHiddenItem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = device.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
+                if (device.totalSize > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp),
+                        strokeCap = StrokeCap.Round,
+                        color = if (progress > 0.85f) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${device.usedSize.toFormattedSize()} used • ${freeSize.toFormattedSize()} free",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (isEditMode && onToggleVisibility != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = onToggleVisibility,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isHiddenItem) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                        contentDescription = if (isHiddenItem) "Show item" else "Hide item",
+                        tint = if (isHiddenItem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

@@ -228,8 +228,13 @@ object SourceFolderResolver {
             return resolvedStandard
         }
 
-        // 4. Dynamic matching against installed applications
-        val appsMap = installedAppsByLabel ?: loadInstalledApps()
+        // 4. Dynamic matching against installed applications (never block main thread if not yet loaded)
+        val appsMap = installedAppsByLabel ?: if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            CoroutineScope(Dispatchers.IO).launch { loadInstalledApps() }
+            emptyMap()
+        } else {
+            loadInstalledApps()
+        }
         for (segment in segments.reversed()) {
             val segLower = segment.lowercase()
             val matchedApp = appsMap[segLower]

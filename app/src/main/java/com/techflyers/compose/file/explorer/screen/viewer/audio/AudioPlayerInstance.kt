@@ -16,9 +16,16 @@ import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import com.techflyers.compose.file.explorer.common.findActivity
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp4.Mp4Extractor
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.App.Companion.logger
 import com.techflyers.compose.file.explorer.R
@@ -47,7 +54,7 @@ import java.io.File
 class AudioPlayerInstance(
     override val uri: Uri,
     override val id: String,
-    val playlist: List<Uri> = listOf(),
+    var playlist: List<Uri> = listOf(),
     val archiveSession: ArchiveMediaSession? = null
 ) : ViewerInstance {
     private val _playerState = MutableStateFlow(PlayerState())
@@ -85,7 +92,27 @@ class AudioPlayerInstance(
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .build()
 
-            exoPlayer = ExoPlayer.Builder(context)
+            val renderersFactory = com.techflyers.compose.file.explorer.screen.viewer.media.SoftwareMediaRenderersFactory.create(
+                context = context,
+                preferSoftwareDecoding = true
+            )
+
+            val extractorsFactory = DefaultExtractorsFactory()
+                .setConstantBitrateSeekingEnabled(true)
+                .setConstantBitrateSeekingAlwaysEnabled(true)
+                .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
+
+            val trackSelector = DefaultTrackSelector(context).apply {
+                setParameters(
+                    buildUponParameters()
+                        .setExceedRendererCapabilitiesIfNecessary(true)
+                        .setExceedAudioConstraintsIfNecessary(true)
+                )
+            }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(context, extractorsFactory))
+                .setTrackSelector(trackSelector)
                 .setAudioAttributes(audioAttributes, true)
                 .build().apply {
                 repeatMode = _playerState.value.repeatMode
@@ -131,6 +158,37 @@ class AudioPlayerInstance(
                         }
                     }
 
+                    override fun onTracksChanged(tracks: Tracks) {
+                        val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+                        if (audioGroups.isNotEmpty() && audioGroups.none { it.isSupported }) {
+                            val fmt = audioGroups.first().getTrackFormat(0)
+                            val codecDesc = com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance.describeCodecName(
+                                fmt.sampleMimeType,
+                                fmt.codecs
+                            )
+                            _playerState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    playbackErrorTitle = "Unsupported Audio Codec",
+                                    playbackErrorDetails = "This audio stream uses $codecDesc, which is not supported by your device's audio decoders.",
+                                    codecDiagnosticLog = com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance.formatTrackFormatDiagnostic(fmt, false)
+                                )
+                            }
+                        }
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        _playerState.update {
+                            it.copy(
+                                isLoading = false,
+                                isPlaying = false,
+                                playbackErrorTitle = "Audio Playback Error (${error.errorCodeName})",
+                                playbackErrorDetails = error.cause?.message ?: error.message ?: "Unable to play this audio file.",
+                                codecDiagnosticLog = "Error Code: ${error.errorCodeName} (${error.errorCode})\n${error.cause?.message ?: error.message ?: ""}"
+                            )
+                        }
+                    }
+
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         val player = exoPlayer ?: return
                         val currentIndex = player.currentMediaItemIndex
@@ -140,7 +198,10 @@ class AudioPlayerInstance(
                                 currentTrackIndex = currentIndex,
                                 totalTracks = player.mediaItemCount,
                                 currentPosition = 0L,
-                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L
+                                duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L,
+                                playbackErrorTitle = null,
+                                playbackErrorDetails = null,
+                                codecDiagnosticLog = null
                             )
                         }
                         updateNotification()
@@ -409,6 +470,28 @@ class AudioPlayerInstance(
             player.seekTo(index, 0)
             player.play()
         }
+    }
+
+    /**
+     * Remove an item from the playlist queue and advance playback if necessary.
+     */
+    fun removePlaylistItem(index: Int): List<Uri> {
+        val player = exoPlayer ?: return playlist
+        if (index !in 0 until player.mediaItemCount) return playlist
+
+        player.removeMediaItem(index)
+        val remaining = List(player.mediaItemCount) { itemIndex ->
+            player.getMediaItemAt(itemIndex).localConfiguration?.uri ?: uri
+        }
+        playlist = remaining
+        val newIndex = player.currentMediaItemIndex.coerceAtMost((remaining.size - 1).coerceAtLeast(0))
+        _playerState.update { state ->
+            state.copy(
+                currentTrackIndex = newIndex,
+                totalTracks = remaining.size
+            )
+        }
+        return remaining
     }
 
     fun setPlaybackSpeed(speed: Float) {

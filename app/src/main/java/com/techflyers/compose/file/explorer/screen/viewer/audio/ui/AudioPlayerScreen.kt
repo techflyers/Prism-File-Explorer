@@ -3,6 +3,9 @@
 package com.techflyers.compose.file.explorer.screen.viewer.audio.ui
 
 import android.graphics.Bitmap
+import android.net.Uri
+import com.techflyers.compose.file.explorer.common.copyToClipboard
+import com.techflyers.compose.file.explorer.common.showMsg
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -18,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +57,14 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TimerOff
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DataObject
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Share
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -60,6 +72,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -71,6 +85,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -94,6 +109,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import android.content.Intent
+import androidx.core.content.FileProvider
+import com.techflyers.compose.file.explorer.screen.viewer.ViewerActivity
+import com.techflyers.compose.file.explorer.screen.viewer.audio.AudioPlayerActivity
+import java.io.File
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,7 +135,8 @@ import kotlin.math.abs
 @Composable
 fun MusicPlayerScreen(
     audioPlayerInstance: AudioPlayerInstance,
-    onClosed: () -> Unit
+    onClosed: () -> Unit,
+    onDelete: ((Uri) -> Boolean)? = null
 ) {
     val context = LocalContext.current
     val playerState by audioPlayerInstance.playerState.collectAsState()
@@ -133,7 +153,13 @@ fun MusicPlayerScreen(
     )
 
     var showPlaylist by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
+    var showTrackInfoDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val currentTrackUri = audioPlayerInstance.playlist.getOrNull(playerState.currentTrackIndex)
+        ?: audioPlayerInstance.uri
 
     // Initialize player
     LaunchedEffect(audioPlayerInstance.uri) {
@@ -165,6 +191,76 @@ fun MusicPlayerScreen(
                 onDismiss = { showPlaylist = false }
             )
         }
+    }
+
+    if (showMetadataSheet) {
+        ExtendedMetadataSheet(
+            uri = currentTrackUri,
+            displayNameHint = metadata.title,
+            onDismiss = { showMetadataSheet = false }
+        )
+    }
+
+    if (showTrackInfoDialog) {
+        AudioTrackInfoDialog(
+            metadata = metadata,
+            uri = currentTrackUri,
+            colorScheme = customColorScheme,
+            onDismissRequest = { showTrackInfoDialog = false },
+            onOpenMetadata = {
+                showTrackInfoDialog = false
+                showMetadataSheet = true
+            }
+        )
+    }
+
+    if (showDeleteConfirmationDialog) {
+        val currentTrackName = metadata.title.ifBlank {
+            currentTrackUri.lastPathSegment ?: stringResource(R.string.file)
+        }
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmationDialog = false },
+            title = { Text(stringResource(R.string.delete_confirmation)) },
+            text = {
+                Text("Are you sure you want to delete \"$currentTrackName\"?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmationDialog = false
+                        val deletedIndex = playerState.currentTrackIndex
+                        val trackUriToDelete = audioPlayerInstance.playlist.getOrNull(deletedIndex)
+                            ?: currentTrackUri
+                        val isDeleted = onDelete?.invoke(trackUriToDelete) ?: run {
+                            val path = AudioPlayerActivity.resolveFilePath(context, trackUriToDelete)
+                            val ok = if (path != null && File(path).exists()) {
+                                File(path).delete()
+                            } else {
+                                runCatching { context.contentResolver.delete(trackUriToDelete, null, null) }.getOrDefault(0) > 0
+                            }
+                            if (ok) (context as? ViewerActivity)?.onFileDeleted(path)
+                            ok
+                        }
+                        if (isDeleted) {
+                            val remaining = audioPlayerInstance.removePlaylistItem(deletedIndex)
+                            if (remaining.isEmpty()) {
+                                onClosed()
+                            } else {
+                                val nextIndex = deletedIndex.coerceAtMost(remaining.lastIndex)
+                                audioPlayerInstance.seekToTrack(nextIndex)
+                            }
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmationDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 
     Surface(
@@ -205,9 +301,56 @@ fun MusicPlayerScreen(
                     onShuffleClick = { audioPlayerInstance.toggleShuffle() },
                     sleepTimerRemainingMs = playerState.sleepTimerRemainingMs,
                     onSleepTimerClick = { audioPlayerInstance.toggleSleepTimerPanel() },
+                    onShareClick = {
+                        val shareUri = if (currentTrackUri.scheme == "file") {
+                            val file = File(currentTrackUri.path ?: "")
+                            if (file.exists()) {
+                                try {
+                                    FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        file
+                                    )
+                                } catch (e: Exception) {
+                                    currentTrackUri
+                                }
+                            } else currentTrackUri
+                        } else {
+                            currentTrackUri
+                        }
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "audio/*"
+                            putExtra(Intent.EXTRA_STREAM, shareUri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(shareIntent, context.getString(R.string.share))
+                        )
+                    },
+                    onDeleteClick = {
+                        showDeleteConfirmationDialog = true
+                    },
+                    onMetadataClick = { showMetadataSheet = true },
+                    onInfoClick = { showTrackInfoDialog = true },
                     onOpenWithClick = {
+                        val openUri = if (currentTrackUri.scheme == "file") {
+                            val file = File(currentTrackUri.path ?: "")
+                            if (file.exists()) {
+                                try {
+                                    FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        file
+                                    )
+                                } catch (e: Exception) {
+                                    currentTrackUri
+                                }
+                            } else currentTrackUri
+                        } else {
+                            currentTrackUri
+                        }
                         val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                            data = audioPlayerInstance.uri
+                            setDataAndType(openUri, "audio/*")
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         context.startActivity(
@@ -243,6 +386,44 @@ fun MusicPlayerScreen(
 
                 // Song info
                 SongInfo(metadata = metadata, colorScheme = customColorScheme)
+
+                playerState.playbackErrorTitle?.let { errTitle ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = errTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            playerState.playbackErrorDetails?.let { details ->
+                                Text(
+                                    text = details,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                            playerState.codecDiagnosticLog?.takeIf { it.isNotBlank() }?.let { diag ->
+                                Text(
+                                    text = diag,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -331,6 +512,15 @@ fun MusicPlayerScreen(
     }
 }
 
+private data class AudioTopBarAction(
+    val id: String,
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val badgeText: String? = null,
+    val tint: Color? = null,
+    val onClick: () -> Unit
+)
+
 @Composable
 fun TopControls(
     onEqualizerClick: () -> Unit,
@@ -343,107 +533,417 @@ fun TopControls(
     onShuffleClick: () -> Unit = {},
     sleepTimerRemainingMs: Long = 0L,
     onSleepTimerClick: () -> Unit = {},
+    onShareClick: (() -> Unit)? = null,
+    onDeleteClick: (() -> Unit)? = null,
+    onMetadataClick: (() -> Unit)? = null,
+    onInfoClick: (() -> Unit)? = null,
     onOpenWithClick: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = onCloseClick) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = null,
-                tint = audioPlayerColorScheme.tintColor
+    var overflowMenuExpanded by remember { mutableStateOf(false) }
+
+    val isTimerActive = sleepTimerRemainingMs > 0
+    val timerBadge = if (isTimerActive) {
+        val minutes = (sleepTimerRemainingMs / 60000).toInt()
+        val seconds = ((sleepTimerRemainingMs % 60000) / 1000).toInt()
+        if (minutes > 0) "${minutes}m" else "${seconds}s"
+    } else null
+
+    val playbackActions = buildList {
+        add(
+            AudioTopBarAction(
+                id = "shuffle",
+                label = if (isShuffleEnabled) "Shuffle: On" else "Shuffle: Off",
+                icon = Icons.Default.Shuffle,
+                tint = if (isShuffleEnabled) audioPlayerColorScheme.primary else audioPlayerColorScheme.tintColor.copy(alpha = 0.6f),
+                onClick = onShuffleClick
+            )
+        )
+        add(
+            AudioTopBarAction(
+                id = "sleep_timer",
+                label = if (isTimerActive) "Sleep Timer ($timerBadge)" else "Sleep Timer",
+                badgeText = timerBadge,
+                icon = Icons.Default.Timer,
+                tint = if (isTimerActive) audioPlayerColorScheme.primary else audioPlayerColorScheme.tintColor.copy(alpha = 0.6f),
+                onClick = onSleepTimerClick
+            )
+        )
+        if (hasPlaylist) {
+            add(
+                AudioTopBarAction(
+                    id = "playlist",
+                    label = "Playlist",
+                    icon = Icons.Default.PlaylistPlay,
+                    tint = audioPlayerColorScheme.tintColor,
+                    onClick = onPlaylistClick
+                )
             )
         }
+        add(
+            AudioTopBarAction(
+                id = "volume",
+                label = "Volume Control",
+                icon = Icons.AutoMirrored.Filled.VolumeUp,
+                tint = audioPlayerColorScheme.tintColor,
+                onClick = onVolumeClick
+            )
+        )
+        add(
+            AudioTopBarAction(
+                id = "equalizer",
+                label = "Equalizer",
+                icon = Icons.Default.Equalizer,
+                tint = audioPlayerColorScheme.tintColor,
+                onClick = onEqualizerClick
+            )
+        )
+    }
 
-        Spacer(Modifier.weight(1f))
+    val menuActions = buildList {
+        onShareClick?.let { onClick ->
+            add(
+                AudioTopBarAction(
+                    id = "share",
+                    label = stringResource(R.string.share),
+                    icon = Icons.Rounded.Share,
+                    tint = audioPlayerColorScheme.tintColor,
+                    onClick = onClick
+                )
+            )
+        }
+        onDeleteClick?.let { onClick ->
+            add(
+                AudioTopBarAction(
+                    id = "delete",
+                    label = stringResource(R.string.delete),
+                    icon = Icons.Rounded.Delete,
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = onClick
+                )
+            )
+        }
+        onMetadataClick?.let { onClick ->
+            add(
+                AudioTopBarAction(
+                    id = "metadata",
+                    label = stringResource(R.string.extended_metadata),
+                    icon = Icons.Rounded.DataObject,
+                    tint = audioPlayerColorScheme.tintColor,
+                    onClick = onClick
+                )
+            )
+        }
+        onInfoClick?.let { onClick ->
+            add(
+                AudioTopBarAction(
+                    id = "info",
+                    label = stringResource(R.string.track_info),
+                    icon = Icons.Rounded.Info,
+                    tint = audioPlayerColorScheme.tintColor,
+                    onClick = onClick
+                )
+            )
+        }
+        onOpenWithClick?.let { onClick ->
+            add(
+                AudioTopBarAction(
+                    id = "open_with",
+                    label = stringResource(R.string.open_with),
+                    icon = Icons.AutoMirrored.Filled.OpenInNew,
+                    tint = audioPlayerColorScheme.tintColor,
+                    onClick = onClick
+                )
+            )
+        }
+    }
 
-        Row {
-            // Shuffle
-            IconButton(onClick = onShuffleClick) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val reservedWidth = 112.dp
+        val availableInlineWidth = (maxWidth - reservedWidth).coerceAtLeast(0.dp)
+        val maxInlineSlots = (availableInlineWidth / 44.dp).toInt().coerceAtLeast(0)
+
+        val inlineActions = playbackActions.take(maxInlineSlots)
+        val overflowPlaybackActions = playbackActions.drop(maxInlineSlots)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onCloseClick) {
                 Icon(
-                    Icons.Default.Shuffle,
-                    contentDescription = "Shuffle",
-                    tint = if (isShuffleEnabled)
-                        audioPlayerColorScheme.primary
-                    else
-                        audioPlayerColorScheme.tintColor.copy(alpha = 0.5f)
+                    Icons.Default.Close,
+                    contentDescription = "Close player",
+                    tint = audioPlayerColorScheme.tintColor
                 )
             }
 
-            // Sleep timer
-            IconButton(onClick = onSleepTimerClick) {
-                val isTimerActive = sleepTimerRemainingMs > 0
-                if (isTimerActive) {
-                    BadgedBox(
-                        badge = {
-                            Badge(
-                                containerColor = audioPlayerColorScheme.primary
+            Spacer(Modifier.weight(1f))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                inlineActions.forEach { action ->
+                    if (action.id == "sleep_timer" && isTimerActive) {
+                        IconButton(onClick = action.onClick) {
+                            BadgedBox(
+                                badge = {
+                                    Badge(containerColor = audioPlayerColorScheme.primary) {
+                                        Text(
+                                            text = timerBadge ?: "",
+                                            fontSize = 9.sp,
+                                            color = audioPlayerColorScheme.tintColor
+                                        )
+                                    }
+                                }
                             ) {
-                                val minutes = (sleepTimerRemainingMs / 60000).toInt()
-                                val seconds = ((sleepTimerRemainingMs % 60000) / 1000).toInt()
-                                Text(
-                                    text = if (minutes > 0) "${minutes}m" else "${seconds}s",
-                                    fontSize = 9.sp,
-                                    color = audioPlayerColorScheme.tintColor
+                                Icon(
+                                    action.icon,
+                                    contentDescription = action.label,
+                                    tint = action.tint ?: audioPlayerColorScheme.tintColor
                                 )
                             }
                         }
-                    ) {
+                    } else {
+                        IconButton(onClick = action.onClick) {
+                            Icon(
+                                imageVector = action.icon,
+                                contentDescription = action.label,
+                                tint = action.tint ?: audioPlayerColorScheme.tintColor
+                            )
+                        }
+                    }
+                }
+
+                Box {
+                    IconButton(onClick = { overflowMenuExpanded = true }) {
                         Icon(
-                            Icons.Default.Timer,
-                            contentDescription = "Sleep Timer",
-                            tint = audioPlayerColorScheme.primary
+                            imageVector = Icons.Rounded.Menu,
+                            contentDescription = "More actions",
+                            tint = audioPlayerColorScheme.tintColor
                         )
                     }
-                } else {
-                    Icon(
-                        Icons.Default.Timer,
-                        contentDescription = "Sleep Timer",
-                        tint = audioPlayerColorScheme.tintColor.copy(alpha = 0.5f)
-                    )
-                }
-            }
 
-            if (hasPlaylist) {
-                IconButton(onClick = onPlaylistClick) {
-                    Icon(
-                        Icons.Default.PlaylistPlay,
-                        contentDescription = "Playlist",
-                        tint = audioPlayerColorScheme.tintColor
-                    )
-                }
-            }
+                    DropdownMenu(
+                        expanded = overflowMenuExpanded,
+                        onDismissRequest = { overflowMenuExpanded = false }
+                    ) {
+                        if (overflowPlaybackActions.isNotEmpty()) {
+                            overflowPlaybackActions.forEach { action ->
+                                DropdownMenuItem(
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = action.icon,
+                                            contentDescription = null,
+                                            tint = action.tint ?: MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    },
+                                    text = {
+                                        Text(
+                                            text = action.label,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    trailingIcon = action.badgeText?.let { badge ->
+                                        {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = audioPlayerColorScheme.primary.copy(alpha = 0.15f)
+                                            ) {
+                                                Text(
+                                                    text = badge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = audioPlayerColorScheme.primary,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        overflowMenuExpanded = false
+                                        action.onClick()
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                        }
 
-            IconButton(onClick = onVolumeClick) {
-                Icon(
-                    Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = null,
-                    tint = audioPlayerColorScheme.tintColor
-                )
-            }
-
-            IconButton(onClick = onEqualizerClick) {
-                Icon(
-                    Icons.Default.Equalizer,
-                    contentDescription = null,
-                    tint = audioPlayerColorScheme.tintColor
-                )
-            }
-
-            onOpenWithClick?.let { onClick ->
-                IconButton(onClick = onClick) {
-                    Icon(
-                        Icons.Default.OpenInNew,
-                        contentDescription = "Open with",
-                        tint = audioPlayerColorScheme.tintColor
-                    )
+                        menuActions.forEach { action ->
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = action.icon,
+                                        contentDescription = null,
+                                        tint = if (action.id == "delete") MaterialTheme.colorScheme.error else (action.tint ?: MaterialTheme.colorScheme.onSurface),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = action.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (action.id == "delete") MaterialTheme.colorScheme.error else Color.Unspecified
+                                    )
+                                },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    action.onClick()
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+fun AudioTrackInfoDialog(
+    metadata: AudioMetadata,
+    uri: Uri,
+    colorScheme: AudioPlayerColorScheme,
+    onDismissRequest: () -> Unit,
+    onOpenMetadata: () -> Unit
+) {
+    val context = LocalContext.current
+    val filePath = remember(uri) { uri.path ?: uri.toString() }
+
+    val durationText = remember(metadata.duration) {
+        if (metadata.duration > 0) {
+            val totalSeconds = metadata.duration / 1000
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            String.format("%02d:%02d", minutes, seconds)
+        } else "Unknown"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.Info,
+                contentDescription = null,
+                tint = colorScheme.primary,
+                modifier = Modifier.size(28.dp)
+            )
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.track_info),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Title
+                Column {
+                    Text(
+                        text = "Title",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = metadata.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Artist & Album
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Artist",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = metadata.artist,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Album",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = metadata.album,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+
+                // Duration
+                Column {
+                    Text(
+                        text = "Duration",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = durationText,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                // File Path / Location with Copy Button
+                Column {
+                    Text(
+                        text = stringResource(R.string.file_location),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = filePath,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                filePath.copyToClipboard()
+                                showMsg("Path copied to clipboard")
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ContentCopy,
+                                contentDescription = "Copy path",
+                                modifier = Modifier.size(16.dp),
+                                tint = colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onOpenMetadata,
+                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary)
+            ) {
+                Text(text = stringResource(R.string.extended_metadata))
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismissRequest) {
+                Text(text = "Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -709,36 +1209,68 @@ fun AdditionalControls(
     onRepeatToggle: () -> Unit,
     colorScheme: AudioPlayerColorScheme
 ) {
+    val speedOptions = remember { listOf(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f) }
+    var speedMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
-        // Speed control
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            IconButton(
-                onClick = {
-                    val newSpeed = when (playbackSpeed) {
-                        0.5f -> 1.0f
-                        1.0f -> 1.25f
-                        1.25f -> 1.5f
-                        1.5f -> 2.0f
-                        else -> 0.5f
-                    }
-                    onSpeedChange(newSpeed)
-                }
+        // Speed control dropdown menu
+        Box {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { speedMenuExpanded = true }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
-                Icon(
-                    Icons.Default.Speed,
-                    contentDescription = null,
-                    tint = colorScheme.tintColor
+                IconButton(
+                    onClick = { speedMenuExpanded = true }
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = "Playback speed",
+                        tint = colorScheme.tintColor
+                    )
+                }
+                Text(
+                    text = if (playbackSpeed == playbackSpeed.toLong().toFloat())
+                        "${playbackSpeed.toInt()}x"
+                    else
+                        "${playbackSpeed}x",
+                    color = colorScheme.tintColor.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
-            Text(
-                text = "${playbackSpeed}x",
-                color = colorScheme.tintColor.copy(alpha = 0.8f),
-                fontSize = 12.sp,
-                style = MaterialTheme.typography.bodySmall
-            )
+
+            androidx.compose.material3.DropdownMenu(
+                expanded = speedMenuExpanded,
+                onDismissRequest = { speedMenuExpanded = false }
+            ) {
+                speedOptions.forEach { speed ->
+                    val isSelected = abs(playbackSpeed - speed) < 0.01f
+                    val speedLabel = if (speed == speed.toLong().toFloat()) {
+                        if (speed == 1.0f) "1x (Normal)" else "${speed.toInt()}x"
+                    } else {
+                        "${speed}x"
+                    }
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = speedLabel,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            speedMenuExpanded = false
+                            onSpeedChange(speed)
+                        }
+                    )
+                }
+            }
         }
 
         // Repeat control (off, all, one)

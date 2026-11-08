@@ -487,7 +487,12 @@ fun NetworkConnectionWizardScreen(tab: NetworkConnectionWizardTab) {
                     value = rootPath,
                     onValueChange = { rootPath = it },
                     label = { Text("Remote Path") },
-                    placeholder = { Text("/") },
+                    placeholder = {
+                        Text(if (selectedType == "LAN/SMB") "/ShareName (optional)" else "/")
+                    },
+                    supportingText = if (selectedType == "LAN/SMB") {
+                        { Text("Leave '/' for server root (all shares), or specify '/Share' or '/Share/Folder'") }
+                    } else null,
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()

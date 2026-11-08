@@ -22,17 +22,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.RotateRight
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material.icons.rounded.ViewCarousel
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -75,7 +77,8 @@ import java.io.File
 
 data class PageItem(
     val originalIndex: Int,
-    var rotation: Int = 0
+    var rotation: Int = 0,
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 @Composable
@@ -299,129 +302,118 @@ fun OrganizePagesDialog(
                     )
                 } else {
                     // Page list
+                    val listState = rememberLazyListState()
+                    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+                        val m = pageList.toMutableList()
+                        val el = m.removeAt(from.index)
+                        m.add(to.index, el)
+                        pageList = m
+                    }
+
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 380.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        itemsIndexed(pageList) { index, item ->
-                            Card(
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        itemsIndexed(pageList, key = { _, item -> item.id }) { index, item ->
+                            ReorderableItem(reorderableState, key = item.id) { isDragging ->
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    // Page Thumbnail
-                                    val thumb = thumbnails[item.originalIndex]
-                                    Box(
+                                    Row(
                                         modifier = Modifier
-                                            .size(52.dp, 68.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceContainerLowest),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (thumb != null) {
-                                            Image(
-                                                bitmap = thumb.asImageBitmap(),
-                                                contentDescription = "Page ${index + 1}",
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .rotate(item.rotation.toFloat()),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        } else {
-                                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                        }
-                                    }
-
-                                    // Page Label
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Page ${index + 1}",
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "Original #${item.originalIndex + 1}" + if (item.rotation != 0) " • ${item.rotation}°" else "",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    // Actions
-                                    // Move Up
-                                    IconButton(
-                                        onClick = {
-                                            if (index > 0) {
-                                                val m = pageList.toMutableList()
-                                                val el = m.removeAt(index)
-                                                m.add(index - 1, el)
-                                                pageList = m
-                                            }
-                                        },
-                                        enabled = index > 0 && !isApplying,
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(20.dp))
-                                    }
-
-                                    // Move Down
-                                    IconButton(
-                                        onClick = {
-                                            if (index < pageList.size - 1) {
-                                                val m = pageList.toMutableList()
-                                                val el = m.removeAt(index)
-                                                m.add(index + 1, el)
-                                                pageList = m
-                                            }
-                                        },
-                                        enabled = index < pageList.size - 1 && !isApplying,
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(20.dp))
-                                    }
-
-                                    // Rotate 90 deg
-                                    IconButton(
-                                        onClick = {
-                                            val m = pageList.toMutableList()
-                                            val current = m[index]
-                                            m[index] = current.copy(rotation = (current.rotation + 90) % 360)
-                                            pageList = m
-                                        },
-                                        enabled = !isApplying,
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.RotateRight, contentDescription = "Rotate", modifier = Modifier.size(20.dp))
-                                    }
-
-                                    // Delete Page
-                                    IconButton(
-                                        onClick = {
-                                            if (pageList.size > 1) {
-                                                val m = pageList.toMutableList()
-                                                m.removeAt(index)
-                                                pageList = m
-                                            }
-                                        },
-                                        enabled = pageList.size > 1 && !isApplying,
-                                        modifier = Modifier.size(34.dp)
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Rounded.Delete,
-                                            contentDescription = "Delete",
-                                            tint = if (pageList.size > 1) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.size(20.dp)
+                                            imageVector = Icons.Rounded.DragHandle,
+                                            contentDescription = "Reorder page",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .draggableHandle()
+                                                .padding(horizontal = 4.dp)
+                                                .size(22.dp)
                                         )
+
+                                        // Page Thumbnail
+                                        val thumb = thumbnails[item.originalIndex]
+                                        Box(
+                                            modifier = Modifier
+                                                .size(52.dp, 68.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (thumb != null) {
+                                                Image(
+                                                    bitmap = thumb.asImageBitmap(),
+                                                    contentDescription = "Page ${index + 1}",
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .rotate(item.rotation.toFloat()),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                            } else {
+                                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                            }
+                                        }
+
+                                        // Page Label
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Page ${index + 1}",
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Original #${item.originalIndex + 1}" + if (item.rotation != 0) " • ${item.rotation}°" else "",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        // Actions
+                                        // Rotate 90 deg
+                                        IconButton(
+                                            onClick = {
+                                                val m = pageList.toMutableList()
+                                                val current = m[index]
+                                                m[index] = current.copy(rotation = (current.rotation + 90) % 360)
+                                                pageList = m
+                                            },
+                                            enabled = !isApplying,
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.RotateRight, contentDescription = "Rotate", modifier = Modifier.size(20.dp))
+                                        }
+
+                                        // Delete Page
+                                        IconButton(
+                                            onClick = {
+                                                if (pageList.size > 1) {
+                                                    val m = pageList.toMutableList()
+                                                    m.removeAt(index)
+                                                    pageList = m
+                                                }
+                                            },
+                                            enabled = pageList.size > 1 && !isApplying,
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Delete,
+                                                contentDescription = "Delete page",
+                                                tint = if (pageList.size > 1) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }

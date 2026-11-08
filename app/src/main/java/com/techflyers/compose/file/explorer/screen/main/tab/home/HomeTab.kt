@@ -49,6 +49,7 @@ class HomeTab : Tab() {
     override val header = globalClass.getString(R.string.home_tab_header)
     val recentFiles = mutableStateListOf<RecentFile>()
     var isLoadingRecentFiles by mutableStateOf(true)
+    var recentFilesLoadingProgress by androidx.compose.runtime.mutableFloatStateOf(0f)
     val pinnedFiles = mutableStateListOf<LocalFileHolder>()
     val scrollState = ScrollState(0)
 
@@ -119,25 +120,31 @@ class HomeTab : Tab() {
             recentFiles.clear()
             recentFiles.addAll(files)
         }
+        recentFilesLoadingProgress = 1f
         isLoadingRecentFiles = false
     }
 
     fun fetchRecentFiles() {
         if (isRecentDisabledOnHome()) {
             isLoadingRecentFiles = false
+            recentFilesLoadingProgress = 1f
             return
         }
         if (globalClass.preferencesManager.recentFilesLimit == 0) {
             recentFiles.clear()
             isLoadingRecentFiles = false
+            recentFilesLoadingProgress = 1f
             return
         }
         if (recentFiles.isNotEmpty() || recentFilesJob?.isActive == true) return
 
         isLoadingRecentFiles = true
+        recentFilesLoadingProgress = 0.18f
         recentFilesJob = scope.launch {
             try {
-                val files = getRecentFiles()
+                val files = getRecentFiles { progress ->
+                    recentFilesLoadingProgress = progress
+                }
                 if (isActive) {
                     withContext(Dispatchers.Main) {
                         applyRecentFilesOnMain(files)
@@ -146,6 +153,7 @@ class HomeTab : Tab() {
             } finally {
                 if (isActive) {
                     withContext(Dispatchers.Main) {
+                        recentFilesLoadingProgress = 1f
                         isLoadingRecentFiles = false
                     }
                 }
@@ -158,12 +166,14 @@ class HomeTab : Tab() {
             recentFilesJob?.cancel()
             recentFiles.clear()
             isLoadingRecentFiles = false
+            recentFilesLoadingProgress = 1f
             return
         }
         if (globalClass.preferencesManager.recentFilesLimit == 0) {
             recentFilesJob?.cancel()
             recentFiles.clear()
             isLoadingRecentFiles = false
+            recentFilesLoadingProgress = 1f
             return
         }
         if (forceInvalidate) {
@@ -171,9 +181,12 @@ class HomeTab : Tab() {
         }
         recentFilesJob?.cancel()
         isLoadingRecentFiles = true
+        recentFilesLoadingProgress = 0.18f
         recentFilesJob = scope.launch {
             try {
-                val files = getRecentFiles()
+                val files = getRecentFiles { progress ->
+                    recentFilesLoadingProgress = progress
+                }
                 if (isActive) {
                     withContext(Dispatchers.Main) {
                         applyRecentFilesOnMain(files)
@@ -182,6 +195,7 @@ class HomeTab : Tab() {
             } finally {
                 if (isActive) {
                     withContext(Dispatchers.Main) {
+                        recentFilesLoadingProgress = 1f
                         isLoadingRecentFiles = false
                     }
                 }
@@ -194,6 +208,7 @@ class HomeTab : Tab() {
             recentFilesJob?.cancel()
             withContext(Dispatchers.Main) {
                 recentFiles.clear()
+                recentFilesLoadingProgress = 1f
                 isLoadingRecentFiles = false
             }
             return
@@ -202,6 +217,7 @@ class HomeTab : Tab() {
             recentFilesJob?.cancel()
             withContext(Dispatchers.Main) {
                 recentFiles.clear()
+                recentFilesLoadingProgress = 1f
                 isLoadingRecentFiles = false
             }
             return
@@ -212,10 +228,13 @@ class HomeTab : Tab() {
         recentFilesJob?.cancel()
         withContext(Dispatchers.Main) {
             isLoadingRecentFiles = true
+            recentFilesLoadingProgress = 0.18f
         }
         val job = scope.launch {
             try {
-                val files = getRecentFiles()
+                val files = getRecentFiles { progress ->
+                    recentFilesLoadingProgress = progress
+                }
                 if (isActive) {
                     withContext(Dispatchers.Main) {
                         applyRecentFilesOnMain(files)
@@ -223,6 +242,7 @@ class HomeTab : Tab() {
                 }
             } finally {
                 withContext(Dispatchers.Main) {
+                    recentFilesLoadingProgress = 1f
                     isLoadingRecentFiles = false
                 }
             }
@@ -346,16 +366,18 @@ class HomeTab : Tab() {
         }
     }
 
-    private fun getRecentFiles(): ArrayList<RecentFile> {
+    private fun getRecentFiles(onProgress: ((Float) -> Unit)? = null): ArrayList<RecentFile> {
         val configuredLimit = globalClass.preferencesManager.recentFilesLimit
         if (configuredLimit == 0) return arrayListOf()
         val carouselLimit = if (configuredLimit in 1..30) configuredLimit else 30
+        onProgress?.invoke(0.45f)
         return arrayListOf<RecentFile>().apply {
             addAll(
                 StorageProvider.getRawRecentFiles(
                     limit = carouselLimit
                 )
             )
+            onProgress?.invoke(0.92f)
         }
     }
 

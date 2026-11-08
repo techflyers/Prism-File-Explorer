@@ -25,8 +25,6 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -349,7 +347,7 @@ fun FilterCustomizationDialog(
                                 IconButton(
                                     modifier = Modifier
                                         .size(32.dp)
-                                        .longPressDraggableHandle(),
+                                        .draggableHandle(),
                                     onClick = {}
                                 ) {
                                     Icon(
@@ -382,38 +380,6 @@ fun FilterCustomizationDialog(
                                     )
                                 }
 
-                                IconButton(
-                                    onClick = {
-                                        if (index > 0) {
-                                            filterItems.add(index - 1, filterItems.removeAt(index))
-                                            persistCurrentList()
-                                        }
-                                    },
-                                    enabled = index > 0,
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.KeyboardArrowUp,
-                                        contentDescription = "Move Up",
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (index < filterItems.lastIndex) {
-                                            filterItems.add(index + 1, filterItems.removeAt(index))
-                                            persistCurrentList()
-                                        }
-                                    },
-                                    enabled = index < filterItems.lastIndex,
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                                        contentDescription = "Move Down",
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
                                 IconButton(
                                     onClick = { editingItem = item },
                                     modifier = Modifier.size(28.dp)

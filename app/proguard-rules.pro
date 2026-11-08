@@ -80,3 +80,7 @@
 # Markwon
 -dontwarn pl.droidsonroids.gif.GifDrawable
 -dontwarn io.noties.markwon.**
+
+# Media3 & NextLib FFmpeg JNI Decoders
+-keep class io.github.anilbeesetti.nextlib.media3ext.** { *; }
+-keep class androidx.media3.decoder.** { *; }

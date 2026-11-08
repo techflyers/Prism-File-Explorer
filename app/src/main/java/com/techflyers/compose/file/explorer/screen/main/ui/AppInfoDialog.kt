@@ -78,10 +78,13 @@ fun AppInfoDialog(
     onDismiss: () -> Unit,
     hasNewUpdate: Boolean
 ) {
-    val appIcon = AppCompatResources.getDrawable(globalClass, R.drawable.app_icon)
-    val versionName =
-        globalClass.packageManager.getPackageInfo(globalClass.packageName, 0).versionName
+    if (!show) return
+
     val context = LocalContext.current
+    val appIcon = remember(context) { AppCompatResources.getDrawable(globalClass, R.drawable.app_icon) }
+    val versionName = remember(context) {
+        globalClass.packageManager.getPackageInfo(globalClass.packageName, 0).versionName
+    }
     val newUpdate = globalClass.mainActivityManager.newUpdate
 
     var animateContent by remember { mutableStateOf(false) }

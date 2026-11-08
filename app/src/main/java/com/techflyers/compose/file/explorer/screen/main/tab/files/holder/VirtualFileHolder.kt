@@ -25,7 +25,14 @@ class VirtualFileHolder(
 ) : ContentHolder() {
     private var fileCount = 0
     private val contentList = arrayListOf<ContentHolder>()
-    private val categories = arrayListOf<String>()
+    private val seenFilePaths = HashSet<String>()
+    private val seenCategoryPaths = HashSet<String>()
+    private val categoryObjects = arrayListOf<FileListCategory>()
+    private val seenFormats = HashSet<String>()
+    @Volatile
+    private var cachedCategoriesSnapshot: List<FileListCategory> = emptyList()
+    @Volatile
+    private var cachedFormatsSnapshot: List<String> = emptyList()
 
     var selectedCategory: FileListCategory? = null
     var selectedFormats: Set<String> = emptySet()
@@ -97,23 +104,23 @@ class VirtualFileHolder(
 
         val configuredRecentLimit = globalClass.preferencesManager.recentFilesLimit
         val initialLimit = if (type == RECENT && configuredRecentLimit > 0) {
-            minOf(PAGE_SIZE, configuredRecentLimit)
+            minOf(INITIAL_PAGE_SIZE, configuredRecentLimit)
         } else {
-            PAGE_SIZE
+            INITIAL_PAGE_SIZE
         }
 
         val rawItems = when (type) {
             BOOKMARKS -> getBookmarks()
-            AUDIO -> getAudioFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
-            VIDEO -> getVideoFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
-            IMAGE -> getImageFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
-            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
-            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            AUDIO -> getAudioFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
+            VIDEO -> getVideoFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
+            IMAGE -> getImageFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
+            ARCHIVE -> getArchiveFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
+            DOCUMENT -> getDocumentFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
             RECENT -> getRecentFiles(sortingPrefs = sortingPrefs, limit = initialLimit, offset = 0)
-            ALL_FILES -> getAllFiles(sortingPrefs = sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            ALL_FILES -> getAllFiles(sortingPrefs = sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
             SEARCH -> getSearchResult()
             DUPLICATES -> ArrayList((customItems ?: emptyList()).filter { runBlocking { it.isValid() } })
-            APK -> getApkFiles(sortingPrefs, limit = PAGE_SIZE, offset = 0)
+            APK -> getApkFiles(sortingPrefs, limit = INITIAL_PAGE_SIZE, offset = 0)
             else -> arrayListOf()
         }
 
@@ -127,10 +134,27 @@ class VirtualFileHolder(
         }
 
         contentList.clear()
-        contentList.addAll(rawItems)
-        if (type != BOOKMARKS && type != DUPLICATES) fetchCategories()
+        seenFilePaths.clear()
+        seenCategoryPaths.clear()
+        categoryObjects.clear()
+        seenFormats.clear()
 
-        return contentList.filter {
+        val uniqueRaw = ArrayList<ContentHolder>(rawItems.size)
+        for (item in rawItems) {
+            if (seenFilePaths.add(item.uniquePath)) {
+                uniqueRaw.add(item)
+            }
+        }
+        contentList.addAll(uniqueRaw)
+
+        if (type != BOOKMARKS && type != DUPLICATES) {
+            appendCategoriesFrom(uniqueRaw)
+        } else {
+            cachedCategoriesSnapshot = emptyList()
+            cachedFormatsSnapshot = emptyList()
+        }
+
+        return uniqueRaw.filter {
             val categoryOk = selectedCategory == null ||
                 it.uniquePath == (selectedCategory!!.data as File).path + File.separator + it.displayName
             val formatOk = selectedFormats.isEmpty() || it.extension.lowercase() in selectedFormats
@@ -170,38 +194,58 @@ class VirtualFileHolder(
         }
         currentOffset += nextPage.size
 
-        contentList.addAll(nextPage)
-        fetchCategories()
+        val uniqueNextPage = ArrayList<ContentHolder>(nextPage.size)
+        for (item in nextPage) {
+            if (seenFilePaths.add(item.uniquePath)) {
+                uniqueNextPage.add(item)
+            }
+        }
+        if (uniqueNextPage.isEmpty()) {
+            hasMoreContent = false
+            return emptyList()
+        }
 
-        return nextPage.filter {
+        contentList.addAll(uniqueNextPage)
+        appendCategoriesFrom(uniqueNextPage)
+
+        val showHidden = globalClass.preferencesManager.showHiddenFiles
+        return uniqueNextPage.filter {
+            val hiddenOk = showHidden || !it.isHidden()
             val categoryOk = selectedCategory == null ||
                 it.uniquePath == (selectedCategory!!.data as File).path + File.separator + it.displayName
             val formatOk = selectedFormats.isEmpty() || it.extension.lowercase() in selectedFormats
-            categoryOk && formatOk
+            hiddenOk && categoryOk && formatOk
         }.also { fileCount = contentList.size }
     }
 
-    private fun fetchCategories() {
-        categories.clear()
-        val seen = HashSet<String>()
-        contentList.forEach { content ->
+    private fun appendCategoriesFrom(items: List<ContentHolder>) {
+        var categoriesChanged = false
+        var formatsChanged = false
+        items.forEach { content ->
             if (content is LocalFileHolder) {
                 val parentPath = content.file.parent
-                if (parentPath != null && seen.add(parentPath)) {
-                    categories.add(parentPath)
+                if (parentPath != null && seenCategoryPaths.add(parentPath)) {
+                    val dirFile = File(parentPath)
+                    categoryObjects.add(FileListCategory(dirFile.name, dirFile))
+                    categoriesChanged = true
                 }
             }
+            val ext = content.extension.lowercase()
+            if (ext.isNotEmpty() && seenFormats.add(ext)) {
+                formatsChanged = true
+            }
+        }
+        if (categoriesChanged || cachedCategoriesSnapshot.isEmpty()) {
+            cachedCategoriesSnapshot = ArrayList(categoryObjects)
+        }
+        if (formatsChanged) {
+            cachedFormatsSnapshot = seenFormats.sorted()
         }
     }
 
-    fun getCategories() = categories.map { File(it).let { FileListCategory(it.name, it) } }
+    fun getCategories(): List<FileListCategory> = cachedCategoriesSnapshot
 
-    fun availableFormats(): List<String> {
-        return contentList.map { it.extension.lowercase() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .sorted()
-    }
+    fun availableFormats(): List<String> = cachedFormatsSnapshot
 
     override suspend fun findFile(name: String): ContentHolder? {
         if (contentList.isEmpty()) {
@@ -222,6 +266,7 @@ class VirtualFileHolder(
     override suspend fun getContentCount() = ContentCount(files = fileCount)
 
     companion object {
+        const val INITIAL_PAGE_SIZE = 100
         const val PAGE_SIZE = 250
         const val MAX_PAGED_CAP = 5000
         const val BOOKMARKS = 0

@@ -49,6 +49,7 @@ import com.techflyers.compose.file.explorer.screen.preferences.constant.Terminal
 import com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher
 import com.techflyers.compose.file.explorer.screen.terminal.isTerminalInstalled
 import com.techflyers.compose.file.explorer.screen.terminal.uninstallTerminal
+import kotlinx.coroutines.launch
 
 @Composable
 fun TerminalContainer() {
@@ -59,7 +60,7 @@ fun TerminalContainer() {
     var showCustomCommandDialog by remember { mutableStateOf(false) }
     var showTermuxInfoDialog by remember { mutableStateOf(false) }
 
-    val installed = remember { isTerminalInstalled(context) }
+    var installed by remember { mutableStateOf(false) }
     val prefs = globalClass.preferencesManager
 
     val terminalAppChoices = listOf(
@@ -68,11 +69,20 @@ fun TerminalContainer() {
         stringResource(R.string.terminal_app_custom)
     )
     val currentTerminalApp = prefs.terminalApp.coerceIn(0, terminalAppChoices.size - 1)
-    val isTermuxInstalled = remember {
-        TerminalLauncher.isPackageInstalled(context, TerminalLauncher.TERMUX_PACKAGE)
-    }
-    var hasTermuxPermission by remember {
-        mutableStateOf(TerminalLauncher.hasTermuxPermission(context))
+    var isTermuxInstalled by remember { mutableStateOf(false) }
+    var hasTermuxPermission by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val (termInstalled, termuxInst, termuxPerm) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            Triple(
+                isTerminalInstalled(context),
+                TerminalLauncher.isPackageInstalled(context, TerminalLauncher.TERMUX_PACKAGE),
+                TerminalLauncher.hasTermuxPermission(context)
+            )
+        }
+        installed = termInstalled
+        isTermuxInstalled = termuxInst
+        hasTermuxPermission = termuxPerm
     }
 
     val termuxPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -90,8 +100,14 @@ fun TerminalContainer() {
         }
     }
 
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        hasTermuxPermission = TerminalLauncher.hasTermuxPermission(context)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val perm = TerminalLauncher.hasTermuxPermission(context)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                hasTermuxPermission = perm
+            }
+        }
     }
 
     Container(

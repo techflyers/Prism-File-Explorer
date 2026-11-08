@@ -83,14 +83,38 @@ class ShareReceiverActivity : BaseActivity() {
         intent?.let { intent ->
             when (intent.action) {
                 Intent.ACTION_SEND -> {
-                    val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-                    if (uri != null) sharedUris.add(uri)
-                    else sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    val uri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                    }
+                    if (uri != null) {
+                        sharedUris.add(uri)
+                    } else {
+                        val clipUri = intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+                        if (clipUri != null) {
+                            sharedUris.add(clipUri)
+                        } else if (intent.data != null) {
+                            sharedUris.add(intent.data!!)
+                        } else {
+                            sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                        }
+                    }
                 }
                 Intent.ACTION_SEND_MULTIPLE -> {
-                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
-                        ?.filterNotNull()
-                        ?.forEach { sharedUris.add(it) }
+                    val list = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+                    }
+                    list?.filterNotNull()?.forEach { sharedUris.add(it) }
+                    if (sharedUris.isEmpty() && intent.clipData != null) {
+                        for (i in 0 until intent.clipData!!.itemCount) {
+                            intent.clipData!!.getItemAt(i)?.uri?.let { sharedUris.add(it) }
+                        }
+                    }
                 }
             }
         }

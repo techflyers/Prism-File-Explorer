@@ -7,8 +7,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +52,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,252 +96,323 @@ fun navigateBreadcrumbHomeLongPress(tab: FilesTab) {
     tab.openFolder(targetRoot, rememberListState = false)
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun rememberFastBreadcrumbViewConfiguration(): ViewConfiguration {
+    val base = LocalViewConfiguration.current
+    return remember(base) {
+        object : ViewConfiguration by base {
+            override val doubleTapTimeoutMillis: Long
+                get() = 120L
+            override val doubleTapMinTimeMillis: Long
+                get() = 20L
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun BreadcrumbBar(tab: FilesTab) {
     val highlightedPathListItemColor = MaterialTheme.colorScheme.primary
+    val multilineWrap = globalClass.preferencesManager.pathBarMultilineWrap
+    val fastViewConfig = rememberFastBreadcrumbViewConfiguration()
 
     if (tab.showCategories) {
         CategoriesRow(tab)
     } else if (tab.activeFolder !is VirtualFileHolder) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        CompositionLocalProvider(LocalViewConfiguration provides fastViewConfig) {
             val isHomeCurrentFolder = tab.homeDir.uniquePath == tab.activeFolder.uniquePath
             val isHomeHovered = tab.dragDropSession?.hoveredTargetDirectory == tab.homeDir.uniquePath
             val isHomeValid = tab.dragDropSession?.isValidDropTarget(tab.homeDir, tab.activeFolder) == true
-
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .onGloballyPositioned { coordinates ->
-                        if (!isHomeCurrentFolder) {
-                            tab.registerDropTarget(tab.homeDir, coordinates)
-                        }
-                    }
-                    .then(
-                        if (isHomeHovered && isHomeValid) {
-                            Modifier
-                                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
-                                .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                        } else if (isHomeHovered && !isHomeValid) {
-                            Modifier
-                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
-                        } else Modifier
-                    )
-                    .combinedClickable(
-                        onClick = { navigateBreadcrumbHomeTap() },
-                        onLongClick = { navigateBreadcrumbHomeLongPress(tab) }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Home,
-                    contentDescription = stringResource(id = R.string.home_tab_title)
-                )
-            }
 
             val highlightedIndex = tab.currentPathSegments.indexOfFirst {
                 tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
             }
 
-            LaunchedEffect(key1 = tab.highlightedPathSegment, key2 = tab.currentPathSegments.size) {
-                val index = tab.currentPathSegments.indexOfFirst {
-                    tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
-                }
-                val targetIndex = max(index, 0)
-                withFrameNanos { }
-                val listState = tab.currentPathSegmentsListState
-                val layoutInfo = listState.layoutInfo
-                val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == targetIndex }
-                if (visibleItem == null) {
-                    listState.animateScrollToItem(targetIndex)
-                    withFrameNanos { }
-                    val updatedLayout = listState.layoutInfo
-                    val newlyVisible = updatedLayout.visibleItemsInfo.find { it.index == targetIndex }
-                    if (newlyVisible != null) {
-                        val endBound = updatedLayout.viewportEndOffset - updatedLayout.afterContentPadding
-                        val itemEnd = newlyVisible.offset + newlyVisible.size
-                        if (itemEnd > endBound) {
-                            listState.animateScrollBy((itemEnd - endBound).toFloat())
+            @Composable
+            fun HomeBreadcrumbButton() {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .size(if (multilineWrap) 34.dp else 40.dp)
+                        .clip(CircleShape)
+                        .onGloballyPositioned { coordinates ->
+                            if (!isHomeCurrentFolder) {
+                                tab.registerDropTarget(tab.homeDir, coordinates)
+                            }
                         }
-                    }
-                } else {
-                    val startBound = 0
-                    val endBound = layoutInfo.viewportEndOffset - layoutInfo.afterContentPadding
-                    val itemStart = visibleItem.offset
-                    val itemEnd = visibleItem.offset + visibleItem.size
-                    if (itemStart < startBound) {
-                        listState.animateScrollBy((itemStart - startBound).toFloat())
-                    } else if (itemEnd > endBound) {
-                        listState.animateScrollBy((itemEnd - endBound).toFloat())
-                    }
+                        .then(
+                            if (isHomeHovered && isHomeValid) {
+                                Modifier
+                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                                    .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                            } else if (isHomeHovered && !isHomeValid) {
+                                Modifier
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .border(1.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp))
+                            } else Modifier
+                        )
+                        .combinedClickable(
+                            onClick = { navigateBreadcrumbHomeTap() },
+                            onLongClick = { navigateBreadcrumbHomeLongPress(tab) }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Home,
+                        contentDescription = stringResource(id = R.string.home_tab_title)
+                    )
                 }
             }
 
-            // Consume leftover horizontal scroll and post-fling velocity so the outer HorizontalPager
-            // does not intercept swipes while keeping full momentum fling on the breadcrumb LazyRow.
-            val consumeLeftoverScroll = remember {
-                object : NestedScrollConnection {
-                    override fun onPostScroll(
-                        consumed: Offset,
-                        available: Offset,
-                        source: NestedScrollSource
-                    ): Offset {
-                        return Offset(available.x, 0f)
+            if (multilineWrap) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(modifier = Modifier.align(Alignment.CenterVertically)) {
+                        HomeBreadcrumbButton()
                     }
-
-                    override suspend fun onPostFling(
-                        consumed: Velocity,
-                        available: Velocity
-                    ): Velocity {
-                        return Velocity(available.x, 0f)
-                    }
-                }
-            }
-
-            LazyRow(
-                modifier = Modifier
-                    .weight(1f)
-                    .nestedScroll(consumeLeftoverScroll),
-                state = tab.currentPathSegmentsListState,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
-                    val isHighlighted = index == highlightedIndex ||
-                            (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
-                    val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
-                    val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
-                    val isCopyHereTarget = tab.copyHereTargetFolder?.uniquePath == item.uniquePath
-                    val isDropTarget = !isCurrentFolder
-                    val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
-                    val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
-
-                    DisposableEffect(item.uniquePath) {
-                        onDispose {
-                            tab.unregisterDropTarget(item.uniquePath)
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(modifier = Modifier.alpha(if (isHistorySegment) 0.42f else 1f)) {
-                            BreadcrumbSeparator(
+                    tab.currentPathSegments.forEachIndexed { index, item ->
+                        Box(modifier = Modifier.align(Alignment.CenterVertically)) {
+                            BreadcrumbSegmentItem(
                                 index = index,
-                                currentItem = item,
-                                pathSegments = tab.currentPathSegments,
+                                item = item,
+                                highlightedIndex = highlightedIndex,
+                                highlightedPathListItemColor = highlightedPathListItemColor,
+                                multilineWrap = true,
                                 tab = tab
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .onGloballyPositioned { coordinates ->
-                                    if (isDropTarget) {
-                                        tab.registerDropTarget(item, coordinates)
-                                    }
+                    }
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HomeBreadcrumbButton()
+
+                    LaunchedEffect(key1 = tab.highlightedPathSegment, key2 = tab.currentPathSegments.size) {
+                        val index = tab.currentPathSegments.indexOfFirst {
+                            tab.breadcrumbSegmentKey(it) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment)
+                        }
+                        val targetIndex = max(index, 0)
+                        withFrameNanos { }
+                        val listState = tab.currentPathSegmentsListState
+                        val layoutInfo = listState.layoutInfo
+                        val visibleItem = layoutInfo.visibleItemsInfo.find { it.index == targetIndex }
+                        if (visibleItem == null) {
+                            listState.animateScrollToItem(targetIndex)
+                            withFrameNanos { }
+                            val updatedLayout = listState.layoutInfo
+                            val newlyVisible = updatedLayout.visibleItemsInfo.find { it.index == targetIndex }
+                            if (newlyVisible != null) {
+                                val endBound = updatedLayout.viewportEndOffset - updatedLayout.afterContentPadding
+                                val itemEnd = newlyVisible.offset + newlyVisible.size
+                                if (itemEnd > endBound) {
+                                    listState.animateScrollBy((itemEnd - endBound).toFloat())
                                 }
-                                .then(
-                                    if (isHovered && isValidTarget) {
-                                        Modifier
-                                            .background(
-                                                MaterialTheme.colorScheme.primaryContainer,
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                            .border(
-                                                1.5.dp,
-                                                MaterialTheme.colorScheme.primary,
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                    } else if (isHovered && !isValidTarget) {
-                                        Modifier
-                                            .background(
-                                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                            .border(
-                                                1.5.dp,
-                                                MaterialTheme.colorScheme.error,
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                    } else if (isCopyHereTarget) {
-                                        Modifier
-                                            .background(
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                            .border(
-                                                1.dp,
-                                                MaterialTheme.colorScheme.primary,
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                    } else Modifier
-                                )
-                                .padding(horizontal = 2.dp)
-                        ) {
-                            Text(
-                                modifier = Modifier
-                                    .widthIn(max = 220.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .combinedClickable(
-                                        onClick = {
-                                            tab.scope.launch {
-                                                if (tab.isBreadcrumbSegmentValid(item)) {
-                                                    tab.openFolderImpl(
-                                                        item = item,
-                                                        rememberSelectedFiles = true,
-                                                    )
-                                                } else {
-                                                    tab.pruneInvalidBreadcrumbSegments()
-                                                    tab.reloadFiles()
-                                                }
-                                            }
-                                        },
-                                        onDoubleClick = {
-                                            if (item.canAddNewContent) {
-                                                tab.toggleCopyHereMode(item)
-                                            }
-                                        },
-                                        onLongClick = {
-                                            item.uniquePath.copyToClipboard()
-                                            showMsg(R.string.path_copied_to_clipboard)
-                                        }
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                                    .alpha(
-                                        when {
-                                            isCopyHereTarget || isHighlighted -> 1f
-                                            isHistorySegment -> 0.45f
-                                            else -> 0.8f
-                                        }
-                                    ),
-                                text = item.displayName
-                                    .orIf(stringResource(id = R.string.internal_storage)) {
-                                        item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
-                                    }
-                                    .orIf(stringResource(id = R.string.root)) {
-                                        item.uniquePath == File.separator
-                                    },
-                                fontSize = 14.sp,
-                                lineHeight = 18.sp,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (isHighlighted || isCopyHereTarget) FontWeight.Medium else FontWeight.Normal,
-                                color = when {
-                                    isHighlighted || isCopyHereTarget -> highlightedPathListItemColor
-                                    isHistorySegment -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                }
+                            }
+                        } else {
+                            val startBound = 0
+                            val endBound = layoutInfo.viewportEndOffset - layoutInfo.afterContentPadding
+                            val itemStart = visibleItem.offset
+                            val itemEnd = visibleItem.offset + visibleItem.size
+                            if (itemStart < startBound) {
+                                listState.animateScrollBy((itemStart - startBound).toFloat())
+                            } else if (itemEnd > endBound) {
+                                listState.animateScrollBy((itemEnd - endBound).toFloat())
+                            }
+                        }
+                    }
+
+                    // Consume leftover horizontal scroll and post-fling velocity so the outer HorizontalPager
+                    // does not intercept swipes while keeping full momentum fling on the breadcrumb LazyRow.
+                    val consumeLeftoverScroll = remember {
+                        object : NestedScrollConnection {
+                            override fun onPostScroll(
+                                consumed: Offset,
+                                available: Offset,
+                                source: NestedScrollSource
+                            ): Offset {
+                                return Offset(available.x, 0f)
+                            }
+
+                            override suspend fun onPostFling(
+                                consumed: Velocity,
+                                available: Velocity
+                            ): Velocity {
+                                return Velocity(available.x, 0f)
+                            }
+                        }
+                    }
+
+                    LazyRow(
+                        modifier = Modifier
+                            .weight(1f)
+                            .nestedScroll(consumeLeftoverScroll),
+                        state = tab.currentPathSegmentsListState,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        itemsIndexed(tab.currentPathSegments, key = { _, it -> tab.breadcrumbSegmentKey(it) }) { index, item ->
+                            BreadcrumbSegmentItem(
+                                index = index,
+                                item = item,
+                                highlightedIndex = highlightedIndex,
+                                highlightedPathListItemColor = highlightedPathListItemColor,
+                                multilineWrap = false,
+                                tab = tab
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BreadcrumbSegmentItem(
+    index: Int,
+    item: ContentHolder,
+    highlightedIndex: Int,
+    highlightedPathListItemColor: Color,
+    multilineWrap: Boolean,
+    tab: FilesTab
+) {
+    val isHighlighted = index == highlightedIndex ||
+            (highlightedIndex < 0 && tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.highlightedPathSegment))
+    val isHistorySegment = highlightedIndex >= 0 && index > highlightedIndex
+    val isCurrentFolder = tab.breadcrumbSegmentKey(item) == tab.breadcrumbSegmentKey(tab.activeFolder)
+    val isCopyHereTarget = tab.copyHereTargetFolder?.uniquePath == item.uniquePath
+    val isDropTarget = !isCurrentFolder
+    val isHovered = tab.dragDropSession?.hoveredTargetDirectory == item.uniquePath
+    val isValidTarget = tab.dragDropSession?.isValidDropTarget(item, tab.activeFolder) == true
+
+    DisposableEffect(item.uniquePath) {
+        onDispose {
+            tab.unregisterDropTarget(item.uniquePath)
+        }
+    }
+
+    Row(
+        modifier = Modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.alpha(if (isHistorySegment) 0.42f else 1f)) {
+            BreadcrumbSeparator(
+                index = index,
+                currentItem = item,
+                pathSegments = tab.currentPathSegments,
+                tab = tab
+            )
+        }
+        Box(
+            modifier = Modifier
+                .onGloballyPositioned { coordinates ->
+                    if (isDropTarget) {
+                        tab.registerDropTarget(item, coordinates)
+                    }
+                }
+                .then(
+                    if (isHovered && isValidTarget) {
+                        Modifier
+                            .background(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.5.dp,
+                                MaterialTheme.colorScheme.primary,
+                                RoundedCornerShape(8.dp)
+                            )
+                    } else if (isHovered && !isValidTarget) {
+                        Modifier
+                            .background(
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.5.dp,
+                                MaterialTheme.colorScheme.error,
+                                RoundedCornerShape(8.dp)
+                            )
+                    } else if (isCopyHereTarget) {
+                        Modifier
+                            .background(
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary,
+                                RoundedCornerShape(8.dp)
+                            )
+                    } else Modifier
+                )
+                .padding(horizontal = 2.dp)
+        ) {
+            Text(
+                modifier = Modifier
+                    .then(if (multilineWrap) Modifier.widthIn(max = 220.dp) else Modifier)
+                    .clip(RoundedCornerShape(8.dp))
+                    .combinedClickable(
+                        onClick = {
+                            if (tab.breadcrumbSegmentKey(item) != tab.breadcrumbSegmentKey(tab.activeFolder)) {
+                                tab.highlightedPathSegment = item
+                            }
+                            tab.scope.launch {
+                                if (tab.isBreadcrumbSegmentValid(item)) {
+                                    tab.openFolderImpl(
+                                        item = item,
+                                        rememberSelectedFiles = true,
+                                    )
+                                } else {
+                                    tab.pruneInvalidBreadcrumbSegments()
+                                    tab.reloadFiles()
+                                }
+                            }
+                        },
+                        onDoubleClick = {
+                            if (item.canAddNewContent) {
+                                tab.toggleCopyHereMode(item)
+                            }
+                        },
+                        onLongClick = {
+                            item.uniquePath.copyToClipboard()
+                            showMsg(R.string.path_copied_to_clipboard)
+                        }
+                    )
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .alpha(
+                        when {
+                            isCopyHereTarget || isHighlighted -> 1f
+                            isHistorySegment -> 0.45f
+                            else -> 0.8f
+                        }
+                    ),
+                text = item.displayName
+                    .orIf(stringResource(id = R.string.internal_storage)) {
+                        item.uniquePath == Environment.getExternalStorageDirectory().absolutePath
+                    }
+                    .orIf(stringResource(id = R.string.root)) {
+                        item.uniquePath == File.separator
+                    },
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
+                maxLines = if (multilineWrap) 3 else 1,
+                softWrap = multilineWrap,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (isHighlighted || isCopyHereTarget) FontWeight.Medium else FontWeight.Normal,
+                color = when {
+                    isHighlighted || isCopyHereTarget -> highlightedPathListItemColor
+                    isHistorySegment -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
+            )
         }
     }
 }

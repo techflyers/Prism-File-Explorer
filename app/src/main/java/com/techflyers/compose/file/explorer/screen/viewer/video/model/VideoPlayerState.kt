@@ -15,6 +15,7 @@ data class VideoPlayerState(
     val isReady: Boolean = false,
     val isPlaying: Boolean = false,
     val isLoading: Boolean = true,
+    val playerInstanceId: Int = 0,
     val currentPosition: Long = 0L,
     val duration: Long = 0L,
     val playbackSpeed: Float = 1.0f,
@@ -28,5 +29,12 @@ data class VideoPlayerState(
     val subtitlesEnabled: Boolean = true,
     val availableSubtitles: List<SubtitleItem> = emptyList(),
     val selectedSubtitleUri: Uri? = null,
-    val subtitleTextSizeSp: Float = 20f
+    val subtitleTextSizeSp: Float = 20f,
+    val preferSoftwareDecoder: Boolean = true,
+    val activeDecoderLabel: String = "SW (FFmpeg)",
+    val usePlatformPlayerFallback: Boolean = false,
+    val playbackErrorTitle: String? = null,
+    val playbackErrorDetails: String? = null,
+    val codecDiagnosticLog: String? = null,
+    val trackWarningMessage: String? = null
 )

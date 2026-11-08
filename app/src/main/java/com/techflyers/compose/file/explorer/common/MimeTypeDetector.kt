@@ -87,11 +87,42 @@ object MimeTypeDetector {
         // Audio
         MagicSignature(byteArrayOf(0x49, 0x44, 0x33), "audio/mpeg"), // ID3 tag
         MagicSignature(byteArrayOf(0xFF.toByte(), 0xFB.toByte()), "audio/mpeg"), // MPEG sync
+        MagicSignature(byteArrayOf(0xFF.toByte(), 0xF3.toByte()), "audio/mpeg"), // MPEG-2 Layer 3 sync
+        MagicSignature(byteArrayOf(0xFF.toByte(), 0xF2.toByte()), "audio/mpeg"), // MPEG-2.5 Layer 3 sync
+        MagicSignature(byteArrayOf(0xFF.toByte(), 0xF1.toByte()), "audio/aac"), // AAC ADTS MPEG-4
+        MagicSignature(byteArrayOf(0xFF.toByte(), 0xF9.toByte()), "audio/aac"), // AAC ADTS MPEG-2
+        MagicSignature(byteArrayOf(0x0B, 0x77), "audio/ac3"), // Dolby AC-3
         MagicSignature(byteArrayOf(0x66, 0x4C, 0x61, 0x43), "audio/flac"),
         MagicSignature(byteArrayOf(0x4F, 0x67, 0x67, 0x53), "audio/ogg"),
+        MagicSignature(byteArrayOf(0x52, 0x49, 0x46, 0x46), "audio/wav", offset = 0, extraCheck = { bytes ->
+            bytes.size >= 12 && bytes[8] == 0x57.toByte() && bytes[9] == 0x41.toByte() &&
+                    bytes[10] == 0x56.toByte() && bytes[11] == 0x45.toByte()
+        }),
+        MagicSignature(byteArrayOf(0x46, 0x4F, 0x52, 0x4D), "audio/aiff", offset = 0, extraCheck = { bytes ->
+            bytes.size >= 12 && bytes[8] == 0x41.toByte() && bytes[9] == 0x49.toByte() &&
+                    bytes[10] == 0x46.toByte() && (bytes[11] == 0x46.toByte() || bytes[11] == 0x43.toByte())
+        }),
+        MagicSignature(byteArrayOf(0x23, 0x21, 0x41, 0x4D, 0x52), "audio/amr"), // #!AMR
 
         // Video
         MagicSignature(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()), "video/x-matroska"),
+        MagicSignature(byteArrayOf(0x52, 0x49, 0x46, 0x46), "video/x-msvideo", offset = 0, extraCheck = { bytes ->
+            bytes.size >= 12 && bytes[8] == 0x41.toByte() && bytes[9] == 0x56.toByte() &&
+                    bytes[10] == 0x49.toByte() && bytes[11] == 0x20.toByte()
+        }),
+        MagicSignature(byteArrayOf(0x46, 0x4C, 0x56, 0x01), "video/x-flv"),
+        MagicSignature(
+            byteArrayOf(
+                0x30, 0x26, 0xB2.toByte(), 0x75, 0x8E.toByte(), 0x66, 0xCF.toByte(), 0x11,
+                0xA6.toByte(), 0xD9.toByte(), 0x00, 0xAA.toByte(), 0x00, 0x62, 0xCE.toByte(), 0x6C
+            ),
+            "video/x-ms-wmv"
+        ),
+        MagicSignature(byteArrayOf(0x00, 0x00, 0x01, 0xBA.toByte()), "video/mpeg"),
+        MagicSignature(byteArrayOf(0x00, 0x00, 0x01, 0xB3.toByte()), "video/mpeg"),
+        MagicSignature(byteArrayOf(0x47), "video/mp2t", offset = 0, extraCheck = { bytes ->
+            bytes.size >= 377 && bytes[188] == 0x47.toByte() && bytes[376] == 0x47.toByte()
+        }),
 
         // Executables
         MagicSignature(byteArrayOf(0x7F, 0x45, 0x4C, 0x46), "application/x-elf"),
@@ -130,14 +161,31 @@ object MimeTypeDetector {
                 }
             }
 
-            // Check for ftyp box (MP4/MOV/3GP)
+            // Check for ISO BMFF / QuickTime box (MP4/MOV/M4A/3GP)
             if (headerBytes.size >= 12) {
-                val ftypOffset = 4
-                if (headerBytes.size > ftypOffset + 4) {
-                    val ftypStr = String(headerBytes, ftypOffset, 4, Charsets.US_ASCII)
-                    if (ftypStr == "ftyp") {
+                val boxType = String(headerBytes, 4, 4, Charsets.US_ASCII)
+                if (boxType == "ftyp") {
+                    val majorBrand = String(headerBytes, 8, 4, Charsets.US_ASCII)
+                    val detectedMime = when {
+                        majorBrand == "qt  " || majorBrand.startsWith("qt") -> "video/quicktime"
+                        majorBrand == "M4A " || majorBrand == "M4B " || majorBrand == "M4P " -> "audio/mp4"
+                        majorBrand.startsWith("3gp") || majorBrand.startsWith("3g2") -> "video/3gpp"
+                        else -> "video/mp4"
+                    }
+                    return DetectedMimeType(
+                        mimeType = detectedMime,
+                        isText = false,
+                        confidence = 0.92f
+                    )
+                } else if (boxType in setOf("moov", "wide", "mdat", "free", "skip", "pnot")) {
+                    // Legacy QuickTime .mov containers without an ftyp box
+                    val boxSize = ((headerBytes[0].toInt() and 0xFF) shl 24) or
+                            ((headerBytes[1].toInt() and 0xFF) shl 16) or
+                            ((headerBytes[2].toInt() and 0xFF) shl 8) or
+                            (headerBytes[3].toInt() and 0xFF)
+                    if (boxSize >= 8 || boxSize == 1) {
                         return DetectedMimeType(
-                            mimeType = "video/mp4",
+                            mimeType = "video/quicktime",
                             isText = false,
                             confidence = 0.9f
                         )

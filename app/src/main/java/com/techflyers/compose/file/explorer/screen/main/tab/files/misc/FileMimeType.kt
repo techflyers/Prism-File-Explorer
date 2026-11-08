@@ -138,8 +138,9 @@ object FileMimeType {
 
     @JvmField
     val videoFileType = setOf(
-        "mp4", "mov", "avi", "mkv", "wmv", "m4v", "3gp",
-        "webm", "flv", "mpeg", "mpg", "ogv", "mxf", "vob", "ts"
+        "mp4", "mov", "qt", "avi", "mkv", "wmv", "m4v", "3gp", "3g2", "3gpp",
+        "webm", "flv", "f4v", "mpeg", "mpg", "m2v", "m2ts", "mts", "ts",
+        "ogv", "mxf", "vob", "asf", "divx", "rm", "rmvb", "mp2v", "mpv"
     )
 
     @JvmField
@@ -162,8 +163,9 @@ object FileMimeType {
 
     @JvmField
     val audioFileType = setOf(
-        "mp3", "4mp", "aup", "ogg", "3ga", "m4b", "wav", "acc",
-        "m4a", "flac", "aac", "wma", "aiff", "amr", "midi", "mid", "opus"
+        "mp3", "4mp", "aup", "ogg", "oga", "opus", "spx", "3ga", "m4b", "wav", "wave", "acc",
+        "m4a", "flac", "aac", "wma", "aiff", "aif", "aifc", "amr", "awb", "midi", "mid",
+        "ac3", "eac3", "dts", "alac", "ape", "wv", "mka", "mp2", "mpa"
     )
 
     @JvmField

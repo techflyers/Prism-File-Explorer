@@ -168,9 +168,13 @@ class LocalFileHolder(
         private val contentCountCache = android.util.LruCache<String, ContentCount>(1000)
         private val videoDurationCache = android.util.LruCache<String, String>(500)
         private val apkLabelCache = android.util.LruCache<String, Pair<String, String>>(500)
+        // Throttle heavy native/IO metadata inspectors (PdfRenderer, ZipFile, MediaMetadataRetriever, PackageManager)
+        // so opening a Category with hundreds of documents/videos never saturates Dispatchers.IO or locks libpdfium.
+        private val heavyMetadataSemaphore = kotlinx.coroutines.sync.Semaphore(2)
 
-        fun getCachedDetails(file: File, lastModified: Long): String? {
-            val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}"
+        fun getCachedDetails(file: File, lastModified: Long, sizeBytes: Long = -1L): String? {
+            val resolvedSize = if (sizeBytes >= 0L) sizeBytes else file.length()
+            val cacheKey = "${file.absolutePath}:$lastModified:$resolvedSize:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}:${globalClass.preferencesManager.showVideoDuration}"
             return detailsCache.get(cacheKey)
         }
     }
@@ -178,7 +182,8 @@ class LocalFileHolder(
     override suspend fun getDetails(): String {
         if (details.isNotEmpty()) return details
 
-        val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}:${globalClass.preferencesManager.showVideoDuration}"
+        val resolvedSize = size
+        val cacheKey = "${file.absolutePath}:$lastModified:$resolvedSize:${globalClass.preferencesManager.dateTimeFormat}:${globalClass.preferencesManager.use12HourFormat}:${globalClass.preferencesManager.deepEmptyFolderCheck}:${globalClass.preferencesManager.showVideoDuration}"
         val cached = detailsCache.get(cacheKey)
         if (cached != null) {
             details = cached
@@ -189,8 +194,8 @@ class LocalFileHolder(
         val rightSide = lastModified.toFormattedDate()
 
         val prefs = globalClass.preferencesManager
-        val leftSide = if (file.isDirectory) {
-            if (prefs.showFolderContentCount && file.canRead()) {
+        val leftSide = if (isFolder) {
+            if (prefs.showFolderContentCount && canRead) {
                 val count = getContentCount()
                 buildString {
                     if (prefs.deepEmptyFolderCheck && count.folders in 1..20 && count.files == 0 &&
@@ -210,32 +215,34 @@ class LocalFileHolder(
                 }
             } else ""
         } else {
-            val sizeStr = file.length().toFormattedSize()
-            val ext = file.extension.lowercase()
+            val sizeStr = resolvedSize.toFormattedSize()
+            val ext = extension
             // Only show extension in metadata when hide-extensions is ON
-            val extLabel = if (prefs.hideFileExtensions && file.extension.isNotEmpty())
-                file.extension.uppercase() else null
+            val extLabel = if (prefs.hideFileExtensions && ext.isNotEmpty())
+                ext.uppercase() else null
 
             when {
-                // PDF / office: show page count
+                // PDF / office: show page count (throttled via heavyMetadataSemaphore)
                 ext == "pdf" || ext in FileMimeType.officeFileType -> {
-                    val pages = com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DocumentPageCount.get(file)
+                    val pages = heavyMetadataSemaphore. acquireAndRun {
+                        com.techflyers.compose.file.explorer.screen.main.tab.files.misc.DocumentPageCount.get(file, lastModified, resolvedSize)
+                    }
                     val pagePart = if (pages != null && pages.value > 0) "$sizeStr • ${pages.value} ${pages.unit}" else sizeStr
                     if (pages == null && extLabel != null) "$sizeStr • $extLabel" else pagePart
                 }
                 (isApk() || isApkBundle()) -> {
-                    val label = apkSubtitle()
+                    val label = heavyMetadataSemaphore.acquireAndRun { apkSubtitle() }
                     if (label != null) "$label • $sizeStr" else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
                 }
                 // Video: show duration
                 ext in FileMimeType.videoFileType && globalClass.preferencesManager.showVideoDuration -> {
-                    val duration = getVideoDuration()
+                    val duration = heavyMetadataSemaphore.acquireAndRun { getVideoDuration() }
                     if (duration.isNotEmpty()) "$sizeStr • $duration"
                     else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
                 }
                 // Archives: show compression ratio
                 ext in archiveExtensions -> {
-                    val ratio = getArchiveCompressionRatio()
+                    val ratio = heavyMetadataSemaphore.acquireAndRun { getArchiveCompressionRatio() }
                     if (ratio != null) "$sizeStr • $ratio"
                     else if (extLabel != null) "$sizeStr • $extLabel" else sizeStr
                 }
@@ -247,6 +254,15 @@ class LocalFileHolder(
         return (if (leftSide.isNotEmpty()) "$leftSide\t $rightSide" else "\t$rightSide").also {
             details = it
             detailsCache.put(cacheKey, it)
+        }
+    }
+
+    private suspend inline fun <T> kotlinx.coroutines.sync.Semaphore.acquireAndRun(block: () -> T): T {
+        acquire()
+        return try {
+            block()
+        } finally {
+            release()
         }
     }
 
@@ -738,9 +754,20 @@ class LocalFileHolder(
 
     fun openFileWithPackage(context: Context, packageName: String, className: String) {
         val uri = createUri()
+        val effectiveMime = if (mimeType == anyFileType || mimeType == "application/octet-stream" || mimeType.isBlank()) {
+            when {
+                FileMimeType.videoFileType.contains(extension) ->
+                    com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance.resolveVideoMimeTypeHint(uri) ?: "video/*"
+                FileMimeType.audioFileType.contains(extension) -> "audio/*"
+                FileMimeType.imageFileType.contains(extension) -> "image/*"
+                else -> mimeType
+            }
+        } else {
+            mimeType
+        }
 
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mimeType)
+            setDataAndType(uri, effectiveMime)
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK
                         or Intent.FLAG_ACTIVITY_NEW_DOCUMENT
@@ -754,8 +781,12 @@ class LocalFileHolder(
             putExtra("extra_file_path", file.absolutePath)
         }
 
-        if (intent.resolveActivity(globalClass.packageManager) != null) {
-            context.startActivity(intent)
+        if (packageName == context.packageName || intent.resolveActivity(globalClass.packageManager) != null) {
+            try {
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                globalClass.showMsg("No app found to open this file.")
+            }
         } else {
             globalClass.showMsg("No app found to open this file.")
         }
@@ -838,7 +869,10 @@ class LocalFileHolder(
             return true
         }
 
-        if (FileMimeType.supportedArchiveFileType.contains(extension) || isTarCompressed()) {
+        if (FileMimeType.supportedArchiveFileType.contains(extension) ||
+            isTarCompressed() ||
+            com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isSupportedArchiveFile(file)
+        ) {
             if (isApk() && skipSupportedExtensions) return false
             if (isApkBundle()) {
                 // Skip opening as zip
@@ -850,9 +884,12 @@ class LocalFileHolder(
 
         if (skipSupportedExtensions) return false
 
-        val magika = MagikaFileTypeDetector.detect(file)
-        val skipMagikaOverride = extension.isNotEmpty() &&
-            globalClass.preferencesManager.disableMagikaExtOverride
+        // Do not let Magika ONNX override known video/audio files (e.g. .mov files with trailing XMP/plist metadata)
+        val isKnownMediaExtension = FileMimeType.videoFileType.contains(extension) ||
+            FileMimeType.audioFileType.contains(extension)
+        val magika = if (isKnownMediaExtension) null else MagikaFileTypeDetector.detect(file)
+        val skipMagikaOverride = isKnownMediaExtension || (extension.isNotEmpty() &&
+            globalClass.preferencesManager.disableMagikaExtOverride)
         if (!skipMagikaOverride && magika != null && magika.probability >= 0.55f) {
             val detectedExt = magika.suggestedExtension.lowercase()
             val extensionMissingOrWrong = extension.isEmpty() ||
@@ -1009,11 +1046,11 @@ class LocalFileHolder(
                 openFileWithPackage(context, context.packageName, ImageViewerActivity::class.java.name)
                 return true
             }
-            mime.startsWith("video/") || label in setOf("mp4", "mkv", "webm", "flv", "3gp") -> {
+            mime.startsWith("video/") || label in setOf("mp4", "qt", "mov", "mkv", "webm", "flv", "3gp", "avi", "wmv", "asf", "mpeg", "mpg", "vob", "ts", "m2ts", "ogv") -> {
                 openFileWithPackage(context, context.packageName, VideoPlayerActivity::class.java.name)
                 return true
             }
-            mime.startsWith("audio/") || label in setOf("mp3", "wav", "ogg", "flac", "midi") -> {
+            mime.startsWith("audio/") || label in setOf("mp3", "m4a", "m4b", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "amr", "ac3", "midi") -> {
                 openFileWithPackage(context, context.packageName, AudioPlayerActivity::class.java.name)
                 return true
             }
@@ -1055,7 +1092,10 @@ class LocalFileHolder(
             "jpg" to "jpeg", "jpeg" to "jpg",
             "htm" to "html", "html" to "htm",
             "yml" to "yaml", "yaml" to "yml",
-            "py" to "python"
+            "py" to "python",
+            "mov" to "mp4", "mp4" to "mov",
+            "qt" to "mov", "mov" to "qt",
+            "m4v" to "mp4", "mp4" to "m4v"
         )
         return aliases[actual] == detected
     }
@@ -1092,7 +1132,8 @@ class LocalFileHolder(
                 FileMimeType.htmlFileType.contains(extension) ||
                 extension == "pdf" || extension == "apk" ||
                 extension == "md" || extension == "markdown" ||
-                isTarCompressed()
+                isTarCompressed() ||
+                com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isSplitArchivePart(file.name)
     }
 
     internal fun createUri() = FileProvider.getUriForFile(

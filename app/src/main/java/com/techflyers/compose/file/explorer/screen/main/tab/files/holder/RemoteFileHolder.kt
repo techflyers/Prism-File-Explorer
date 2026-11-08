@@ -83,8 +83,8 @@ class RemoteFileHolder(
         return (if (leftSide.isNotEmpty()) "$leftSide\t $rightSide" else "\t$rightSide").also { details = it }
     }
 
-    override suspend fun listContent(): ArrayList<out ContentHolder> {
-        return try {
+    override suspend fun listContent(): ArrayList<out ContentHolder> = withContext(Dispatchers.IO) {
+        try {
             val listed = client.listDirectory(remotePath)
             var files = 0
             var folders = 0
@@ -131,7 +131,7 @@ class RemoteFileHolder(
         lastCreationError = null
         val path = RemotePaths.join(remotePath, name)
         try {
-            client.createFile(path)
+            withContext(Dispatchers.IO) { client.createFile(path) }
             onCreated(
                 RemoteFileHolder(
                     connection = connection,
@@ -150,7 +150,7 @@ class RemoteFileHolder(
         lastCreationError = null
         val path = RemotePaths.join(remotePath, name)
         try {
-            client.createDirectory(path)
+            withContext(Dispatchers.IO) { client.createDirectory(path) }
             onCreated(
                 RemoteFileHolder(
                     connection = connection,

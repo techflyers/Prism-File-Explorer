@@ -2,20 +2,35 @@ package com.techflyers.compose.file.explorer.screen.viewer.video
 
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp4.Mp4Extractor
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.name
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
+import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
 import com.techflyers.compose.file.explorer.screen.viewer.media.MediaNotificationHelper
+import com.techflyers.compose.file.explorer.screen.viewer.media.SoftwareMediaRenderersFactory
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.SubtitleItem
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.VideoPlayerState
 import kotlinx.coroutines.CoroutineScope
@@ -28,9 +43,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
-import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
 import java.io.File
 
 class VideoPlayerInstance(
@@ -42,8 +54,11 @@ class VideoPlayerInstance(
     private val _playerState = MutableStateFlow(VideoPlayerState())
     val playerState: StateFlow<VideoPlayerState> = _playerState.asStateFlow()
     private var exoPlayer: ExoPlayer? = null
+    private var appContext: Context? = null
     private var positionTrackingJob: Job? = null
     private var mediaNotificationHelper: MediaNotificationHelper? = null
+    private var audioFallbackRetriedForIndex: Int = -1
+    private var softwareFallbackRetriedForIndex: Int = -1
 
     // Per-video URI custom or overridden subtitle selection
     private val customSubtitlesByVideoUri = mutableMapOf<Uri, MutableList<SubtitleItem>>()
@@ -59,6 +74,80 @@ class VideoPlayerInstance(
                 "ass", "ssa" -> MimeTypes.TEXT_SSA
                 "ttml", "dfxp", "xml" -> MimeTypes.APPLICATION_TTML
                 else -> MimeTypes.APPLICATION_SUBRIP
+            }
+        }
+
+        fun resolveVideoMimeTypeHint(uri: Uri): String? {
+            val pathOrName = (uri.path ?: uri.lastPathSegment ?: "").lowercase()
+            return when (pathOrName.substringAfterLast('.', "")) {
+                "mov", "qt" -> "video/quicktime"
+                "mp4", "m4v" -> MimeTypes.VIDEO_MP4
+                "mkv" -> MimeTypes.VIDEO_MATROSKA
+                "webm" -> MimeTypes.VIDEO_WEBM
+                "3gp", "3gpp" -> MimeTypes.VIDEO_H263
+                "avi", "divx" -> MimeTypes.VIDEO_AVI
+                "flv", "f4v" -> MimeTypes.VIDEO_FLV
+                "mpeg", "mpg", "m2v", "vob", "mp2v", "mpv" -> MimeTypes.VIDEO_MPEG
+                "ts", "m2ts", "mts" -> MimeTypes.VIDEO_MP2T
+                "ogv" -> MimeTypes.VIDEO_OGG
+                else -> null
+            }
+        }
+
+        fun describeCodecName(mimeType: String?, codecs: String?): String {
+            val c = codecs?.lowercase().orEmpty()
+            val m = mimeType?.lowercase().orEmpty()
+            return when {
+                c.startsWith("apch") || c.startsWith("apcn") || c.startsWith("apcs") ||
+                    c.startsWith("apco") || c.startsWith("ap4h") || c.startsWith("ap4x") ||
+                    m.contains("prores") || m.contains("apcn") -> "Apple ProRes ($codecs)"
+                c.startsWith("hvc1") || c.startsWith("hev1") || m == MimeTypes.VIDEO_H265 ->
+                    if (!codecs.isNullOrBlank()) "HEVC / H.265 ($codecs)" else "HEVC / H.265"
+                c.startsWith("avc1") || c.startsWith("avc3") || m == MimeTypes.VIDEO_H264 ->
+                    if (!codecs.isNullOrBlank()) "AVC / H.264 ($codecs)" else "AVC / H.264"
+                c.startsWith("av01") || m == MimeTypes.VIDEO_AV1 ->
+                    if (!codecs.isNullOrBlank()) "AV1 ($codecs)" else "AV1"
+                c.startsWith("vp09") || c.startsWith("vp9") || m == MimeTypes.VIDEO_VP9 -> "VP9"
+                c.startsWith("vp08") || c.startsWith("vp8") || m == MimeTypes.VIDEO_VP8 -> "VP8"
+                m == MimeTypes.VIDEO_MP4V -> "MPEG-4 Part 2"
+                m == MimeTypes.VIDEO_MPEG2 -> "MPEG-2 Video"
+                m == MimeTypes.VIDEO_MPEG -> "MPEG-1/2 Video"
+                m == MimeTypes.VIDEO_MJPEG || c == "jpeg" || c == "mjpa" || c == "mjpb" -> "Motion JPEG (MJPEG)"
+                m == MimeTypes.VIDEO_DIVX -> "DivX"
+                m == MimeTypes.VIDEO_VC1 || m.contains("wmv") -> "VC-1 / WMV"
+                m == MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
+                m == MimeTypes.AUDIO_E_AC3 || m == MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital Plus (E-AC-3)"
+                m == MimeTypes.AUDIO_DTS || m == MimeTypes.AUDIO_DTS_HD -> "DTS Audio"
+                m == MimeTypes.AUDIO_TRUEHD -> "Dolby TrueHD"
+                m == MimeTypes.AUDIO_ALAC || c == "alac" -> "Apple Lossless (ALAC)"
+                m == MimeTypes.AUDIO_RAW || c in setOf("twos", "sowt", "in24", "in32", "fl32", "fl64", "lpcm") ->
+                    if (!codecs.isNullOrBlank()) "Linear PCM ($codecs)" else "Raw PCM Audio"
+                !mimeType.isNullOrBlank() && !codecs.isNullOrBlank() -> "$mimeType ($codecs)"
+                !mimeType.isNullOrBlank() -> mimeType
+                !codecs.isNullOrBlank() -> codecs
+                else -> "Unknown Codec"
+            }
+        }
+
+        fun formatTrackFormatDiagnostic(format: Format, isSupported: Boolean): String {
+            return buildString {
+                append(describeCodecName(format.sampleMimeType ?: format.containerMimeType, format.codecs))
+                if (format.width != Format.NO_VALUE && format.height != Format.NO_VALUE) {
+                    append(" • ${format.width}×${format.height}")
+                }
+                if (format.frameRate != Format.NO_VALUE.toFloat() && format.frameRate > 0f) {
+                    append(" @ ${String.format("%.2f", format.frameRate)}fps")
+                }
+                if (format.channelCount != Format.NO_VALUE && format.channelCount > 0) {
+                    append(" • ${format.channelCount}ch")
+                }
+                if (format.sampleRate != Format.NO_VALUE && format.sampleRate > 0) {
+                    append(" ${format.sampleRate}Hz")
+                }
+                if (format.bitrate != Format.NO_VALUE && format.bitrate > 0) {
+                    append(" • ${format.bitrate / 1000} kbps")
+                }
+                append(if (isSupported) " [Supported]" else " [Unsupported by active decoder]")
             }
         }
     }
@@ -151,22 +240,59 @@ class VideoPlayerInstance(
         }
     }
 
-    suspend fun initializePlayer(context: Context, uri: Uri) {
+    @OptIn(UnstableApi::class)
+    suspend fun initializePlayer(
+        context: Context,
+        uri: Uri,
+        preservePlaybackPositionMs: Long? = null,
+        preservePlaylistIndex: Int? = null
+    ) {
+        appContext = context.applicationContext
+        val preferSw = _playerState.value.preferSoftwareDecoder
         _playerState.update {
             it.copy(
                 isLoading = true,
                 isReady = false,
+                usePlatformPlayerFallback = false,
+                activeDecoderLabel = if (preferSw) "SW (FFmpeg)" else "HW (MediaCodec)",
+                playbackErrorTitle = null,
+                playbackErrorDetails = null,
+                codecDiagnosticLog = null,
+                trackWarningMessage = null,
                 playlist = playlist
             )
         }
 
         withContext(Dispatchers.Main) {
+            exoPlayer?.release()
+            exoPlayer = null
+
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build()
 
-            exoPlayer = ExoPlayer.Builder(context)
+            val renderersFactory = SoftwareMediaRenderersFactory.create(
+                context = context,
+                preferSoftwareDecoding = preferSw
+            )
+
+            val extractorsFactory = com.techflyers.compose.file.explorer.screen.viewer.media.PrismExtractorsFactory()
+
+            val trackSelector = DefaultTrackSelector(context).apply {
+                setParameters(
+                    buildUponParameters()
+                        .setExceedRendererCapabilitiesIfNecessary(true)
+                        .setExceedVideoConstraintsIfNecessary(true)
+                        .setExceedAudioConstraintsIfNecessary(true)
+                )
+            }
+
+            val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setTrackSelector(trackSelector)
                 .setAudioAttributes(audioAttributes, true)
                 .build().apply {
                 val uris = playlist.ifEmpty { listOf(uri) }
@@ -175,16 +301,18 @@ class VideoPlayerInstance(
                 }
                 setMediaItems(mediaItems)
                 repeatMode = _playerState.value.repeatMode
+                setPlaybackSpeed(_playerState.value.playbackSpeed)
 
-                val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
+                val startIndex = preservePlaylistIndex
+                    ?: uris.indexOfFirst { it == uri }.coerceAtLeast(0)
                 val initialUri = uris.getOrNull(startIndex) ?: uri
                 val (initialSubs, initialSelectedSub) = discoverSubtitlesForVideo(context, initialUri)
 
-                seekTo(startIndex, 0)
+                seekTo(startIndex, preservePlaybackPositionMs ?: 0L)
                 prepare()
                 playWhenReady = true
 
-                volume = 1.0f
+                volume = if (_playerState.value.isMuted) 0f else 1.0f
 
                 val initialTitle = if (initialUri.scheme == "file") {
                     initialUri.path?.let { File(it).name } ?: initialUri.name
@@ -194,18 +322,36 @@ class VideoPlayerInstance(
 
                 _playerState.update { currentState ->
                     currentState.copy(
+                        playerInstanceId = currentState.playerInstanceId + 1,
                         title = initialTitle,
                         currentPlaylistIndex = startIndex,
-                        isMuted = false,
                         availableSubtitles = initialSubs,
                         selectedSubtitleUri = initialSelectedSub?.uri,
                         subtitlesEnabled = true
                     )
                 }
 
-                if (initialSelectedSub != null && initialSelectedSub.isAutoMatched) {
+                if (preservePlaybackPositionMs == null && initialSelectedSub != null && initialSelectedSub.isAutoMatched) {
                     globalClass.showMsg("Auto-loaded subtitle: ${initialSelectedSub.name}")
                 }
+
+                addAnalyticsListener(object : AnalyticsListener {
+                    override fun onVideoDecoderInitialized(
+                        eventTime: AnalyticsListener.EventTime,
+                        decoderName: String,
+                        initializedTimestampMs: Long,
+                        initializationDurationMs: Long
+                    ) {
+                        val lower = decoderName.lowercase()
+                        val isSw = lower.contains("ffmpeg") ||
+                            lower.contains("dav1d") ||
+                            lower.startsWith("c2.android.") ||
+                            lower.startsWith("omx.google.") ||
+                            lower.contains(".sw.")
+                        val friendly = if (isSw) "SW ($decoderName)" else "HW ($decoderName)"
+                        _playerState.update { it.copy(activeDecoderLabel = friendly) }
+                    }
+                })
 
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -225,15 +371,29 @@ class VideoPlayerInstance(
                                 currentState.copy(
                                     duration = duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L,
                                     isLoading = false,
-                                    isReady = true
+                                    isReady = currentState.playbackErrorTitle == null
                                 )
                             }
+                        } else if (playbackState == Player.STATE_IDLE) {
+                            _playerState.update { currentState ->
+                                currentState.copy(isLoading = false)
+                            }
                         }
+                    }
+
+                    override fun onTracksChanged(tracks: Tracks) {
+                        inspectTracksSupport(tracks)
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        handlePlaybackException(error)
                     }
 
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         val player = exoPlayer ?: return
                         val currentIndex = player.currentMediaItemIndex
+                        audioFallbackRetriedForIndex = -1
+                        softwareFallbackRetriedForIndex = -1
                         val currentUri = mediaItem?.localConfiguration?.uri ?: uris.getOrNull(currentIndex) ?: uri
                         val trackTitle = if (currentUri.scheme == "file") {
                             currentUri.path?.let { File(it).name } ?: currentUri.name
@@ -248,7 +408,12 @@ class VideoPlayerInstance(
                                 currentPosition = 0L,
                                 duration = player.duration.takeIf { d -> d isNot TIME_UNSET } ?: 0L,
                                 availableSubtitles = subs,
-                                selectedSubtitleUri = selectedSub?.uri
+                                selectedSubtitleUri = selectedSub?.uri,
+                                usePlatformPlayerFallback = false,
+                                playbackErrorTitle = null,
+                                playbackErrorDetails = null,
+                                codecDiagnosticLog = null,
+                                trackWarningMessage = null
                             )
                         }
                         updateNotification()
@@ -260,25 +425,306 @@ class VideoPlayerInstance(
             }
         }
 
-        mediaNotificationHelper = MediaNotificationHelper(
-            context = context,
-            sessionTag = "PrismVideo",
-            notificationId = 1002,
-            targetActivityClass = VideoPlayerActivity::class.java,
-            initialUri = uri,
-            instanceId = id,
-            onPlayPause = { playPause() },
-            onNext = { playNext() },
-            onPrevious = { playPrevious() },
-            onSeekTo = { pos -> seekTo(pos) },
-            onStop = {
-                exoPlayer?.stop()
-                _playerState.update { it.copy(isPlaying = false) }
-            }
-        )
+        if (mediaNotificationHelper == null) {
+            mediaNotificationHelper = MediaNotificationHelper(
+                context = context,
+                sessionTag = "PrismVideo",
+                notificationId = 1002,
+                targetActivityClass = VideoPlayerActivity::class.java,
+                initialUri = uri,
+                instanceId = id,
+                onPlayPause = { playPause() },
+                onNext = { playNext() },
+                onPrevious = { playPrevious() },
+                onSeekTo = { pos -> seekTo(pos) },
+                onStop = {
+                    exoPlayer?.stop()
+                    _playerState.update { it.copy(isPlaying = false) }
+                }
+            )
+        }
 
         startPositionTracking()
         updateNotification()
+    }
+
+    /**
+     * Toggles between Software-first (FFmpeg + c2.android.*) and Hardware-first decoding
+     * while preserving the current playlist index and playback timestamp.
+     */
+    fun toggleDecoderMode(context: Context) {
+        val currentPos = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        val currentIdx = exoPlayer?.currentMediaItemIndex ?: _playerState.value.currentPlaylistIndex
+        val nextPreferSw = !_playerState.value.preferSoftwareDecoder
+        _playerState.update {
+            it.copy(
+                preferSoftwareDecoder = nextPreferSw,
+                activeDecoderLabel = if (nextPreferSw) "SW (FFmpeg)" else "HW (MediaCodec)"
+            )
+        }
+        val modeLabel = if (nextPreferSw) "Software Decoder (FFmpeg)" else "Hardware Decoder"
+        globalClass.showMsg("Switched to $modeLabel")
+        CoroutineScope(Dispatchers.Main).launch {
+            initializePlayer(
+                context = context,
+                uri = uri,
+                preservePlaybackPositionMs = currentPos,
+                preservePlaylistIndex = currentIdx
+            )
+        }
+    }
+
+    private fun inspectTracksSupport(tracks: Tracks) {
+        val groups = tracks.groups
+        if (groups.isEmpty()) return
+
+        val videoGroups = groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        val audioGroups = groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+
+        val hasSupportedVideo = videoGroups.isEmpty() || videoGroups.any { it.isSupported }
+        val hasSupportedAudio = audioGroups.isEmpty() || audioGroups.any { it.isSupported }
+
+        val diagnosticReport = buildTrackDiagnostics(tracks)
+
+        if (videoGroups.isNotEmpty() && !hasSupportedVideo) {
+            // If we were in Hardware mode, automatically retry in Software (FFmpeg) mode first!
+            val currentIdx = exoPlayer?.currentMediaItemIndex ?: 0
+            val ctx = appContext
+            if (!_playerState.value.preferSoftwareDecoder && ctx != null && softwareFallbackRetriedForIndex != currentIdx) {
+                softwareFallbackRetriedForIndex = currentIdx
+                _playerState.update { it.copy(preferSoftwareDecoder = true, activeDecoderLabel = "SW (FFmpeg)") }
+                CoroutineScope(Dispatchers.Main).launch {
+                    initializePlayer(
+                        context = ctx,
+                        uri = uri,
+                        preservePlaybackPositionMs = 0L,
+                        preservePlaylistIndex = currentIdx
+                    )
+                }
+                return
+            }
+
+            val firstFormat = videoGroups.first().getTrackFormat(0)
+            val codecLabel = describeCodecName(firstFormat.sampleMimeType, firstFormat.codecs)
+            val dims = if (firstFormat.width != Format.NO_VALUE && firstFormat.height != Format.NO_VALUE) {
+                " (${firstFormat.width}×${firstFormat.height})"
+            } else ""
+            _playerState.update { state ->
+                state.copy(
+                    isLoading = false,
+                    isReady = false,
+                    playbackErrorTitle = "Unsupported Video Codec",
+                    playbackErrorDetails = "This video track uses $codecLabel$dims, which could not be decoded by the bundled FFmpeg software decoder or device MediaCodec.",
+                    codecDiagnosticLog = diagnosticReport
+                )
+            }
+            return
+        }
+
+        if (audioGroups.isNotEmpty() && !hasSupportedAudio) {
+            val firstAudio = audioGroups.first().getTrackFormat(0)
+            val audioCodec = describeCodecName(firstAudio.sampleMimeType, firstAudio.codecs)
+            if (videoGroups.isEmpty()) {
+                _playerState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        isReady = false,
+                        playbackErrorTitle = "Unsupported Audio Codec",
+                        playbackErrorDetails = "This media file uses $audioCodec, which is not supported by the audio decoders.",
+                        codecDiagnosticLog = diagnosticReport
+                    )
+                }
+            } else {
+                _playerState.update { state ->
+                    state.copy(
+                        trackWarningMessage = "Audio track ($audioCodec) is not supported; playing video without sound.",
+                        codecDiagnosticLog = diagnosticReport
+                    )
+                }
+            }
+        }
+    }
+
+    private fun handlePlaybackException(error: PlaybackException) {
+        val player = exoPlayer
+        val currentIdx = player?.currentMediaItemIndex ?: 0
+        val currentPos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        val ctx = appContext
+
+        // If Hardware decoder failed, automatically fallback to Software (FFmpeg) decoder!
+        val isDecoderFailure = error.errorCode in setOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+        )
+        if (isDecoderFailure && !_playerState.value.preferSoftwareDecoder && ctx != null && softwareFallbackRetriedForIndex != currentIdx) {
+            softwareFallbackRetriedForIndex = currentIdx
+            _playerState.update {
+                it.copy(
+                    preferSoftwareDecoder = true,
+                    activeDecoderLabel = "SW (FFmpeg)",
+                    trackWarningMessage = "Hardware decoder failed; switched to FFmpeg software decoder."
+                )
+            }
+            CoroutineScope(Dispatchers.Main).launch {
+                initializePlayer(
+                    context = ctx,
+                    uri = uri,
+                    preservePlaybackPositionMs = currentPos,
+                    preservePlaylistIndex = currentIdx
+                )
+            }
+            return
+        }
+
+        // If the failure is solely in the audio renderer/decoder while video tracks exist,
+        // disable the audio track once and retry so the video can still play.
+        val causeMsg = (error.cause?.message ?: error.message ?: "").lowercase()
+        val isAudioError = error.errorCode in setOf(
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+        ) || causeMsg.contains("audio") || causeMsg.contains("mediacodecaudiorenderer") || causeMsg.contains("ffmpegaudiorenderer")
+
+        if (isAudioError && player != null && audioFallbackRetriedForIndex != currentIdx) {
+            val hasVideo = player.currentTracks.groups.any { it.type == C.TRACK_TYPE_VIDEO && it.isSupported }
+            if (hasVideo) {
+                audioFallbackRetriedForIndex = currentIdx
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .build()
+                player.prepare()
+                player.play()
+                _playerState.update { state ->
+                    state.copy(
+                        trackWarningMessage = "Audio track decoder failed (${error.errorCodeName}); playing video without audio."
+                    )
+                }
+                return
+            }
+        }
+
+        val errorTitle = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED -> "Unsupported Media Codec"
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> "Unsupported or Corrupted Container"
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+            PlaybackException.ERROR_CODE_IO_NO_PERMISSION -> "File Access Error"
+            else -> "Media Playback Error"
+        }
+
+        val trackDiagnostics = player?.currentTracks?.let { buildTrackDiagnostics(it) }.orEmpty()
+        val causeChain = buildString {
+            appendLine("Decoder Mode: ${_playerState.value.activeDecoderLabel}")
+            appendLine("Error Code: ${error.errorCodeName} (${error.errorCode})")
+            error.message?.let { appendLine("Message: $it") }
+            var c = error.cause
+            var depth = 1
+            while (c != null && depth <= 5) {
+                appendLine("Cause [$depth]: ${c.javaClass.simpleName}: ${c.message}")
+                c = c.cause
+                depth++
+            }
+            if (trackDiagnostics.isNotBlank()) {
+                appendLine()
+                append(trackDiagnostics)
+            }
+        }.trim()
+
+        val humanDetails = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                "The video or audio stream uses a codec or profile that could not be decoded (${error.cause?.message ?: error.errorCodeName})."
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
+                "The media container format is unsupported or has a non-standard header structure (${error.cause?.message ?: error.errorCodeName})."
+            else ->
+                error.cause?.message ?: error.message ?: "Unable to play this media file (${error.errorCodeName})."
+        }
+
+        _playerState.update { state ->
+            state.copy(
+                isLoading = false,
+                isReady = false,
+                isPlaying = false,
+                playbackErrorTitle = errorTitle,
+                playbackErrorDetails = humanDetails,
+                codecDiagnosticLog = causeChain
+            )
+        }
+    }
+
+    private fun buildTrackDiagnostics(tracks: Tracks): String {
+        val currentUri = _playerState.value.playlist.getOrNull(_playerState.value.currentPlaylistIndex) ?: uri
+        return buildString {
+            appendLine("File: ${_playerState.value.title.ifEmpty { currentUri.lastPathSegment ?: currentUri.toString() }}")
+            appendLine("URI: $currentUri")
+            val groups = tracks.groups
+            if (groups.isEmpty()) {
+                appendLine("Tracks: None detected in container")
+            } else {
+                groups.forEachIndexed { groupIdx, group ->
+                    val typeLabel = when (group.type) {
+                        C.TRACK_TYPE_VIDEO -> "Video"
+                        C.TRACK_TYPE_AUDIO -> "Audio"
+                        C.TRACK_TYPE_TEXT -> "Subtitle"
+                        else -> "Track (${group.type})"
+                    }
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val supported = group.isTrackSupported(i)
+                        appendLine("$typeLabel #$groupIdx.$i: ${formatTrackFormatDiagnostic(format, supported)}")
+                    }
+                }
+            }
+        }.trim()
+    }
+
+    fun switchToPlatformPlayerFallback() {
+        exoPlayer?.stop()
+        _playerState.update { state ->
+            state.copy(
+                usePlatformPlayerFallback = true,
+                playbackErrorTitle = null,
+                playbackErrorDetails = null,
+                isLoading = false,
+                isReady = true
+            )
+        }
+    }
+
+    fun onPlatformPlayerError(what: Int, extra: Int) {
+        val prevLog = _playerState.value.codecDiagnosticLog.orEmpty()
+        val updatedLog = buildString {
+            if (prevLog.isNotBlank()) {
+                appendLine(prevLog)
+                appendLine()
+            }
+            appendLine("Android Platform MediaPlayer Error: what=$what, extra=$extra")
+        }.trim()
+        _playerState.update { state ->
+            state.copy(
+                usePlatformPlayerFallback = false,
+                isLoading = false,
+                isReady = false,
+                isPlaying = false,
+                playbackErrorTitle = "Unsupported Video Codec / Format",
+                playbackErrorDetails = "Both FFmpeg/ExoPlayer and Android's native MediaPlayer failed to decode this file (what=$what, extra=$extra).",
+                codecDiagnosticLog = updatedLog
+            )
+        }
+    }
+
+    fun dismissTrackWarning() {
+        _playerState.update { it.copy(trackWarningMessage = null) }
     }
 
     fun selectSubtitle(context: Context, subtitle: SubtitleItem?) {
@@ -365,11 +811,13 @@ class VideoPlayerInstance(
         positionTrackingJob = CoroutineScope(Dispatchers.Main).launch {
             while (true) {
                 exoPlayer?.let { player ->
-                    _playerState.update { currentState ->
-                        currentState.copy(
-                            currentPosition = player.currentPosition,
-                            duration = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
-                        )
+                    if (!_playerState.value.usePlatformPlayerFallback) {
+                        _playerState.update { currentState ->
+                            currentState.copy(
+                                currentPosition = player.currentPosition,
+                                duration = player.duration.takeIf { it isNot TIME_UNSET } ?: 0L
+                            )
+                        }
                     }
                 }
                 delay(100)
@@ -539,6 +987,7 @@ class VideoPlayerInstance(
     }
 
     override fun onClose() {
+        appContext = null
         positionTrackingJob?.cancel()
         mediaNotificationHelper?.release()
         mediaNotificationHelper = null

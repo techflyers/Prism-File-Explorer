@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Numbers
 import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material3.Icon
@@ -64,7 +65,7 @@ fun StorageDeviceView(
         Icon(
             modifier = Modifier.padding(8.dp),
             imageVector = when (storageDevice.type) {
-                INTERNAL_STORAGE -> Icons.Rounded.FolderOpen
+                INTERNAL_STORAGE -> Icons.Rounded.Smartphone
                 ROOT -> Icons.Rounded.Numbers
                 REMOTE_STORAGE -> Icons.Rounded.Cloud
                 else -> Icons.Rounded.SdStorage

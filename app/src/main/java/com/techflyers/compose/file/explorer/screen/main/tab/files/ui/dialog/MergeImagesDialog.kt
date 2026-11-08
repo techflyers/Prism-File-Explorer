@@ -7,13 +7,17 @@ import android.graphics.Paint
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.DragHandle
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -106,52 +110,50 @@ fun MergeImagesDialog(
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    orderedFiles.forEachIndexed { index, fileHolder ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${index + 1}.",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.width(24.dp)
-                            )
-                            Text(
-                                text = fileHolder.displayName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = {
-                                    if (index > 0) {
-                                        val list = orderedFiles.toMutableList()
-                                        val item = list.removeAt(index)
-                                        list.add(index - 1, item)
-                                        orderedFiles = list
-                                    }
-                                },
-                                enabled = index > 0 && !isProcessing
+                val listState = rememberLazyListState()
+                val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+                    val list = orderedFiles.toMutableList()
+                    val item = list.removeAt(from.index)
+                    list.add(to.index, item)
+                    orderedFiles = list
+                }
+
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                ) {
+                    itemsIndexed(orderedFiles, key = { _, fileHolder -> fileHolder.uniquePath }) { index, fileHolder ->
+                        ReorderableItem(reorderableState, key = fileHolder.uniquePath) { isDragging ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up")
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (index < orderedFiles.size - 1) {
-                                        val list = orderedFiles.toMutableList()
-                                        val item = list.removeAt(index)
-                                        list.add(index + 1, item)
-                                        orderedFiles = list
-                                    }
-                                },
-                                enabled = index < orderedFiles.size - 1 && !isProcessing
-                            ) {
-                                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = "Reorder",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .draggableHandle()
+                                        .padding(end = 6.dp)
+                                        .size(20.dp)
+                                )
+                                Text(
+                                    text = "${index + 1}.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(24.dp)
+                                )
+                                Text(
+                                    text = fileHolder.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }

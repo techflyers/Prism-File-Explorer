@@ -60,13 +60,17 @@ fun BehaviorContainer() {
     val prefs = globalClass.preferencesManager
     val context = LocalContext.current
 
-    val defaultOpeningMethodsList = prefs.getDefaultOpeningMethodsList()
+    val defaultOpeningMethodsList = remember(prefs.defaultOpeningMethods) {
+        prefs.getDefaultOpeningMethodsList()
+    }
     var showDefaultAppsDialog by remember { mutableStateOf(false) }
 
-    DefaultAppsDialog(
-        show = showDefaultAppsDialog,
-        onDismissRequest = { showDefaultAppsDialog = false }
-    )
+    if (showDefaultAppsDialog) {
+        DefaultAppsDialog(
+            show = true,
+            onDismissRequest = { showDefaultAppsDialog = false }
+        )
+    }
 
     Container(
         title = stringResource(R.string.behavior),

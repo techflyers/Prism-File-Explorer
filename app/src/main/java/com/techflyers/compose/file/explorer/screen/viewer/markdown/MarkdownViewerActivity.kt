@@ -34,8 +34,10 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PictureAsPdf
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Smartphone
@@ -141,6 +143,7 @@ private fun MarkdownViewerScreen(
     val density = androidx.compose.ui.platform.LocalDensity.current
     var sourceContent by remember { mutableStateOf("") }
     var showSource by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var isPrintLayout by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -161,13 +164,22 @@ private fun MarkdownViewerScreen(
         scope.launch(Dispatchers.IO) {
             try {
                 val file = File(filePath)
-                if (file.exists()) {
-                    val text = file.readText()
-                    withContext(Dispatchers.Main) { sourceContent = text }
-                } else {
-                    context.contentResolver.openInputStream(instance.uri)?.use { stream ->
-                        val text = stream.bufferedReader().readText()
-                        withContext(Dispatchers.Main) { sourceContent = text }
+                val tempFile = File(context.cacheDir, fileName.ifEmpty { "temp.md" })
+                val targetFile = if (file.exists()) file else if (tempFile.exists()) tempFile else null
+                val newText = when {
+                    targetFile != null && targetFile.exists() -> targetFile.readText()
+                    else -> context.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                        stream.bufferedReader().readText()
+                    }
+                }
+                if (newText != null && newText != sourceContent) {
+                    withContext(Dispatchers.Main) { sourceContent = newText }
+                    if (instance.uri.scheme == "content") {
+                        try {
+                            context.contentResolver.openOutputStream(instance.uri, "wt")?.use { out ->
+                                out.write(newText.toByteArray())
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             } catch (e: Exception) {
@@ -394,6 +406,9 @@ private fun MarkdownViewerScreen(
                     }) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open with")
                     }
+                    IconButton(onClick = { showMetadataSheet = true }) {
+                        Icon(Icons.Rounded.Info, contentDescription = "Extended Metadata")
+                    }
                     IconButton(onClick = {
                         ConvertioService.convertToPdf(context, filePath)
                     }) {
@@ -401,6 +416,14 @@ private fun MarkdownViewerScreen(
                     }
                 }
             )
+            if (showMetadataSheet) {
+                ExtendedMetadataSheet(
+                    uri = instance.uri,
+                    extraFilePath = filePath,
+                    displayNameHint = fileName,
+                    onDismiss = { showMetadataSheet = false }
+                )
+            }
         }
     ) { paddingValues ->
         Column(

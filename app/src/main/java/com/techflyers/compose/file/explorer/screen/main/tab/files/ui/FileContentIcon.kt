@@ -1,8 +1,16 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.util.LruCache
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Archive
@@ -23,10 +31,18 @@ import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.drawable.toBitmap
 import com.techflyers.compose.file.explorer.common.icons.Code
 import com.techflyers.compose.file.explorer.common.icons.Iso
 import com.techflyers.compose.file.explorer.common.icons.Java
@@ -48,7 +64,6 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeT
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.docFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.ebookFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.editableFileType
-import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.epubFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.excelFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.fontFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
@@ -62,12 +77,93 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeT
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.sqlFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.vectorFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.videoFileType
-import android.util.LruCache
-import androidx.compose.runtime.remember
+import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 private val iconCache = LruCache<String, FileContentIcon>(1000)
+private val appFolderIconCache = LruCache<String, ImageBitmap>(300)
+private val missingAppPackages = ConcurrentHashMap.newKeySet<String>()
+
+/**
+ * Detects if [holder] is an app-specific directory inside `Android/data/<pkg>`,
+ * `Android/obb/<pkg>`, `Android/media/<pkg>`, `/data/data/<pkg>`, or `/data/user/<id>/<pkg>`
+ * (whether accessed via standard storage or Shizuku/Root) and returns `<pkg>`.
+ */
+fun extractAndroidAppPackageName(holder: ContentHolder): String? {
+    if (!holder.isFolder) return null
+    val normalized = holder.uniquePath.replace('\\', '/').trimEnd('/')
+    val parentPath = normalized.substringBeforeLast('/', "")
+    val folderName = normalized.substringAfterLast('/')
+    if (!folderName.contains('.') || folderName.startsWith('.')) return null
+
+    val lowerParent = parentPath.lowercase()
+    val isAppPackageParent = lowerParent.endsWith("/android/data") ||
+        lowerParent.endsWith("/android/obb") ||
+        lowerParent.endsWith("/android/media") ||
+        lowerParent == "/data/data" ||
+        lowerParent.matches(Regex("^/data/user/\\d+$")) ||
+        lowerParent.matches(Regex("^/data/user_de/\\d+$"))
+    return if (isAppPackageParent) folderName else null
+}
+
+private fun resolveAppPackageIcon(context: Context, packageName: String): ImageBitmap? {
+    appFolderIconCache.get(packageName)?.let { return it }
+    if (missingAppPackages.contains(packageName)) return null
+
+    val pm = context.packageManager
+
+    // 1. Standard PackageManager lookup (supported via QUERY_ALL_PACKAGES)
+    val drawable = runCatching {
+        pm.getApplicationIcon(packageName)
+    }.getOrElse {
+        runCatching {
+            @Suppress("DEPRECATION")
+            val appInfo = pm.getApplicationInfo(
+                packageName,
+                PackageManager.MATCH_UNINSTALLED_PACKAGES or PackageManager.MATCH_DISABLED_COMPONENTS
+            )
+            pm.getApplicationIcon(appInfo)
+        }.getOrNull()
+    } ?: run {
+        // 2. Fallback via Shizuku `pm path <package>` for multi-user / restricted packages
+        if (ShizukuManager.isPrivileged) {
+            runCatching {
+                val output = ShizukuManager.runCommand("pm path ${ShizukuManager.escapeShellArg(packageName)}")
+                val apkPath = output
+                    ?.lineSequence()
+                    ?.map { it.trim() }
+                    ?.firstOrNull { it.startsWith("package:") }
+                    ?.removePrefix("package:")
+                    ?.trim()
+                if (!apkPath.isNullOrEmpty()) {
+                    @Suppress("DEPRECATION")
+                    val pkgInfo = pm.getPackageArchiveInfo(apkPath, 0)
+                    val appInfo = pkgInfo?.applicationInfo
+                    if (appInfo != null) {
+                        appInfo.sourceDir = apkPath
+                        appInfo.publicSourceDir = apkPath
+                        appInfo.loadIcon(pm)
+                    } else null
+                } else null
+            }.getOrNull()
+        } else null
+    }
+
+    if (drawable != null) {
+        val bitmap = runCatching {
+            drawable.toBitmap(width = 128, height = 128).asImageBitmap()
+        }.getOrNull()
+        if (bitmap != null) {
+            appFolderIconCache.put(packageName, bitmap)
+            return bitmap
+        }
+    }
+
+    missingAppPackages.add(packageName)
+    return null
+}
 
 data class FileContentIcon(
     val icon: Any,
@@ -87,14 +183,14 @@ private fun magikaIconForLabel(label: String): FileContentIcon? = when (label) {
     "sql" -> FileContentIcon(PrismIcons.Sql)
     "pdf" -> FileContentIcon(PrismIcons.Pdf)
     "apk" -> FileContentIcon(Icons.Default.Android)
-    "mp4", "mkv", "webm", "flv", "3gp" -> FileContentIcon(Icons.Default.Videocam)
+    "mp4", "qt", "mov", "mkv", "webm", "flv", "3gp", "avi", "wmv", "asf", "mpeg", "mpg", "vob", "ts", "m2ts", "ogv" -> FileContentIcon(Icons.Default.Videocam)
     "png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "psd" -> FileContentIcon(Icons.Default.Image)
     "svg" -> FileContentIcon(PrismIcons.Vector)
     "doc", "docx" -> FileContentIcon(Icons.Default.Description)
     "xls", "xlsx" -> FileContentIcon(Icons.Default.TableChart)
     "ppt", "pptx" -> FileContentIcon(Icons.Default.Slideshow)
     "ttf", "otf" -> FileContentIcon(Icons.Default.TextFields)
-    "mp3", "wav", "ogg", "flac", "midi" -> FileContentIcon(Icons.Default.Audiotrack)
+    "mp3", "m4a", "m4b", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "amr", "ac3", "midi" -> FileContentIcon(Icons.Default.Audiotrack)
     "epub" -> FileContentIcon(Icons.Rounded.Bookmark)
     "cbz", "cbr", "cb7", "cbt" -> FileContentIcon(Icons.Rounded.Bookmarks)
     "zip", "jar", "apk", "gzip", "bzip", "sevenzip", "rar", "tar", "xz", "iso", "dmg", "cab" ->
@@ -139,13 +235,67 @@ private fun getContentIcon(content: ContentHolder): FileContentIcon {
     if (comicFileType.contains(extension)) return FileContentIcon(Icons.Rounded.Bookmarks)
     if (ebookFileType.contains(extension) || djvuFileTypes.contains(extension) || content.displayName.lowercase().endsWith(".fb2.zip")) return FileContentIcon(Icons.Rounded.Bookmark)
     if (editableFileType.contains(extension)) return FileContentIcon(Icons.Default.Description)
-    if (archiveFileType.contains(extension)) return FileContentIcon(Icons.Default.Archive)
+    if (archiveFileType.contains(extension) ||
+        com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isSplitArchivePart(content.displayName)
+    ) return FileContentIcon(Icons.Default.Archive)
 
     return FileContentIcon(Icons.Default.QuestionMark)
 }
 
 @Composable
 fun FileContentIcon(item: ContentHolder) {
+    val context = LocalContext.current
+
+    // Check if this folder is an Android app data/obb/media package directory
+    val appPackageName = remember(item.uniquePath, item.isFolder) {
+        extractAndroidAppPackageName(item)
+    }
+
+    if (appPackageName != null) {
+        val cachedBitmap = appFolderIconCache.get(appPackageName)
+        val appBitmap by produceState<ImageBitmap?>(initialValue = cachedBitmap, appPackageName) {
+            if (value == null && !missingAppPackages.contains(appPackageName)) {
+                value = withContext(Dispatchers.IO) {
+                    resolveAppPackageIcon(context, appPackageName)
+                }
+            }
+        }
+
+        if (appBitmap != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(color = colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = appBitmap!!,
+                    contentDescription = item.displayName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize(0.78f)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(2.dp)
+                        .size(14.dp)
+                        .background(colorScheme.surfaceContainerHighest.copy(alpha = 0.92f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Folder,
+                        contentDescription = null,
+                        tint = colorScheme.primary,
+                        modifier = Modifier.size(10.dp)
+                    )
+                }
+            }
+            return
+        }
+    }
+
     // Start with extension-based icon
     val extensionIcon = getContentIcon(item)
 

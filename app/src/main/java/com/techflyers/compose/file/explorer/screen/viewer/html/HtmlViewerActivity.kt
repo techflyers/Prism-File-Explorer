@@ -44,10 +44,15 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.common.ConvertioApiKeyDialog
 import com.techflyers.compose.file.explorer.common.ConvertioProgressDialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.launch
 import com.techflyers.compose.file.explorer.common.ConvertioService
 import com.techflyers.compose.file.explorer.common.ui.SafeSurface
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerActivity
@@ -97,26 +102,18 @@ private fun HtmlViewerScreen(
 ) {
     var sourceContent by remember { mutableStateOf("") }
     var showSource by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var activeMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val extraPath = (context as? android.app.Activity)?.intent?.getStringExtra("extra_file_path")
     val filePath = remember {
-        try {
-            val cursor = globalClass.contentResolver.query(instance.uri, null, null, null, null)
-            var path = ""
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex("_data")
-                    if (idx >= 0) path = it.getString(idx) ?: ""
-                }
-            }
-            if (path.isEmpty()) instance.uri.path ?: "" else path
-        } catch (_: Exception) {
-            instance.uri.path ?: ""
-        }
+        com.techflyers.compose.file.explorer.common.resolveUriToPath(context, instance.uri, extraPath)
     }
 
     val fileName = remember { filePath.substringAfterLast('/') }
@@ -129,13 +126,43 @@ private fun HtmlViewerScreen(
                 if (file.exists()) {
                     sourceContent = file.readText()
                 } else {
-                    globalClass.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                    context.contentResolver.openInputStream(instance.uri)?.use { stream ->
                         sourceContent = stream.bufferedReader().readText()
                     }
                 }
             } catch (e: Exception) {
                 sourceContent = "Failed to load file: ${e.message}"
             }
+        }
+    }
+
+    // Load / reload content on resume (e.g. after editing in TextEditorActivity)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val file = File(filePath)
+                val tempFile = File(context.cacheDir, fileName.ifEmpty { "temp.html" })
+                val targetFile = if (file.exists()) file else if (tempFile.exists()) tempFile else null
+                val newText = when {
+                    targetFile != null && targetFile.exists() -> targetFile.readText()
+                    else -> context.contentResolver.openInputStream(instance.uri)?.use { stream ->
+                        stream.bufferedReader().readText()
+                    }
+                }
+                if (newText != null && newText != sourceContent) {
+                    withContext(Dispatchers.Main) {
+                        sourceContent = newText
+                        webViewRef?.loadDataWithBaseURL(null, newText, "text/html", "UTF-8", null)
+                    }
+                    if (instance.uri.scheme == "content") {
+                        try {
+                            context.contentResolver.openOutputStream(instance.uri, "wt")?.use { out ->
+                                out.write(newText.toByteArray())
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -174,14 +201,23 @@ private fun HtmlViewerScreen(
                             showSource = false
                         } else {
                             // Open in text editor
-                            val file = java.io.File(filePath)
+                            val file = File(filePath)
                             if (file.exists()) {
                                 globalClass.textEditorManager.openTextEditor(
                                     LocalFileHolder(file),
-                                    globalClass
+                                    context
                                 )
                             } else {
-                                showSource = true
+                                try {
+                                    val tempFile = File(context.cacheDir, fileName.ifEmpty { "temp.html" })
+                                    tempFile.writeText(sourceContent)
+                                    globalClass.textEditorManager.openTextEditor(
+                                        LocalFileHolder(tempFile),
+                                        context
+                                    )
+                                } catch (e: Exception) {
+                                    showSource = true
+                                }
                             }
                         }
                     }) {
@@ -204,6 +240,9 @@ private fun HtmlViewerScreen(
                     }) {
                         Icon(Icons.Rounded.OpenInNew, contentDescription = "Open with")
                     }
+                    IconButton(onClick = { showMetadataSheet = true }) {
+                        Icon(Icons.Rounded.Info, contentDescription = "Extended Metadata")
+                    }
                     IconButton(onClick = {
                         ConvertioService.convertToPdf(globalClass, filePath)
                     }) {
@@ -211,6 +250,14 @@ private fun HtmlViewerScreen(
                     }
                 }
             )
+            if (showMetadataSheet) {
+                ExtendedMetadataSheet(
+                    uri = instance.uri,
+                    extraFilePath = filePath,
+                    displayNameHint = fileName,
+                    onDismiss = { showMetadataSheet = false }
+                )
+            }
         }
     ) { paddingValues ->
         Column(

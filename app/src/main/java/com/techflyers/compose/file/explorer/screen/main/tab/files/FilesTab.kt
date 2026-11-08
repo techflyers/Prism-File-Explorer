@@ -33,6 +33,7 @@ import com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActi
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.RemoteFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileListCategory
@@ -47,7 +48,9 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CompressT
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
 import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
+import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ZipTree
 import com.reandroid.archive.ZipAlign
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -472,6 +475,10 @@ class FilesTab(
 
     // The archive waiting for a password to be entered before opening
     var pendingPasswordArchive: com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder? = null
+    var pendingPasswordIsRetry by mutableStateOf(false)
+    var archiveErrorTitle by mutableStateOf("")
+    var archiveErrorSummary by mutableStateOf("")
+    var archiveErrorLog by mutableStateOf("")
 
     // Used to detect changes to an already updated ZipTree in ZipManager
     var zipSourceTimestamp = -1L
@@ -489,6 +496,8 @@ class FilesTab(
     var tabViewLabel by mutableStateOf(createTabLabel())
 
     var isLoading by mutableStateOf(false)
+    var isCategoryLoading by mutableStateOf(false)
+    var categoryLoadingProgress by androidx.compose.runtime.mutableFloatStateOf(0f)
 
     var foldersCount by mutableIntStateOf(0)
         private set
@@ -929,7 +938,10 @@ class FilesTab(
         val requestGeneration = listingGeneration.incrementAndGet()
         listingJob?.cancel()
         withContext(Dispatchers.Main) {
-            if (requestGeneration == listingGeneration.get()) isLoading = false
+            if (requestGeneration == listingGeneration.get()) {
+                isLoading = false
+                isCategoryLoading = false
+            }
         }
 
         // Prevent opening invalid files
@@ -1017,6 +1029,10 @@ class FilesTab(
             }
         }
 
+        // Apply folder header & breadcrumb highlight immediately on Main before disk listing
+        // when the folder is not served synchronously from cache.
+        var headerStateApplied = false
+
         // Reuse cached folder listings when navigating between folders whose contents haven't changed on disk
         if ((globalClass.preferencesManager.onlyRefreshSortIconOnNavigation || isNavigatingHistory) && item is LocalFileHolder) {
             val cached = folderListingCache.get(item.uniquePath)
@@ -1049,6 +1065,7 @@ class FilesTab(
                         if (requestGeneration != listingGeneration.get()) return@withContext
                         isLoading = false
                         applyFolderHeaderStateOnMain()
+                        headerStateApplied = true
                         foldersCount = cached.foldersCount
                         filesCount = cached.filesCount
                         showCategories = false
@@ -1061,6 +1078,13 @@ class FilesTab(
                     }
                     return
                 }
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            if (requestGeneration == listingGeneration.get() && !headerStateApplied) {
+                applyFolderHeaderStateOnMain()
+                headerStateApplied = true
             }
         }
 
@@ -1097,21 +1121,14 @@ class FilesTab(
                             items = displayItems.toList()
                         )
                     )
-                    val stabilizeLoading = globalClass.preferencesManager.stabilizeDirectoryLoading
-                    if (stabilizeLoading) {
-                        val prewarmStart = System.currentTimeMillis()
-                        val prewarmCount = minOf(displayItems.size, 80)
-                        for (i in 0 until prewarmCount) {
-                            if (!isActive || requestGeneration != listingGeneration.get()) return@launch
-                            if (System.currentTimeMillis() - prewarmStart > 650L) break
-                            runCatching { displayItems[i].getDetails() }
-                        }
-                    }
                     loadingIndicatorJob.cancel()
                     withContext(Dispatchers.Main) {
                         if (requestGeneration != listingGeneration.get()) return@withContext
                         isLoading = false
-                        applyFolderHeaderStateOnMain()
+                        if (!headerStateApplied) {
+                            applyFolderHeaderStateOnMain()
+                            headerStateApplied = true
+                        }
                         foldersCount = count.folders
                         filesCount = count.files
                         showCategories = false
@@ -1124,49 +1141,155 @@ class FilesTab(
                     }
                 } else if (item is VirtualFileHolder) {
                     val vFolder = item
-                    val check = StorageProvider.getCategoryQuickCheck(vFolder.type)
-                    lastKnownCategoryCount = check.first
-                    lastKnownCategoryMaxDate = check.second
+                    loadingIndicatorJob.cancel()
+                    withContext(Dispatchers.Main) {
+                        if (requestGeneration == listingGeneration.get()) {
+                            isLoading = false
+                            isCategoryLoading = true
+                            categoryLoadingProgress = 0.15f
+                            if (!headerStateApplied) {
+                                applyFolderHeaderStateOnMain()
+                                headerStateApplied = true
+                            }
+                        }
+                    }
 
+                    // Load the first page immediately before running any secondary checks so the UI populates right away
                     val firstPage = vFolder.listSortedContent()
                     if (!isActive || requestGeneration != listingGeneration.get()) return@launch
 
-                    loadingIndicatorJob.cancel()
+                    val seenPathsInTab = HashSet<String>(firstPage.size * 2)
+                    val uniqueFirstPage = ArrayList<ContentHolder>(firstPage.size)
+                    for (entry in firstPage) {
+                        if (seenPathsInTab.add(entry.uniquePath)) {
+                            uniqueFirstPage.add(entry)
+                        }
+                    }
+
+                    val pageCap = if (vFolder.isUnlimitedMode()) Int.MAX_VALUE else 5000
+                    val hasMoreAfterFirst = vFolder.hasMoreContent && uniqueFirstPage.size < pageCap
+                    val initialCategories = vFolder.getCategories()
+                    val firstMaxSiblingSize = uniqueFirstPage.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+                    val firstProgress = if (!hasMoreAfterFirst) 1f else 0.35f
+
                     withContext(Dispatchers.Main) {
                         if (requestGeneration != listingGeneration.get()) return@withContext
                         isLoading = false
-                        applyFolderHeaderStateOnMain()
+                        categoryLoadingProgress = firstProgress
+                        isCategoryLoading = hasMoreAfterFirst
                         activeFolderContent.clear()
-                        activeFolderContent.addAll(firstPage)
-                        updateContentSnapshot()
+                        activeFolderContent.addAll(uniqueFirstPage)
+                        if (selectedTypeFilters.isEmpty()) {
+                            contentSnapshot = uniqueFirstPage.toList()
+                            maxSiblingSize = firstMaxSiblingSize
+                        } else {
+                            updateContentSnapshot()
+                        }
                         foldersCount = 0
                         filesCount = activeFolderContent.size
                         categories.clear()
-                        categories.addAll(vFolder.getCategories())
+                        categories.addAll(initialCategories)
                         showCategories = categories.isNotEmpty()
-                        applyFolderScrollRestore(item.uniquePath, rememberListState, firstPage.size)
+                        applyFolderScrollRestore(item.uniquePath, rememberListState, uniqueFirstPage.size)
                         requestHomeToolbarUpdate()
                         postEvent()
                     }
 
-                    // Background append for remaining pages (up to 5,000 for media categories, or all items for Unlimited Recent / All Files)
-                    val pageCap = if (vFolder.isUnlimitedMode()) Int.MAX_VALUE else 5000
-                    var loadedCount = firstPage.size
+                    val check = StorageProvider.getCategoryQuickCheck(vFolder.type)
+                    lastKnownCategoryCount = check.first
+                    lastKnownCategoryMaxDate = check.second
+
+                    val expectedTotal = when (vFolder.type) {
+                        VirtualFileHolder.RECENT -> {
+                            val lim = globalClass.preferencesManager.recentFilesLimit
+                            if (lim > 0) lim else StorageProvider.indexedRecentFilesCount.takeIf { it > 0 } ?: 1000
+                        }
+                        VirtualFileHolder.ALL_FILES -> {
+                            StorageProvider.indexedRecentFilesCount.takeIf { it > 0 } ?: 2000
+                        }
+                        else -> check.first.takeIf { it > 0 }?.coerceAtMost(pageCap) ?: 800
+                    }.coerceAtLeast(uniqueFirstPage.size.coerceAtLeast(1))
+
+                    // Background append for remaining pages with throttled UI commits so UI navigation is never blocked
+                    val accumulatedItems = ArrayList<ContentHolder>(uniqueFirstPage)
+                    var runningMaxSize = firstMaxSiblingSize
+                    var loadedCount = uniqueFirstPage.size
+                    val pendingPages = ArrayList<ContentHolder>(VirtualFileHolder.PAGE_SIZE * 2)
+                    var lastMainCommitMs = System.currentTimeMillis()
+
                     while (isActive && requestGeneration == listingGeneration.get() && vFolder.hasMoreContent && loadedCount < pageCap) {
                         val nextPage = vFolder.loadNextPage()
                         if (!isActive || requestGeneration != listingGeneration.get() || nextPage.isEmpty()) break
-                        loadedCount += nextPage.size
-                        withContext(Dispatchers.Main) {
-                            if (requestGeneration != listingGeneration.get()) return@withContext
-                            activeFolderContent.addAll(nextPage)
-                            updateContentSnapshot()
-                            filesCount = activeFolderContent.size
-                            categories.clear()
-                            categories.addAll(vFolder.getCategories())
-                            showCategories = categories.isNotEmpty()
-                            requestHomeToolbarUpdate()
+
+                        var addedInStep = 0
+                        for (entry in nextPage) {
+                            if (seenPathsInTab.add(entry.uniquePath)) {
+                                pendingPages.add(entry)
+                                accumulatedItems.add(entry)
+                                if (entry.size > runningMaxSize) runningMaxSize = entry.size
+                                addedInStep++
+                            }
+                        }
+                        if (addedInStep == 0) break
+                        loadedCount += addedInStep
+
+                        val progressNow = (0.35f + (loadedCount.toFloat() / maxOf(expectedTotal, loadedCount)) * 0.61f).coerceIn(0.35f, 0.96f)
+                        categoryLoadingProgress = progressNow
+
+                        val nowMs = System.currentTimeMillis()
+                        val shouldCommitNow = !vFolder.hasMoreContent || loadedCount >= pageCap || (nowMs - lastMainCommitMs >= 160L)
+                        if (shouldCommitNow && pendingPages.isNotEmpty()) {
+                            val batchToCommit = ArrayList(pendingPages)
+                            val snapshotCopy = ArrayList(accumulatedItems)
+                            val snapshotMax = runningMaxSize
+                            pendingPages.clear()
+                            val updatedCategories = vFolder.getCategories()
+                            lastMainCommitMs = nowMs
+
+                            withContext(Dispatchers.Main) {
+                                if (requestGeneration != listingGeneration.get()) return@withContext
+                                activeFolderContent.addAll(batchToCommit)
+                                if (selectedTypeFilters.isEmpty()) {
+                                    contentSnapshot = snapshotCopy
+                                    maxSiblingSize = snapshotMax
+                                } else {
+                                    updateContentSnapshot()
+                                }
+                                filesCount = activeFolderContent.size
+                                if (categories.size != updatedCategories.size) {
+                                    categories.clear()
+                                    categories.addAll(updatedCategories)
+                                    showCategories = categories.isNotEmpty()
+                                }
+                                requestHomeToolbarUpdate()
+                            }
                         }
                         kotlinx.coroutines.yield()
+                    }
+
+                    if (pendingPages.isNotEmpty() && isActive && requestGeneration == listingGeneration.get()) {
+                        val batchToCommit = ArrayList(pendingPages)
+                        val snapshotCopy = ArrayList(accumulatedItems)
+                        val snapshotMax = runningMaxSize
+                        pendingPages.clear()
+                        val updatedCategories = vFolder.getCategories()
+                        withContext(Dispatchers.Main) {
+                            if (requestGeneration != listingGeneration.get()) return@withContext
+                            activeFolderContent.addAll(batchToCommit)
+                            if (selectedTypeFilters.isEmpty()) {
+                                contentSnapshot = snapshotCopy
+                                maxSiblingSize = snapshotMax
+                            } else {
+                                updateContentSnapshot()
+                            }
+                            filesCount = activeFolderContent.size
+                            if (categories.size != updatedCategories.size) {
+                                categories.clear()
+                                categories.addAll(updatedCategories)
+                                showCategories = categories.isNotEmpty()
+                            }
+                            requestHomeToolbarUpdate()
+                        }
                     }
 
                     // Optional background filesystem walk if enabled in preferences
@@ -1181,25 +1304,40 @@ class FilesTab(
                             else -> emptySet()
                         }
                         if (ext.isNotEmpty()) {
-                            val existingPaths = withContext(Dispatchers.Main) {
-                                if (requestGeneration == listingGeneration.get()) {
-                                    activeFolderContent.map { it.uniquePath }.toSet()
-                                } else {
-                                    emptySet()
-                                }
-                            }
+                            val existingPaths = HashSet(seenPathsInTab)
                             if (requestGeneration != listingGeneration.get()) return@launch
                             CategoryFileScanner.walkStorageRootsBackground(ext, existingPaths) { batch ->
                                 if (isActive && requestGeneration == listingGeneration.get() && batch.isNotEmpty()) {
-                                    withContext(Dispatchers.Main) {
-                                        if (requestGeneration != listingGeneration.get()) return@withContext
-                                        activeFolderContent.addAll(batch)
-                                        updateContentSnapshot()
-                                        filesCount = activeFolderContent.size
-                                        requestHomeToolbarUpdate()
+                                    val uniqueWalkBatch = batch.filter { seenPathsInTab.add(it.uniquePath) }
+                                    if (uniqueWalkBatch.isNotEmpty()) {
+                                        accumulatedItems.addAll(uniqueWalkBatch)
+                                        for (entry in uniqueWalkBatch) {
+                                            if (entry.size > runningMaxSize) runningMaxSize = entry.size
+                                        }
+                                        val snapshotCopy = ArrayList(accumulatedItems)
+                                        val snapshotMax = runningMaxSize
+                                        withContext(Dispatchers.Main) {
+                                            if (requestGeneration != listingGeneration.get()) return@withContext
+                                            activeFolderContent.addAll(uniqueWalkBatch)
+                                            if (selectedTypeFilters.isEmpty()) {
+                                                contentSnapshot = snapshotCopy
+                                                maxSiblingSize = snapshotMax
+                                            } else {
+                                                updateContentSnapshot()
+                                            }
+                                            filesCount = activeFolderContent.size
+                                            requestHomeToolbarUpdate()
+                                        }
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (requestGeneration == listingGeneration.get()) {
+                            categoryLoadingProgress = 1f
+                            isCategoryLoading = false
                         }
                     }
                 } else {
@@ -1210,6 +1348,7 @@ class FilesTab(
                     withContext(Dispatchers.Main) {
                         if (requestGeneration != listingGeneration.get()) return@withContext
                         isLoading = false
+                        isCategoryLoading = false
                         applyFolderHeaderStateOnMain()
                         activeFolderContent.clear()
                         activeFolderContent.addAll(sorted)
@@ -1227,6 +1366,7 @@ class FilesTab(
                 withContext(Dispatchers.Main) {
                     if (requestGeneration == listingGeneration.get()) {
                         isLoading = false
+                        isCategoryLoading = false
                         requestHomeToolbarUpdate()
                     }
                 }
@@ -1733,6 +1873,25 @@ class FilesTab(
     }
 
     private suspend fun computePathSegments(targetFolder: ContentHolder = activeFolder): List<ContentHolder> {
+        val existingSegments = withContext(Dispatchers.Main) { currentPathSegments.toList() }
+        val targetKey = breadcrumbSegmentKey(targetFolder)
+        val existingMatchIndex = existingSegments.indexOfFirst { breadcrumbSegmentKey(it) == targetKey }
+        if (existingMatchIndex >= 0) {
+            val mergedSegments = ArrayList<ContentHolder>(existingSegments.size)
+            for (i in 0..existingMatchIndex) {
+                mergedSegments.add(existingSegments[i])
+            }
+            for (i in (existingMatchIndex + 1) until existingSegments.size) {
+                val trailing = existingSegments[i]
+                if (isBreadcrumbSegmentValid(trailing)) {
+                    mergedSegments.add(trailing)
+                } else {
+                    break
+                }
+            }
+            return mergedSegments
+        }
+
         val cleanOnExitPath = globalClass.cleanOnExitDir.uniquePath
 
         // Walk through parent files
@@ -1746,7 +1905,6 @@ class FilesTab(
         }
 
         val newAncestorSegments = paths.reversed()
-        val existingSegments = withContext(Dispatchers.Main) { currentPathSegments.toList() }
 
         // Keep forward breadcrumb history (greyed-out child path segments) when navigating up
         // a folder, while validating each trailing segment so deleted archives/folders are pruned
@@ -1789,27 +1947,11 @@ class FilesTab(
         globalClass.mainActivityManager.addTabAndSelect(tab)
     }
 
-    /**
-     * Shares the selected files.
-     * Only local content can be shared, other types must create a local copy first.
-     */
-    fun shareSelectedFiles(context: Context) {
-        val uris = arrayListOf<Uri>()
-
-        selectedFiles.forEach { selectedFile ->
-            val content = selectedFile.component2()
-            if (content is LocalFileHolder) {
-                uris.add(
-                    getUriForFile(context, globalClass.packageName + ".provider", content.file)
-                )
-            }
-        }
-
+    private fun launchShareIntent(context: Context, uris: List<Uri>) {
         if (uris.isEmpty()) return
-
         val builder = ShareCompat.IntentBuilder(context)
             .setType(if (uris.size == 1) uris[0].getMimeType(globalClass) else anyFileType)
-        
+
         uris.forEach {
             builder.addStream(it)
         }
@@ -1819,11 +1961,154 @@ class FilesTab(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        val chooserIntent = Intent.createChooser(intent, null)
-        
-        // On Android 14+ (API 34+), the system automatically uses the new share sheet.
-        // We can add custom actions or preview data here if needed.
+        val chooserIntent = Intent.createChooser(intent, null).apply {
+            if (context !is android.app.Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
         context.startActivity(chooserIntent)
+    }
+
+    /**
+     * Shares the selected files.
+     * Extracts non-local files (such as files inside archives) to cleanOnExitDir before sharing.
+     */
+    fun shareSelectedFiles(context: Context) {
+        val filesToShare = if (selectedFiles.isNotEmpty()) {
+            selectedFiles.values.toList()
+        } else if (targetFile != null) {
+            listOf(targetFile!!)
+        } else {
+            emptyList()
+        }
+
+        if (filesToShare.isEmpty()) return
+
+        val allLocal = filesToShare.all { it is LocalFileHolder }
+        if (allLocal) {
+            val uris = arrayListOf<Uri>()
+            for (holder in filesToShare.filterIsInstance<LocalFileHolder>()) {
+                if (holder.file.exists()) {
+                    uris.add(getUriForFile(context, globalClass.packageName + ".provider", holder.file))
+                }
+            }
+            if (uris.isNotEmpty()) {
+                launchShareIntent(context, uris)
+            }
+            return
+        }
+
+        isLoading = true
+        scope.launch(Dispatchers.IO) {
+            val uris = arrayListOf<Uri>()
+            try {
+                // 1. Process ZipFileHolders
+                val zipHolders = filesToShare.filterIsInstance<ZipFileHolder>()
+                if (zipHolders.isNotEmpty()) {
+                    val byTree = zipHolders.groupBy { it.zipTree }
+                    for ((zipTree, holders) in byTree) {
+                        val toExtract = holders.filter { holder ->
+                            val existing = holder.zipTree.getExtractionDestinationFile(holder.node)?.file
+                            val flat = File(holder.zipTree.cleanOnExitDir.file, holder.node.name)
+                            (existing == null || !existing.exists()) && !flat.exists()
+                        }
+                        if (toExtract.isNotEmpty()) {
+                            val sourceFile = zipTree.source.file
+                            val sourceName = sourceFile.name
+                            val ext = zipTree.source.extension.lowercase()
+                            val isNative = ArchiveManager.isNativeArchivePath(sourceName) || ArchiveManager.isNativeArchive(ext)
+
+                            if (isNative) {
+                                ArchiveManager.extractMembers(
+                                    archivePath = zipTree.archivePathForNative,
+                                    internalPaths = toExtract.map { it.node.path },
+                                    destinationDir = zipTree.cleanOnExitDir.uniquePath,
+                                    password = zipTree.password
+                                )
+                            } else {
+                                val zipFile = if (!zipTree.password.isNullOrEmpty()) {
+                                    net.lingala.zip4j.ZipFile(zipTree.tempArchiveFile, zipTree.password!!.toCharArray())
+                                } else {
+                                    net.lingala.zip4j.ZipFile(zipTree.tempArchiveFile)
+                                }
+                                zipFile.use { zf ->
+                                    for (item in toExtract) {
+                                        zf.extractFile(item.node.path, zipTree.cleanOnExitDir.uniquePath)
+                                    }
+                                }
+                            }
+                        }
+
+                        for (holder in holders) {
+                            var localFile = holder.zipTree.getExtractionDestinationFile(holder.node)?.file
+                            if (localFile == null || !localFile.exists()) {
+                                val flat = File(holder.zipTree.cleanOnExitDir.file, holder.node.name)
+                                if (flat.exists()) localFile = flat
+                            }
+                            if (localFile != null && localFile.exists()) {
+                                holder.zipTree.addExtractedFile(holder.node, LocalFileHolder(localFile))
+                                uris.add(getUriForFile(context, globalClass.packageName + ".provider", localFile))
+                            }
+                        }
+                    }
+                }
+
+                // 2. Process LocalFileHolders
+                for (holder in filesToShare.filterIsInstance<LocalFileHolder>()) {
+                    if (holder.file.exists()) {
+                        uris.add(getUriForFile(context, globalClass.packageName + ".provider", holder.file))
+                    }
+                }
+
+                // 3. Process ShizukuFileHolders
+                for (holder in filesToShare.filterIsInstance<ShizukuFileHolder>()) {
+                    val tempFile = File(globalClass.cleanOnExitDir.file, "${System.currentTimeMillis()}_${holder.displayName}")
+                    if (ShizukuManager.copyToLocal(holder.uniquePath, tempFile)) {
+                        uris.add(getUriForFile(context, globalClass.packageName + ".provider", tempFile))
+                    } else {
+                        val directFile = File(holder.uniquePath)
+                        if (directFile.exists() && directFile.canRead()) {
+                            uris.add(getUriForFile(context, globalClass.packageName + ".provider", directFile))
+                        }
+                    }
+                }
+
+                // 4. Process RemoteFileHolders
+                for (holder in filesToShare.filterIsInstance<RemoteFileHolder>()) {
+                    val local = holder.downloadToCache()
+                    if (local.file.exists()) {
+                        uris.add(getUriForFile(context, globalClass.packageName + ".provider", local.file))
+                    }
+                }
+            } catch (e: Exception) {
+                logger.logError(e)
+                withContext(Dispatchers.Main) {
+                    if (e is ZipTree.ArchivePasswordRequiredException) {
+                        val tree = filesToShare.filterIsInstance<ZipFileHolder>().firstOrNull()?.zipTree
+                        if (tree != null) {
+                            toggleArchivePasswordDialog(tree.source, isRetry = e.isRetry)
+                        }
+                    } else if (e is ArchiveManager.ArchiveOperationException && e.isPasswordError) {
+                        val tree = filesToShare.filterIsInstance<ZipFileHolder>().firstOrNull()?.zipTree
+                        if (tree != null) {
+                            toggleArchivePasswordDialog(tree.source, isRetry = !tree.password.isNullOrEmpty())
+                        }
+                    } else {
+                        val summary = (e as? ArchiveManager.ArchiveOperationException)?.summary
+                            ?: e.message
+                            ?: globalClass.getString(R.string.failed_to_extract_file)
+                        globalClass.showMsg(summary)
+                    }
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                    if (uris.isNotEmpty()) {
+                        launchShareIntent(context, uris)
+                    }
+                }
+            }
+        }
     }
 
     fun addToHomeScreen(context: Context, file: LocalFileHolder, shortcutName: String = file.displayName) {
@@ -1955,9 +2240,21 @@ class FilesTab(
         _dialogsState.update { it.copy(showImportPrefsDialog = file != null) }
     }
 
-    fun toggleArchivePasswordDialog(archive: LocalFileHolder?) {
+    fun toggleArchivePasswordDialog(archive: LocalFileHolder?, isRetry: Boolean = false) {
         pendingPasswordArchive = archive
+        pendingPasswordIsRetry = isRetry
         _dialogsState.update { it.copy(showArchivePasswordDialog = archive != null) }
+    }
+
+    fun showArchiveErrorDialog(archiveName: String, summary: String, diagnosticLog: String) {
+        archiveErrorTitle = archiveName
+        archiveErrorSummary = summary
+        archiveErrorLog = diagnosticLog
+        _dialogsState.update { it.copy(showArchiveErrorDialog = true) }
+    }
+
+    fun dismissArchiveErrorDialog() {
+        _dialogsState.update { it.copy(showArchiveErrorDialog = false) }
     }
 
     fun toggleShareFolderCompressDialog(show: Boolean) {

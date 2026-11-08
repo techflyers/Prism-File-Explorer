@@ -69,11 +69,13 @@ fun AppInfoContainer() {
         }
     }
 
-    AppInfoDialog(
-        show = showAppInfoDialog,
-        onDismiss = { showAppInfoDialog = false },
-        hasNewUpdate = globalClass.mainActivityManager.newUpdate != null
-    )
+    if (showAppInfoDialog) {
+        AppInfoDialog(
+            show = true,
+            onDismiss = { showAppInfoDialog = false },
+            hasNewUpdate = globalClass.mainActivityManager.newUpdate != null
+        )
+    }
 
     Container(
         title = stringResource(R.string.other),

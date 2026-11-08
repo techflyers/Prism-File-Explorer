@@ -401,8 +401,12 @@ object ShizukuManager {
     private fun checkRoot(): Boolean {
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val finished = process.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return false
+            }
             val output = BufferedReader(InputStreamReader(process.inputStream)).readLine() ?: ""
-            process.waitFor()
             output.contains("uid=0")
         } catch (_: Exception) {
             false

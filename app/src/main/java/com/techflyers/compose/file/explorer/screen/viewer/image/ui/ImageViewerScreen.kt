@@ -63,6 +63,7 @@ import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
 import com.techflyers.compose.file.explorer.screen.main.MainActivity
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Transform
@@ -136,6 +137,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.saket.telephoto.zoomable.DoubleClickToZoomListener
+import me.saket.telephoto.zoomable.OverzoomEffect
+import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
@@ -242,7 +246,12 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
             key = { page -> imageList.getOrNull(page)?.toString() ?: page.toString() }
         ) { page ->
             val pageUri = imageList.getOrNull(page) ?: return@HorizontalPager
-            val zoomableState = rememberZoomableState()
+            val zoomableState = rememberZoomableState(
+                zoomSpec = ZoomSpec(
+                    maxZoomFactor = 1000f,
+                    overzoomEffect = OverzoomEffect.NoLimits
+                )
+            )
             val imageState = rememberZoomableImageState(zoomableState)
 
             // Reset zoom only when navigating *to* this page. Do not key on
@@ -304,6 +313,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                         contentScale = contentScale,
                         state = imageState,
                         onClick = { showControls = !showControls },
+                        onDoubleClick = DoubleClickToZoomListener.cycle(maxZoomFactor = 3f),
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
@@ -601,13 +611,12 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
         }
 
         if (showInfo) {
-            val info = imageInfo ?: extractImageInfo(
-                currentUri,
-                imageDimensions.first,
-                imageDimensions.second,
-                imagePaths.getOrNull(safeIndex)
-            ).also { imageInfo = it }
-            ImageInfoBottomSheet(imageInfo = info, onDismiss = { showInfo = false })
+            ExtendedMetadataSheet(
+                uri = currentUri,
+                extraFilePath = currentResolvedPath,
+                displayNameHint = imageInfo?.name,
+                onDismiss = { showInfo = false }
+            )
         }
 
         if (showDeleteConfirmation) {

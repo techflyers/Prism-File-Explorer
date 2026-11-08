@@ -33,6 +33,9 @@ object TerminalLauncher {
     @Volatile
     private var pendingTermuxPath: String? = null
 
+    @Volatile
+    private var pendingTermuxCommand: String? = null
+
     private tailrec fun Context.findActivity(): Activity? = when (this) {
         is Activity -> this
         is ContextWrapper -> baseContext.findActivity()
@@ -87,7 +90,9 @@ object TerminalLauncher {
 
     fun onTermuxPermissionResult(context: Context, granted: Boolean) {
         val path = pendingTermuxPath
+        val customCmd = pendingTermuxCommand
         pendingTermuxPath = null
+        pendingTermuxCommand = null
         if (granted) {
             Toast.makeText(
                 context,
@@ -95,14 +100,22 @@ object TerminalLauncher {
                 Toast.LENGTH_SHORT
             ).show()
             if (!path.isNullOrEmpty()) {
-                openTermux(context, path)
+                if (!customCmd.isNullOrBlank()) {
+                    runCommandInTermux(context, path, customCmd)
+                } else {
+                    openTermux(context, path)
+                }
             }
         } else if (!path.isNullOrEmpty()) {
             val targetFile = File(path)
             val targetDir = if (targetFile.isFile) targetFile.parent ?: path else path
             val escapedDir = targetDir.replace("'", "'\\''")
-            val cdCmd = "cd '$escapedDir'"
-            cdCmd.copyToClipboard()
+            val fallbackCmd = if (!customCmd.isNullOrBlank()) {
+                "cd '$escapedDir' && $customCmd"
+            } else {
+                "cd '$escapedDir'"
+            }
+            fallbackCmd.copyToClipboard()
             Toast.makeText(
                 context,
                 context.getString(R.string.termux_permission_copy_notice),
@@ -148,9 +161,23 @@ object TerminalLauncher {
         context.startActivity(intent)
     }
 
-    private fun buildTermuxRunCommandIntent(packageName: String, targetDir: String, escapedDir: String): Intent {
+    private fun buildTermuxRunCommandIntent(
+        packageName: String,
+        targetDir: String,
+        escapedDir: String,
+        customCommand: String? = null
+    ): Intent {
         val shellCmd = buildString {
+            append("export PREFIX='/data/data/$packageName/files/usr'; ")
+            append("export HOME='/data/data/$packageName/files/home'; ")
+            append("export TMPDIR='/data/data/$packageName/files/usr/tmp'; ")
+            append("export PATH=\"/data/data/$packageName/files/usr/bin:\$PATH\"; ")
+            append("export LD_LIBRARY_PATH=\"/data/data/$packageName/files/usr/lib:\$LD_LIBRARY_PATH\"; ")
             append("export PWD='$escapedDir'; cd '$escapedDir' 2>/dev/null; ")
+            if (!customCommand.isNullOrBlank()) {
+                append("$customCommand; ")
+                append("echo ''; ")
+            }
             append("if [ -x /data/data/$packageName/files/home/.termux/shell ]; then ")
             append("exec /data/data/$packageName/files/home/.termux/shell -l; ")
             append("elif [ -n \"\$SHELL\" ] && [ -x \"\$SHELL\" ]; then ")
@@ -194,6 +221,18 @@ object TerminalLauncher {
     }
 
     fun openTermux(context: Context, path: String) {
+        dispatchToTermux(context, path, customCommand = null)
+    }
+
+    /**
+     * Executes a custom runner or shell command inside Termux in [workingDir], keeping the
+     * interactive Termux session open afterwards (using the same RUN_COMMAND pipeline as `cd`).
+     */
+    fun runCommandInTermux(context: Context, workingDir: String, command: String) {
+        dispatchToTermux(context, workingDir, customCommand = command)
+    }
+
+    private fun dispatchToTermux(context: Context, path: String, customCommand: String?) {
         val targetFile = File(path)
         val targetDir = if (targetFile.isFile) targetFile.parent ?: path else path
 
@@ -218,7 +257,11 @@ object TerminalLauncher {
         }
 
         val escapedDir = targetDir.replace("'", "'\\''")
-        val cdCmd = "cd '$escapedDir'"
+        val fallbackClipboardCmd = if (!customCommand.isNullOrBlank()) {
+            "cd '$escapedDir' && $customCommand"
+        } else {
+            "cd '$escapedDir'"
+        }
 
         // Check if RUN_COMMAND permission is granted; try granting via Shizuku if available
         var hasPerm = hasTermuxPermission(context)
@@ -230,7 +273,8 @@ object TerminalLauncher {
             val activity = context.findActivity()
             if (activity != null) {
                 // Request runtime permission first and wait for user response in BaseActivity.onRequestPermissionsResult
-                pendingTermuxPath = path
+                pendingTermuxPath = targetDir
+                pendingTermuxCommand = customCommand
                 ActivityCompat.requestPermissions(
                     activity,
                     arrayOf(TERMUX_PERMISSION),
@@ -240,7 +284,7 @@ object TerminalLauncher {
             }
 
             // Fallback only when no Activity context is available
-            cdCmd.copyToClipboard()
+            fallbackClipboardCmd.copyToClipboard()
             Toast.makeText(
                 context,
                 context.getString(R.string.termux_permission_copy_notice),
@@ -256,7 +300,12 @@ object TerminalLauncher {
             return
         }
 
-        val runCommandIntent = buildTermuxRunCommandIntent(TERMUX_PACKAGE, targetDir, escapedDir)
+        val runCommandIntent = buildTermuxRunCommandIntent(
+            packageName = TERMUX_PACKAGE,
+            targetDir = targetDir,
+            escapedDir = escapedDir,
+            customCommand = customCommand
+        )
         val serviceStarted = tryStartRunCommandService(context, runCommandIntent)
 
         if (serviceStarted) {
@@ -294,7 +343,7 @@ object TerminalLauncher {
                     mainHandler.postDelayed({
                         val secondRetryOk = tryStartRunCommandService(context.applicationContext, runCommandIntent)
                         if (!secondRetryOk) {
-                            cdCmd.copyToClipboard()
+                            fallbackClipboardCmd.copyToClipboard()
                             Toast.makeText(
                                 context.applicationContext,
                                 context.getString(R.string.termux_permission_copy_notice),
@@ -311,15 +360,21 @@ object TerminalLauncher {
         context: Context,
         path: String,
         packageName: String,
-        commandTemplate: String
+        commandTemplate: String,
+        customRunnerCommand: String? = null
     ) {
         val targetFile = File(path)
         val targetDir = if (targetFile.isFile) targetFile.parent ?: path else path
         val escapedDir = targetDir.replace("'", "'\\''")
-        val command = commandTemplate
+        val baseCommand = commandTemplate
             .replace("{dir}", escapedDir)
             .replace("{path}", escapedDir)
             .replace("{file}", targetFile.name)
+        val command = if (!customRunnerCommand.isNullOrBlank()) {
+            "cd '$escapedDir' && $customRunnerCommand"
+        } else {
+            baseCommand
+        }
 
         if (!isPackageInstalled(context, packageName)) {
             Toast.makeText(
@@ -345,7 +400,12 @@ object TerminalLauncher {
         }
 
         if (packageName.contains("termux", ignoreCase = true)) {
-            val runIntent = buildTermuxRunCommandIntent(packageName, targetDir, escapedDir)
+            val runIntent = buildTermuxRunCommandIntent(
+                packageName = packageName,
+                targetDir = targetDir,
+                escapedDir = escapedDir,
+                customCommand = customRunnerCommand
+            )
             val started = tryStartRunCommandService(context, runIntent)
             if (started) {
                 Handler(Looper.getMainLooper()).postDelayed({

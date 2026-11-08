@@ -143,7 +143,9 @@ private class DownloadOfficeEngineInstaller(private val context: Context) : Offi
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val workManager = WorkManager.getInstance(context)
-    private val _state = MutableStateFlow(OfficeEngine.installedState(context))
+    private val _state = MutableStateFlow<OfficeEngineState>(
+        if (!OfficeEngine.isSupported()) OfficeEngineState.Unsupported else OfficeEngineState.NotInstalled
+    )
     override val state: StateFlow<OfficeEngineState> = _state.asStateFlow()
     override val usesNotification: Boolean = true
 
@@ -151,6 +153,7 @@ private class DownloadOfficeEngineInstaller(private val context: Context) : Offi
 
     init {
         scope.launch {
+            _state.value = OfficeEngine.installedState(context)
             // Cancel any leftover stuck ENQUEUED/BLOCKED work from a prior app session on launch
             // so relaunching the app never gets permanently stuck in a zombie Downloading state.
             runCatching {

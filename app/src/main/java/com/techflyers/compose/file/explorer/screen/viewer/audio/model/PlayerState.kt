@@ -13,5 +13,8 @@ data class PlayerState(
     val currentTrackIndex: Int = 0,
     val totalTracks: Int = 1,
     val isShuffleEnabled: Boolean = false,
-    val sleepTimerRemainingMs: Long = 0L
+    val sleepTimerRemainingMs: Long = 0L,
+    val playbackErrorTitle: String? = null,
+    val playbackErrorDetails: String? = null,
+    val codecDiagnosticLog: String? = null
 )

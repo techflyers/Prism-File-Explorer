@@ -93,6 +93,16 @@ class ImageEditorActivity : ViewerActivity() {
         }
     }
 
+    private fun flattenAlphaToWhite(bitmap: Bitmap): Bitmap {
+        if (!bitmap.hasAlpha()) return bitmap
+        val whiteBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(whiteBitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(bitmap, 0f, 0f, paint)
+        return whiteBitmap
+    }
+
     /** Save directly to the real filesystem path — most reliable method. */
     private fun saveBitmapToFile(bitmap: Bitmap, path: String): Pair<Boolean, String> {
         return try {
@@ -107,7 +117,12 @@ class ImageEditorActivity : ViewerActivity() {
                 "webp" -> Bitmap.CompressFormat.WEBP
                 else   -> Bitmap.CompressFormat.JPEG
             }
-            val compressed = FileOutputStream(file).use { out -> bitmap.compress(format, 95, out) }
+            val toCompress = if (format == Bitmap.CompressFormat.JPEG) flattenAlphaToWhite(bitmap) else bitmap
+            val compressed = try {
+                FileOutputStream(file).use { out -> toCompress.compress(format, 95, out) }
+            } finally {
+                if (toCompress !== bitmap) toCompress.recycle()
+            }
             if (!compressed) {
                 Log.e(TAG, "bitmap.compress() returned false for $realPath")
                 return Pair(false, "Compression failed")
@@ -138,9 +153,14 @@ class ImageEditorActivity : ViewerActivity() {
                 type.contains("webp") -> Bitmap.CompressFormat.WEBP
                 else                  -> Bitmap.CompressFormat.JPEG
             }
+            val toCompress = if (format == Bitmap.CompressFormat.JPEG) flattenAlphaToWhite(bitmap) else bitmap
             val out = context.contentResolver.openOutputStream(uri, "wt")
                 ?: return Pair(false, "Could not open output stream for URI")
-            val compressed = out.use { bitmap.compress(format, 95, it) }
+            val compressed = try {
+                out.use { toCompress.compress(format, 95, it) }
+            } finally {
+                if (toCompress !== bitmap) toCompress.recycle()
+            }
             if (!compressed) Pair(false, "Compression returned false") else Pair(true, "")
         } catch (e: Exception) {
             Log.e(TAG, "saveBitmapToUri failed", e)
@@ -183,7 +203,12 @@ class ImageEditorActivity : ViewerActivity() {
                 "webp" -> Bitmap.CompressFormat.WEBP
                 else   -> Bitmap.CompressFormat.JPEG
             }
-            val compressed = FileOutputStream(targetFile).use { out -> bitmap.compress(format, 95, out) }
+            val toCompress = if (format == Bitmap.CompressFormat.JPEG) flattenAlphaToWhite(bitmap) else bitmap
+            val compressed = try {
+                FileOutputStream(targetFile).use { out -> toCompress.compress(format, 95, out) }
+            } finally {
+                if (toCompress !== bitmap) toCompress.recycle()
+            }
             if (!compressed) {
                 targetFile.delete()
                 return Pair(false, "Compression failed")

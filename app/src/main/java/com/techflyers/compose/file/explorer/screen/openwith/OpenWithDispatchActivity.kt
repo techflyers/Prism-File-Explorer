@@ -58,8 +58,9 @@ class OpenWithDispatchActivity : BaseActivity() {
     }
 
     override fun onPermissionGranted() {
-        val uri = intent.data
+        val uri = extractUri()
         if (uri == null) {
+            Toast.makeText(this, R.string.file_not_found, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -88,8 +89,33 @@ class OpenWithDispatchActivity : BaseActivity() {
         }
 
         lifecycleScope.launch {
-            dispatchUri(uri)
+            try {
+                dispatchUri(uri)
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@OpenWithDispatchActivity, "Error opening file: ${e.message}", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
         }
+    }
+
+    private fun extractUri(): Uri? {
+        val i = intent ?: return null
+        if (i.data != null) return i.data
+
+        val streamUri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            i.getParcelableExtra(Intent.EXTRA_STREAM)
+        }
+        if (streamUri != null) return streamUri
+
+        val clipUri = i.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+        if (clipUri != null) return clipUri
+
+        return null
     }
 
     private suspend fun dispatchUri(uri: Uri) {
@@ -98,7 +124,8 @@ class OpenWithDispatchActivity : BaseActivity() {
         }
 
         val extension = fileName.substringAfterLast('.', "").lowercase()
-        val mimeType = intent.type ?: getMimeType(uri, localFile, extension)
+        val rawMime = intent.type?.takeIf { it.isNotBlank() && it != "*/*" && it != "application/octet-stream" }
+        val mimeType = rawMime ?: getMimeType(uri, localFile, extension)
 
         withContext(Dispatchers.Main) {
             routeFile(uri, fileName, extension, mimeType, localFile)
@@ -338,6 +365,7 @@ class OpenWithDispatchActivity : BaseActivity() {
         if (FileMimeType.supportedArchiveFileType.contains(lowerExt) ||
             FileMimeType.archiveFileType.contains(lowerExt) ||
             isTarCompressed(fileName) ||
+            com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager.isSplitArchivePart(fileName) ||
             isArchiveMimeType(mimeType)
         ) {
             val targetFile = ensureLocalFile(uri, fileName, localFile)
@@ -392,11 +420,11 @@ class OpenWithDispatchActivity : BaseActivity() {
                         startViewer(ImageViewerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }
-                    detectedMime.startsWith("video/") || label in setOf("mp4", "mkv", "webm", "flv", "3gp") -> {
+                    detectedMime.startsWith("video/") || label in setOf("mp4", "qt", "mov", "mkv", "webm", "flv", "3gp", "avi", "wmv", "asf", "mpeg", "mpg", "vob", "ts", "m2ts", "ogv") -> {
                         startViewer(VideoPlayerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }
-                    detectedMime.startsWith("audio/") || label in setOf("mp3", "wav", "ogg", "flac", "midi") -> {
+                    detectedMime.startsWith("audio/") || label in setOf("mp3", "m4a", "m4b", "aac", "wav", "ogg", "oga", "opus", "flac", "wma", "aiff", "amr", "ac3", "midi") -> {
                         startViewer(AudioPlayerActivity::class.java, uri, detectedMime, ensuredFile)
                         return
                     }
@@ -464,6 +492,7 @@ class OpenWithDispatchActivity : BaseActivity() {
         val viewerIntent = Intent(this, activityClass).apply {
             action = Intent.ACTION_VIEW
             setDataAndType(uri, mimeType)
+            clipData = android.content.ClipData.newRawUri("", uri)
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
@@ -473,7 +502,11 @@ class OpenWithDispatchActivity : BaseActivity() {
             )
             localFile?.let { putExtra("extra_file_path", it.absolutePath) }
         }
-        startActivity(viewerIntent)
+        try {
+            startActivity(viewerIntent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open file: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
         finish()
     }
 
@@ -483,7 +516,8 @@ class OpenWithDispatchActivity : BaseActivity() {
         return withContext(Dispatchers.IO) {
             try {
                 val tempDir = File(cacheDir, "open_with_cache").apply { mkdirs() }
-                val targetFile = File(tempDir, fileName)
+                val safeFileName = fileName.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file_${System.currentTimeMillis()}" }
+                val targetFile = File(tempDir, safeFileName)
                 contentResolver.openInputStream(uri)?.use { input ->
                     targetFile.outputStream().use { output ->
                         input.copyTo(output)

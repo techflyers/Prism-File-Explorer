@@ -46,7 +46,9 @@ fun FormatRibbon(tab: FilesTab, compact: Boolean = false) {
         FilterConfigManager.getCategoryFilters(folder.type).filter { it.isEnabled }
     }
 
-    val discoveredExts = folder.availableFormats()
+    val discoveredExts = remember(folder, tab.filesCount) {
+        folder.availableFormats()
+    }
     val coveredExts = remember(configuredFilters) {
         configuredFilters.flatMap { it.extensions }.map { it.lowercase() }.toSet()
     }

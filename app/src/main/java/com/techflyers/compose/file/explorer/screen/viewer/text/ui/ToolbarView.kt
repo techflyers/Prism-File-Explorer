@@ -1,5 +1,6 @@
 package com.techflyers.compose.file.explorer.screen.viewer.text.ui
 
+import android.content.Intent
 import androidx.activity.OnBackPressedDispatcher
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Save
@@ -30,9 +32,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.content.Intent
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import com.techflyers.compose.file.explorer.screen.viewer.text.TextViewerInstance
 import io.github.rosemoe.sora.widget.CodeEditor
 
@@ -43,6 +45,7 @@ fun ToolbarView(
     onBackPressedDispatcher: OnBackPressedDispatcher
 ) {
     var showOptionsMenu by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -103,6 +106,10 @@ fun ToolbarView(
             )
         }
 
+        IconButton(onClick = { showMetadataSheet = true }) {
+            Icon(imageVector = Icons.Rounded.Info, contentDescription = "Extended Metadata")
+        }
+
         val context = LocalContext.current
         IconButton(onClick = {
             val openIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -126,5 +133,13 @@ fun ToolbarView(
                 showOptionsMenu = false
             }
         }
+    }
+
+    if (showMetadataSheet) {
+        ExtendedMetadataSheet(
+            uri = textViewerInstance.uri,
+            displayNameHint = textViewerInstance.activityTitle,
+            onDismiss = { showMetadataSheet = false }
+        )
     }
 }

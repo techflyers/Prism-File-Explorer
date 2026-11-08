@@ -23,12 +23,21 @@ abstract class ViewerActivity : BaseActivity() {
 
         enableEdgeToEdge()
 
-        if (intent.data == null) {
+        val incomingUri = intent.data
+            ?: (if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM)
+            })
+            ?: intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+
+        if (incomingUri == null) {
             finish()
             return
         }
 
-        uri = intent.data
+        uri = incomingUri
 
         if (savedInstanceState != null) {
             uid = savedInstanceState.getString("uid", String.randomString(12))
@@ -41,9 +50,11 @@ abstract class ViewerActivity : BaseActivity() {
         val instance = globalClass.viewersManager.instances.find { it.id == uid }
 
         if (instance == null) {
-            globalClass.viewersManager.instances.add(
-                onCreateNewInstance(uri!!, uid).also { currentInstance = it }
-            )
+            val newInstance = onCreateNewInstance(uri!!, uid)
+            currentInstance = newInstance
+            globalClass.viewersManager.instances.add(newInstance)
+        } else {
+            currentInstance = instance
         }
 
         checkPermissions()

@@ -83,6 +83,24 @@ class PreferencesManager {
         getPreferencesKey = { stringPreferencesKey(it) }
     )
 
+    var topToolbarButtonsConfig by prefMutableState(
+        keyName = "topToolbarButtonsConfig",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var topToolbarOverflowConfig by prefMutableState(
+        keyName = "topToolbarOverflowConfig",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var showToolbarSubtitle by prefMutableState(
+        keyName = "showToolbarSubtitle",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
     var homeTabLayout by prefMutableState(
         keyName = "homeTabLayout",
         defaultValue = getDefaultHomeLayout().toJson(),
@@ -98,6 +116,12 @@ class PreferencesManager {
     var showPathBar by prefMutableState(
         keyName = "showPathBar",
         defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var pathBarMultilineWrap by prefMutableState(
+        keyName = "pathBarMultilineWrap",
+        defaultValue = false,
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
@@ -391,6 +415,36 @@ class PreferencesManager {
         keyName = "drawerHiddenItems",
         defaultValue = emptySet<String>(),
         getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
+    var drawerAlwaysScrollToTop by prefMutableState(
+        keyName = "drawerAlwaysScrollToTop",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var drawerPinnedSections by prefMutableState(
+        keyName = "drawerPinnedSections",
+        defaultValue = emptySet<String>(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
+    )
+
+    var showSettingsInDrawer by prefMutableState(
+        keyName = "showSettingsInDrawer",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var showAboutInDrawer by prefMutableState(
+        keyName = "showAboutInDrawer",
+        defaultValue = true,
+        getPreferencesKey = { booleanPreferencesKey(it) }
+    )
+
+    var drawerCompactStorageView by prefMutableState(
+        keyName = "drawerCompactStorageView",
+        defaultValue = false,
+        getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
     var middleSwipeZoneWidthPercent by prefMutableState(

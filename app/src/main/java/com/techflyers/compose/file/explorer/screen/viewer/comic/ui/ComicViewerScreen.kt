@@ -37,7 +37,9 @@ import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.FitScreen
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -151,6 +153,7 @@ fun ComicViewerScreen(
     var showBookmarksMenu by remember { mutableStateOf(false) }
     var showJumpDialog by remember { mutableStateOf(false) }
     var showThumbnailsSheet by remember { mutableStateOf(false) }
+    var showMetadataSheet by remember { mutableStateOf(false) }
 
     // Sync pager position with instance state
     LaunchedEffect(pagerState) {
@@ -362,6 +365,15 @@ fun ComicViewerScreen(
                             }
                         }
 
+                        // Extended Metadata Info
+                        IconButton(onClick = { showMetadataSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Info,
+                                contentDescription = "Extended Metadata",
+                                tint = Color.White
+                            )
+                        }
+
                         // Open With external app
                         IconButton(onClick = {
                             val openIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -381,6 +393,13 @@ fun ComicViewerScreen(
                     modifier = Modifier.statusBarsPadding()
                 )
             }
+        }
+        if (showMetadataSheet) {
+            ExtendedMetadataSheet(
+                uri = instance.uri,
+                displayNameHint = instance.title,
+                onDismiss = { showMetadataSheet = false }
+            )
         }
 
         // Floating Bottom Scrubber Bar

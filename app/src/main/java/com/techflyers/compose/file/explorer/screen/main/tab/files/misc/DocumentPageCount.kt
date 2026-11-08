@@ -10,8 +10,10 @@ object DocumentPageCount {
 
     data class Count(val value: Int, val unit: String)
 
-    fun get(file: File): Count? {
-        val key = "${file.absolutePath}:${file.lastModified()}:${file.length()}"
+    fun get(file: File, cachedLastModified: Long = -1L, cachedSize: Long = -1L): Count? {
+        val mtime = if (cachedLastModified >= 0L) cachedLastModified else file.lastModified()
+        val len = if (cachedSize >= 0L) cachedSize else file.length()
+        val key = "${file.absolutePath}:$mtime:$len"
         cache.get(key)?.let { return Count(it.first, it.second) }
         val ext = file.extension.lowercase()
         val result = when (ext) {

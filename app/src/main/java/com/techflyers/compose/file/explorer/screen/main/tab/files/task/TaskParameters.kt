@@ -11,13 +11,15 @@ data class CopyTaskParameters(
 class DeleteTaskParameters : TaskParameters
 
 data class ExtractTaskParameters(
-    val password: String? = null
+    val password: String? = null,
+    val extractInParentDirect: Boolean = false
 ) : TaskParameters
 
 data class CompressTaskParameters(
     val destPath: String,
     val password: String? = null,
-    val compressionLevel: Int = 5
+    val compressionLevel: Int = 5,
+    val splitVolumeSize: String? = null
 ) : TaskParameters
 
 data class RenameTaskParameters(

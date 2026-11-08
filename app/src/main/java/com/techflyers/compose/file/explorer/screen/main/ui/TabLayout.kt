@@ -108,13 +108,12 @@ fun TabLayout(
     var from by remember { mutableIntStateOf(-1) }
     var to by remember { mutableIntStateOf(-1) }
     var draggedItem by remember { mutableIntStateOf(-1) }
-    var isDraggingAnyTab by remember { mutableStateOf(false) }
     var lastDragFinishedTime by remember { mutableLongStateOf(0L) }
     val list = remember { mutableStateListOf<Int>() }
     var showClosedTabsHistoryDialog by remember { mutableStateOf(false) }
 
     val reorderableLazyListState = rememberReorderableLazyListState(tabLayoutState) { old, new ->
-        if (draggedItem > -1 || isDraggingAnyTab) {
+        if (draggedItem > -1) {
             if (from < 0) from = old.index
             to = new.index
 
@@ -122,8 +121,8 @@ fun TabLayout(
         }
     }
 
-    LaunchedEffect(draggedItem, isDraggingAnyTab) {
-        if (draggedItem < 0 && !isDraggingAnyTab && from > -1 && to > -1) {
+    LaunchedEffect(draggedItem) {
+        if (draggedItem < 0 && from > -1 && to > -1) {
             lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
             onReorder(from, to)
             from = -1
@@ -131,18 +130,16 @@ fun TabLayout(
         }
     }
 
-    // Keep `list` synchronously in sync with `tabs` by `slotId` when not dragging so in-place
-    // tab replacements never render a 0-width missing frame or shift edge tabs off-screen.
-    if (!isDraggingAnyTab && draggedItem < 0) {
+    LaunchedEffect(tabs) {
         if (list.size == tabs.size) {
             tabs.forEachIndexed { idx, tab ->
-                if (list[idx] != tab.slotId) {
-                    list[idx] = tab.slotId
+                if (list[idx] != tab.id) {
+                    list[idx] = tab.id
                 }
             }
         } else {
             list.clear()
-            list.addAll(tabs.map { it.slotId })
+            list.addAll(tabs.map { it.id })
         }
     }
 
@@ -168,21 +165,18 @@ fun TabLayout(
                 .heightIn(max = 42.dp),
             state = tabLayoutState,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = if (plusOnLeft) 0.dp else 8.dp,
+                start = if (plusOnLeft) 0.dp else (if (hideToolbar) 8.dp else 0.dp),
                 end = if (plusOnLeft) 8.dp else 0.dp
             ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            itemsIndexed(list, key = { _, item -> item }) { index, slotId ->
-                tabs.find { it.slotId == slotId }?.let { tab ->
-                    ReorderableItem(reorderableLazyListState, key = tab.slotId) { isDragged ->
-                        if (isDragged && draggedItem isNot slotId) {
-                            draggedItem = slotId
-                            isDraggingAnyTab = true
-                        } else if (!isDragged && draggedItem == slotId) {
+            itemsIndexed(list, key = { _, item -> item }) { index, id ->
+                tabs.find { it.id == id }?.let { tab ->
+                    ReorderableItem(reorderableLazyListState, key = tab.id) { isDragged ->
+                        if (isDragged && draggedItem isNot id) {
+                            draggedItem = id
+                        } else if (!isDragged && draggedItem == id) {
                             draggedItem = -1
-                            isDraggingAnyTab = false
-                            lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                         }
 
                         val isSelected = selectedTabIndex == index
@@ -227,9 +221,12 @@ fun TabLayout(
                         var showTabHeaderMenu by remember(tab.id) {
                             mutableStateOf(false)
                         }
+                        var lastClickTime by remember(tab.id) {
+                            mutableLongStateOf(0L)
+                        }
 
-                        LaunchedEffect(isDragged, isDraggingAnyTab, draggedItem) {
-                            if (isDragged || isDraggingAnyTab || draggedItem != -1) {
+                        LaunchedEffect(isDragged, draggedItem, reorderableLazyListState.isAnyItemDragging) {
+                            if (isDragged || draggedItem != -1 || reorderableLazyListState.isAnyItemDragging) {
                                 showTabHeaderMenu = false
                             }
                         }
@@ -252,36 +249,35 @@ fun TabLayout(
                                     interactionSource = remember { MutableInteractionSource() },
                                     onClick = {
                                         val currentTime = android.os.SystemClock.uptimeMillis()
-                                        if (isDragged || isDraggingAnyTab || draggedItem != -1 ||
-                                            (currentTime - lastDragFinishedTime) < 400L
+                                        if (isDragged || draggedItem != -1 || reorderableLazyListState.isAnyItemDragging ||
+                                            (currentTime - lastDragFinishedTime) < 350L
                                         ) {
                                             showTabHeaderMenu = false
                                             return@combinedClickable
                                         }
-                                        if (!isSelected) {
-                                            mainActivityManager.selectTabAt(index)
-                                        } else {
-                                            showTabHeaderMenu = true
-                                        }
-                                    },
-                                    onLongClick = {
-                                        if (!isDragged && !isDraggingAnyTab && draggedItem == -1) {
-                                            if (!isSelected) {
-                                                mainActivityManager.selectTabAt(index, true)
+                                        if (currentTime - lastClickTime < 300L) {
+                                            lastClickTime = 0L
+                                            showTabHeaderMenu = false
+                                            if (!tab.isPinned) {
+                                                mainActivityManager.removeTabAt(index)
                                             }
-                                            showTabHeaderMenu = true
+                                        } else {
+                                            lastClickTime = currentTime
+                                            if (!isSelected) {
+                                                mainActivityManager.selectTabAt(index)
+                                            } else {
+                                                showTabHeaderMenu = true
+                                            }
                                         }
                                     }
                                 )
                                 .padding(horizontal = 16.dp)
                                 .longPressDraggableHandle(
                                     onDragStarted = {
-                                        isDraggingAnyTab = true
                                         showTabHeaderMenu = false
                                     },
                                     onDragStopped = {
                                         val didReorder = from > -1 && to > -1 && from != to
-                                        isDraggingAnyTab = false
                                         lastDragFinishedTime = android.os.SystemClock.uptimeMillis()
                                         if (!didReorder) {
                                             if (!isSelected) {
@@ -333,12 +329,12 @@ fun TabLayout(
                             }
                             Text(
                                 modifier = Modifier.alpha(alphaAnim.value),
-                                text = tab.header,
+                                text = (tab as? FilesTab)?.tabViewLabel ?: tab.header,
                                 fontSize = 14.sp,
-                                fontWeight = if (isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (isSelected || isCopyHereDestination) FontWeight.SemiBold else FontWeight.Normal,
                                 color = textColorAnim.value
                             )
-                            if (showTabHeaderMenu && !isDragged && !isDraggingAnyTab && draggedItem == -1) {
+                            if (showTabHeaderMenu && !isDragged && draggedItem == -1 && !reorderableLazyListState.isAnyItemDragging) {
                                 OptionsMenu(
                                     tab = tab,
                                     index = index,

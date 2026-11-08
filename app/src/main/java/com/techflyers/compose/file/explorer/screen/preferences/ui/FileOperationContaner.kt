@@ -283,8 +283,12 @@ fun FileOperationContainer() {
 
         var showResetLockDialog by remember { mutableStateOf(false) }
         var showResetVaultDialog by remember { mutableStateOf(false) }
-        val lockSummary = remember(showResetLockDialog, preferences.encryptLockedFolders, preferences.autoEncryptLargeFolders) {
-            FolderLockStore.getStatusSummary()
+        var lockSummary by remember { mutableStateOf("No folders are currently locked") }
+
+        LaunchedEffect(showResetLockDialog, preferences.encryptLockedFolders, preferences.autoEncryptLargeFolders) {
+            lockSummary = withContext(Dispatchers.IO) {
+                FolderLockStore.getStatusSummary()
+            }
         }
 
         PreferenceItem(

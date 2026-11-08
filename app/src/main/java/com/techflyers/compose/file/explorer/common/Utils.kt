@@ -470,24 +470,28 @@ fun Uri.getMimeType(context: Context): String {
 
 val Uri.name: String?
     get() {
-        return when (scheme) {
-            "content" -> {
-                val cursor = globalClass.contentResolver.query(this, null, null, null, null)
-                cursor?.use {
-                    val nameIndex = it.getColumnIndex(DISPLAY_NAME)
-                    if (it.moveToFirst() && nameIndex >= 0) {
-                        it.getString(nameIndex)
-                    } else {
-                        null
-                    }
+        return try {
+            when (scheme) {
+                "content" -> {
+                    val cursor = globalClass.contentResolver.query(this, null, null, null, null)
+                    cursor?.use {
+                        val nameIndex = it.getColumnIndex(DISPLAY_NAME)
+                        if (it.moveToFirst() && nameIndex >= 0) {
+                            it.getString(nameIndex)
+                        } else {
+                            null
+                        }
+                    } ?: lastPathSegment
                 }
-            }
 
-            "file" -> {
-                File(path ?: emptyString).name
-            }
+                "file" -> {
+                    File(path ?: emptyString).name
+                }
 
-            else -> null
+                else -> lastPathSegment
+            }
+        } catch (_: Exception) {
+            lastPathSegment
         }
     }
 
@@ -502,28 +506,32 @@ data class UriInfo(
 )
 
 fun Uri.lastModified(context: Context): Long {
-    return when (scheme) {
-        "content" -> {
-            val cursor = context.contentResolver.query(this, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val lastModifiedIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
-                    if (lastModifiedIndex isNot -1) {
-                        it.getLong(lastModifiedIndex) * 1000L
+    return try {
+        when (scheme) {
+            "content" -> {
+                val cursor = context.contentResolver.query(this, null, null, null, null)
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val lastModifiedIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                        if (lastModifiedIndex isNot -1) {
+                            it.getLong(lastModifiedIndex) * 1000L
+                        } else {
+                            0L
+                        }
                     } else {
                         0L
                     }
-                } else {
-                    0L
-                }
-            } ?: 0L
-        }
+                } ?: 0L
+            }
 
-        "file" -> {
-            path?.let { File(it).lastModified() } ?: 0L
-        }
+            "file" -> {
+                path?.let { File(it).lastModified() } ?: 0L
+            }
 
-        else -> 0L
+            else -> 0L
+        }
+    } catch (_: Exception) {
+        0L
     }
 }
 
@@ -537,40 +545,45 @@ fun Uri.getUriInfo(context: Context): UriInfo {
 
     if (scheme.equals("content", ignoreCase = true)) {
         // This is a content URI. Use ContentResolver to query metadata.
-        val cursor = contentResolver.query(this, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                // Get Display Name
-                val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex isNot -1) {
-                    name = it.getString(nameIndex)
-                }
-
-                // Get Size
-                val sizeIndex = it.getColumnIndex(OpenableColumns.SIZE)
-                if (sizeIndex isNot -1) {
-                    size = it.getLong(sizeIndex)
-                }
-
-                // Get Last Modified (might not be available for all providers)
-                val lastModifiedIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
-                if (lastModifiedIndex isNot -1) {
-                    // The value is in seconds, convert to milliseconds
-                    lastModified = it.getLong(lastModifiedIndex) * 1000L
-                }
-
-                // Try to get a real path. WARNING: This is not reliable and often returns null.
-                // It's most likely to work for MediaStore URIs.
-                try {
-                    val pathIndex = it.getColumnIndex(MediaStore.Images.Media.DATA)
-                    if (pathIndex isNot -1) {
-                        path = it.getString(pathIndex)
+        try {
+            val cursor = contentResolver.query(this, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    // Get Display Name
+                    val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex isNot -1) {
+                        name = it.getString(nameIndex)
                     }
-                } catch (_: Exception) {
-                    // The DATA column might not exist for this URI, which is normal.
-                    path = null
+
+                    // Get Size
+                    val sizeIndex = it.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIndex isNot -1) {
+                        size = it.getLong(sizeIndex)
+                    }
+
+                    // Get Last Modified (might not be available for all providers)
+                    val lastModifiedIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                    if (lastModifiedIndex isNot -1) {
+                        // The value is in seconds, convert to milliseconds
+                        lastModified = it.getLong(lastModifiedIndex) * 1000L
+                    }
+
+                    // Try to get a real path. WARNING: This is not reliable and often returns null.
+                    // It's most likely to work for MediaStore URIs.
+                    try {
+                        val pathIndex = it.getColumnIndex(MediaStore.Images.Media.DATA)
+                        if (pathIndex isNot -1) {
+                            path = it.getString(pathIndex)
+                        }
+                    } catch (_: Exception) {
+                        // The DATA column might not exist for this URI, which is normal.
+                        path = null
+                    }
                 }
             }
+        } catch (_: Exception) {}
+        if (name.isNullOrEmpty()) {
+            name = lastPathSegment
         }
     } else if (scheme.equals("file", ignoreCase = true)) {
         // This is a file URI.
@@ -771,6 +784,7 @@ fun resolveUriToPath(context: Context, uri: Uri, extraFilePath: String? = null):
             "/external_files_path/" to externalStorage,
             "/external_files/" to externalStorage,
             "/external-path/" to externalStorage,
+            "/external/" to externalStorage,
             "/root_path/" to "",
             "/files/" to externalStorage,
             "/storage/" to "/storage"
@@ -803,7 +817,8 @@ fun resolveUriToPath(context: Context, uri: Uri, extraFilePath: String? = null):
             val extension = uri.name?.substringAfterLast('.', "tmp") ?: "tmp"
             val rawName = uri.name?.substringBeforeLast('.') ?: "temp"
             val safeName = rawName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(30)
-            val prefix = if (safeName.isNotBlank() && safeName != "temp") "${safeName}_" else "prism_temp_"
+            val prefix = (if (safeName.isNotBlank() && safeName != "temp") "${safeName}_" else "prism_temp_")
+                .let { if (it.length < 3) it.padEnd(3, '_') else it }
             val tempFile = File.createTempFile(prefix, ".$extension", context.cacheDir)
             tempFile.deleteOnExit()
             context.contentResolver.openInputStream(uri)?.use { input ->

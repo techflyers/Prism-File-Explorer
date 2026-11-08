@@ -269,7 +269,20 @@ class TextEditorManager {
                 } ?: withContext(Dispatchers.Main) { onFailed().also { isSaving = false } }
             } catch (e: Exception) {
                 logger.logError(e)
-                withContext(Dispatchers.Main) { onFailed().also { isSaving = false } }
+                val targetFile = activeFile.file
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = targetFile,
+                    throwable = e
+                )
+                withContext(Dispatchers.Main) {
+                    globalClass.showMsg(
+                        com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                            globalClass.getString(R.string.failed_to_save),
+                            reason
+                        )
+                    )
+                    onFailed().also { isSaving = false }
+                }
             }
         }
     }
@@ -408,8 +421,8 @@ class TextEditorManager {
         val isVaultTemp = com.techflyers.compose.file.explorer.screen.main.tab.files.service.VaultService.isVaultTempFile(localFileHolder.file)
         if (isVaultTemp) {
             fileInstanceList.removeAll { it.file.uniquePath == localFileHolder.uniquePath }
-            globalClass.preferencesManager.readOnly = false
         }
+        globalClass.preferencesManager.readOnly = false
         activeFile = getFileInstance(localFileHolder)?.file ?: localFileHolder
 
         val intent = Intent(context, TextEditorActivity::class.java).apply {
@@ -488,8 +501,7 @@ class TextEditorManager {
                     it.readOnly = false
                     editable = true
                 } else {
-                    it.readOnly = true
-                    editable = false
+                    editable = !it.readOnly
                 }
                 setPinLineNumber(it.pinLineNumber)
                 getComponent(Magnifier::class.java).isEnabled = it.enableMagnifier

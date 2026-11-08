@@ -18,6 +18,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.VirtualFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ApkPreviewDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ArchiveErrorDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ArchivePasswordDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.BookmarksDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.CopyHereConfirmationDialog
@@ -195,8 +196,16 @@ fun Dialogs(tab: FilesTab) {
         onDismissRequest = { tab.toggleArchivePasswordDialog(null) }
     )
 
+    ArchiveErrorDialog(
+        show = dialogsState.value.showArchiveErrorDialog,
+        archiveName = tab.archiveErrorTitle,
+        summary = tab.archiveErrorSummary,
+        diagnosticLog = tab.archiveErrorLog,
+        onDismissRequest = { tab.dismissArchiveErrorDialog() }
+    )
+
     ShareFolderCompressDialog(
-        show = dialogsState.value.showShareFolderCompressDialog && tab.selectedFiles.isNotEmpty(),
+        show = dialogsState.value.showShareFolderCompressDialog && (tab.selectedFiles.isNotEmpty() || tab.targetFile != null),
         tab = tab,
         onDismissRequest = { tab.toggleShareFolderCompressDialog(false) }
     )

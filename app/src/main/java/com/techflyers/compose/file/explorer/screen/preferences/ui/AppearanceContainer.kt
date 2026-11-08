@@ -15,6 +15,8 @@ import androidx.compose.material.icons.rounded.Nightlight
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Tab
 import androidx.compose.material.icons.rounded.TabUnselected
 import androidx.compose.material.icons.rounded.Tune
@@ -37,9 +39,14 @@ import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.showMsg
+import com.techflyers.compose.file.explorer.common.toJson
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SelectionRibbonSettingsDialog
+import com.techflyers.compose.file.explorer.screen.main.ui.TopToolbarSettingsDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeLayout
+import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionIds
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
+import com.google.gson.Gson
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -47,6 +54,7 @@ import java.util.Locale
 fun AppearanceContainer() {
     val prefs = globalClass.preferencesManager
     var showSelectionRibbonSettingsDialog by remember { mutableStateOf(false) }
+    var showTopToolbarSettingsDialog by remember { mutableStateOf(false) }
 
     Container(
         title = stringResource(R.string.appearance),
@@ -78,6 +86,18 @@ fun AppearanceContainer() {
         PreferenceDivider()
 
         PreferenceItem(
+            label = "Customize top toolbar",
+            supportingText = "Reorder or toggle top toolbar buttons (including hamburger menu) and overflow menu (⋮) items",
+            icon = Icons.Rounded.Tune,
+            onClick = { showTopToolbarSettingsDialog = true }
+        )
+        if (showTopToolbarSettingsDialog) {
+            TopToolbarSettingsDialog(onDismiss = { showTopToolbarSettingsDialog = false })
+        }
+
+        PreferenceDivider()
+
+        PreferenceItem(
             label = "Show directory path bar",
             supportingText = "Display the interactive breadcrumb path bar above the file list",
             icon = Icons.Rounded.FolderOpen,
@@ -88,11 +108,33 @@ fun AppearanceContainer() {
         PreferenceDivider()
 
         PreferenceItem(
+            label = "Multiline wrap in path bar",
+            supportingText = "Wrap long paths and folder names across multiple lines instead of scrolling horizontally",
+            icon = Icons.Rounded.ViewStream,
+            switchState = prefs.pathBarMultilineWrap,
+            onSwitchChange = { prefs.pathBarMultilineWrap = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
             label = "Hide Home tab search bar",
             supportingText = "Hide the search box on the Home tab while keeping the toolbar search icon visible",
             icon = Icons.Rounded.SearchOff,
             switchState = prefs.hideHomeSearchBar,
-            onSwitchChange = { prefs.hideHomeSearchBar = it }
+            onSwitchChange = { hide ->
+                prefs.hideHomeSearchBar = hide
+                try {
+                    val currentLayout = Gson().fromJson(
+                        prefs.homeTabLayout,
+                        HomeLayout::class.java
+                    )
+                    val updatedSections = currentLayout.getSections().map {
+                        if (it.id == HomeSectionIds.SEARCH_BAR) it.copy(isEnabled = !hide) else it
+                    }
+                    prefs.homeTabLayout = HomeLayout(updatedSections).toJson()
+                } catch (_: Exception) {}
+            }
         )
 
         PreferenceDivider()
@@ -153,6 +195,46 @@ fun AppearanceContainer() {
             icon = Icons.Rounded.Bookmark,
             switchState = prefs.showBookmarksInDrawer,
             onSwitchChange = { prefs.showBookmarksInDrawer = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.show_settings_in_drawer),
+            supportingText = stringResource(R.string.show_settings_in_drawer_desc),
+            icon = Icons.Rounded.Settings,
+            switchState = prefs.showSettingsInDrawer,
+            onSwitchChange = { prefs.showSettingsInDrawer = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.show_about_in_drawer),
+            supportingText = stringResource(R.string.show_about_in_drawer_desc),
+            icon = Icons.Rounded.Info,
+            switchState = prefs.showAboutInDrawer,
+            onSwitchChange = { prefs.showAboutInDrawer = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.drawer_always_scroll_top),
+            supportingText = stringResource(R.string.drawer_always_scroll_top_desc),
+            icon = Icons.Rounded.VerticalAlignTop,
+            switchState = prefs.drawerAlwaysScrollToTop,
+            onSwitchChange = { prefs.drawerAlwaysScrollToTop = it }
+        )
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = stringResource(R.string.compact_storage_in_drawer),
+            supportingText = stringResource(R.string.compact_storage_in_drawer_desc),
+            icon = Icons.Rounded.Dock,
+            switchState = prefs.drawerCompactStorageView,
+            onSwitchChange = { prefs.drawerCompactStorageView = it }
         )
 
         PreferenceDivider()

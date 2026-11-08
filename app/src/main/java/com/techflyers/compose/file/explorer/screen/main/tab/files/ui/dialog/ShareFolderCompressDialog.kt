@@ -42,13 +42,17 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ZipFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ArchiveManager
+import com.techflyers.compose.file.explorer.screen.main.tab.files.zip.ZipTree
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 private data class ShareFormatOption(
     val label: String,
@@ -73,8 +77,14 @@ fun ShareFolderCompressDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val targetFiles = remember(tab.selectedFiles) {
-        tab.selectedFiles.values.filterIsInstance<LocalFileHolder>()
+    val targetFiles = remember(tab.selectedFiles, tab.targetFile) {
+        if (tab.selectedFiles.isNotEmpty()) {
+            tab.selectedFiles.values.toList()
+        } else if (tab.targetFile != null) {
+            listOf(tab.targetFile!!)
+        } else {
+            emptyList()
+        }
     }
 
     val formats = remember {
@@ -239,7 +249,7 @@ fun ShareFolderCompressDialog(
                 Button(
                     onClick = {
                         if (targetFiles.isEmpty()) {
-                            globalClass.showMsg("No valid local files to compress")
+                            globalClass.showMsg("No files to compress")
                             onDismissRequest()
                             return@Button
                         }
@@ -263,7 +273,7 @@ fun ShareFolderCompressDialog(
                         }
 
                         val baseName = if (targetFiles.size == 1) {
-                            targetFiles.first().displayName
+                            targetFiles.first().displayName.substringBeforeLast('.').ifEmpty { targetFiles.first().displayName }
                         } else {
                             tab.activeFolder.displayName.ifEmpty { "archive" }
                         }
@@ -273,27 +283,116 @@ fun ShareFolderCompressDialog(
 
                         compressJob = scope.launch(Dispatchers.IO) {
                             try {
-                                val parentPath = targetFiles.firstOrNull()?.getParent()?.uniquePath?.takeIf {
-                                    it.isNotEmpty() && File(it).isDirectory
-                                }
-                                val sourcePaths = if (parentPath != null && targetFiles.all { it.getParent()?.uniquePath == parentPath }) {
-                                    targetFiles.map { it.displayName }
-                                } else {
-                                    targetFiles.map { it.file.absolutePath }
-                                }
-
-                                ArchiveManager.compress(
-                                    sourcePaths = sourcePaths,
-                                    archivePath = destFile.absolutePath,
-                                    password = null,
-                                    compressionLevel = chosenLevel,
-                                    workingDir = parentPath,
-                                    isAborted = { isAborted },
-                                    onProgress = { pct, curFile ->
-                                        progressPercent = pct
-                                        currentFile = curFile
+                                val allLocal = targetFiles.all { it is LocalFileHolder }
+                                if (allLocal) {
+                                    val localFiles = targetFiles.filterIsInstance<LocalFileHolder>()
+                                    val parentPath = localFiles.firstOrNull()?.getParent()?.uniquePath?.takeIf {
+                                        it.isNotEmpty() && File(it).isDirectory
                                     }
-                                )
+                                    val sourcePaths = if (parentPath != null && localFiles.all { it.getParent()?.uniquePath == parentPath }) {
+                                        localFiles.map { it.displayName }
+                                    } else {
+                                        localFiles.map { it.file.absolutePath }
+                                    }
+
+                                    ArchiveManager.compress(
+                                        sourcePaths = sourcePaths,
+                                        archivePath = destFile.absolutePath,
+                                        password = null,
+                                        compressionLevel = chosenLevel,
+                                        workingDir = parentPath,
+                                        isAborted = { isAborted },
+                                        onProgress = { pct, curFile ->
+                                            progressPercent = pct
+                                            currentFile = curFile
+                                        }
+                                    )
+                                } else {
+                                    val tempExtractDir = File(
+                                        globalClass.cleanOnExitDir.file,
+                                        "share_compress_${UUID.randomUUID()}"
+                                    ).apply { mkdirs() }
+
+                                    try {
+                                        val zipHolders = targetFiles.filterIsInstance<ZipFileHolder>()
+                                        if (zipHolders.isNotEmpty()) {
+                                            val byTree = zipHolders.groupBy { it.zipTree }
+                                            for ((zipTree, holders) in byTree) {
+                                                val sourceFile = zipTree.source.file
+                                                val sourceName = sourceFile.name
+                                                val ext = zipTree.source.extension.lowercase()
+                                                val isNative = ArchiveManager.isNativeArchivePath(sourceName) || ArchiveManager.isNativeArchive(ext)
+
+                                                if (isNative) {
+                                                    val internalPaths = holders.map { it.node.path }
+                                                    ArchiveManager.extractMembers(
+                                                        archivePath = zipTree.archivePathForNative,
+                                                        internalPaths = internalPaths,
+                                                        destinationDir = tempExtractDir.absolutePath,
+                                                        password = zipTree.password
+                                                    )
+                                                } else {
+                                                    val zipFile = if (!zipTree.password.isNullOrEmpty()) {
+                                                        net.lingala.zip4j.ZipFile(zipTree.tempArchiveFile, zipTree.password!!.toCharArray())
+                                                    } else {
+                                                        net.lingala.zip4j.ZipFile(zipTree.tempArchiveFile)
+                                                    }
+                                                    zipFile.use { zf ->
+                                                        for (h in holders) {
+                                                            if (h.isFolder) {
+                                                                val prefix = if (h.node.path.endsWith("/")) h.node.path else "${h.node.path}/"
+                                                                val headers = zf.fileHeaders.filter { it.fileName.startsWith(prefix) || it.fileName == h.node.path }
+                                                                for (header in headers) {
+                                                                    zf.extractFile(header, tempExtractDir.absolutePath)
+                                                                }
+                                                            } else {
+                                                                zf.extractFile(h.node.path, tempExtractDir.absolutePath)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        val localHolders = targetFiles.filterIsInstance<LocalFileHolder>()
+                                        for (local in localHolders) {
+                                            val dest = File(tempExtractDir, local.displayName)
+                                            if (local.isFolder) {
+                                                local.file.copyRecursively(dest, overwrite = true)
+                                            } else {
+                                                local.file.copyTo(dest, overwrite = true)
+                                            }
+                                        }
+
+                                        val activeZipFolder = tab.activeFolder as? ZipFileHolder
+                                        val baseRelPath = activeZipFolder?.node?.path?.trim('/') ?: ""
+                                        val stagedFolder = if (baseRelPath.isNotEmpty() && File(tempExtractDir, baseRelPath).isDirectory) {
+                                            File(tempExtractDir, baseRelPath)
+                                        } else {
+                                            tempExtractDir
+                                        }
+
+                                        val itemsToCompress = stagedFolder.listFiles()?.map { it.name } ?: emptyList()
+                                        if (itemsToCompress.isEmpty()) {
+                                            throw IllegalStateException("No files were extracted from archive to compress")
+                                        }
+
+                                        ArchiveManager.compress(
+                                            sourcePaths = itemsToCompress,
+                                            archivePath = destFile.absolutePath,
+                                            password = null,
+                                            compressionLevel = chosenLevel,
+                                            workingDir = stagedFolder.absolutePath,
+                                            isAborted = { isAborted },
+                                            onProgress = { pct, curFile ->
+                                                progressPercent = pct
+                                                currentFile = curFile
+                                            }
+                                        )
+                                    } finally {
+                                        tempExtractDir.deleteRecursively()
+                                    }
+                                }
 
                                 if (!isAborted && destFile.exists() && destFile.length() > 0) {
                                     withContext(Dispatchers.Main) {
@@ -315,7 +414,11 @@ fun ShareFolderCompressDialog(
                                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                             }
 
-                                        val chooser = Intent.createChooser(shareIntent, "Share archive")
+                                        val chooser = Intent.createChooser(shareIntent, "Share archive").apply {
+                                            if (context !is android.app.Activity) {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                        }
                                         context.startActivity(chooser)
                                     }
                                 } else if (isAborted) {
@@ -329,8 +432,20 @@ fun ShareFolderCompressDialog(
                                 if (destFile.exists()) destFile.delete()
                                 withContext(Dispatchers.Main) {
                                     isCompressing = false
-                                    globalClass.showMsg("Compression failed: ${e.message ?: "Unknown error"}")
                                     onDismissRequest()
+                                    if (e is ZipTree.ArchivePasswordRequiredException ||
+                                        (e is ArchiveManager.ArchiveOperationException && e.isPasswordError)
+                                    ) {
+                                        val tree = targetFiles.filterIsInstance<ZipFileHolder>().firstOrNull()?.zipTree
+                                        if (tree != null) {
+                                            tab.toggleArchivePasswordDialog(tree.source, isRetry = true)
+                                        }
+                                    } else {
+                                        val summary = (e as? ArchiveManager.ArchiveOperationException)?.summary
+                                            ?: e.message
+                                            ?: "Compression failed"
+                                        globalClass.showMsg(summary)
+                                    }
                                 }
                             }
                         }

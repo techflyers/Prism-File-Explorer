@@ -41,16 +41,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ShizukuContainer() {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showDownloadDialog by remember { mutableStateOf(false) }
     var showInfoDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        ShizukuManager.checkStatus()
-        ShizukuManager.probeRoot()
+        withContext(Dispatchers.IO) {
+            ShizukuManager.checkStatus()
+            ShizukuManager.probeRoot()
+        }
     }
 
     Container(
@@ -93,7 +99,9 @@ fun ShizukuContainer() {
             onClick = {
                 when {
                     ShizukuManager.isShizukuGranted -> {
-                        ShizukuManager.checkStatus()
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            ShizukuManager.checkStatus()
+                        }
                     }
                     ShizukuManager.isBinderAlive -> {
                         ShizukuManager.requestShizukuPermission()
@@ -135,18 +143,20 @@ fun ShizukuContainer() {
                 supportingText = modeLabel,
                 icon = Icons.Rounded.SwapHoriz,
                 onClick = {
-                    val rootOk = ShizukuManager.probeRoot()
-                    val next = when (ShizukuManager.accessMode) {
-                        ShizukuManager.AccessMode.NONE ->
-                            if (ShizukuManager.isShizukuGranted) ShizukuManager.AccessMode.SHIZUKU
-                            else if (rootOk) ShizukuManager.AccessMode.ROOT
-                            else ShizukuManager.AccessMode.NONE
-                        ShizukuManager.AccessMode.SHIZUKU ->
-                            if (rootOk) ShizukuManager.AccessMode.ROOT
-                            else ShizukuManager.AccessMode.NONE
-                        ShizukuManager.AccessMode.ROOT -> ShizukuManager.AccessMode.NONE
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val rootOk = ShizukuManager.probeRoot()
+                        val next = when (ShizukuManager.accessMode) {
+                            ShizukuManager.AccessMode.NONE ->
+                                if (ShizukuManager.isShizukuGranted) ShizukuManager.AccessMode.SHIZUKU
+                                else if (rootOk) ShizukuManager.AccessMode.ROOT
+                                else ShizukuManager.AccessMode.NONE
+                            ShizukuManager.AccessMode.SHIZUKU ->
+                                if (rootOk) ShizukuManager.AccessMode.ROOT
+                                else ShizukuManager.AccessMode.NONE
+                            ShizukuManager.AccessMode.ROOT -> ShizukuManager.AccessMode.NONE
+                        }
+                        ShizukuManager.updateAccessMode(next)
                     }
-                    ShizukuManager.updateAccessMode(next)
                 }
             )
         }
