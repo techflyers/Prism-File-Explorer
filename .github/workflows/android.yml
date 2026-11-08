@@ -1,0 +1,135 @@
+name: Android CI
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - ".github/workflows/android.yml"
+      - "app/**"
+      - "baselineProfile/**"
+      - "gradle/**"
+      - "**/*.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
+      - "settings.gradle.kts"
+      - "proot/**"
+      - "link2symlink/**"
+      - "terminal-emulator/**"
+      - "terminal-view/**"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - ".github/workflows/android.yml"
+      - "app/**"
+      - "baselineProfile/**"
+      - "gradle/**"
+      - "**/*.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
+      - "settings.gradle.kts"
+      - "proot/**"
+      - "link2symlink/**"
+      - "terminal-emulator/**"
+      - "terminal-view/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build pre-release APK
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platforms;android-36
+            build-tools;36.0.0
+            ndk;28.2.13676358
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Remove machine-specific Gradle Java home
+        run: sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+
+      - name: Check for release signing key
+        id: release-signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure release signing
+        if: ${{ steps.release-signing.outputs.configured == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/prism-release.jks"
+          cat >> local.properties <<EOF
+          signing.storeFilePath=$GITHUB_WORKSPACE/prism-release.jks
+          signing.storePassword=$ANDROID_KEYSTORE_PASSWORD
+          signing.keyAlias=$ANDROID_KEY_ALIAS
+          signing.keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      # Keep the repository app sources unchanged. Patch only this CI checkout
+      # so the side-by-side pre-release APK has unique provider authorities.
+      - name: Isolate pre-release provider authorities
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/build.gradle.kts")
+          source = path.read_text()
+          marker = "        }\n    }\n\n    packaging {"
+          pre_release = "        }\n        create(\"preRelease\") {\n            initWith(getByName(\"release\"))\n            applicationIdSuffix = \".prerelease\"\n            versionNameSuffix = \"-pre-release\"\n            matchingFallbacks += listOf(\"release\")\n        }\n    }\n\n    packaging {"
+          if source.count(marker) != 1:
+              raise SystemExit("Could not find the expected buildTypes insertion point")
+          path.write_text(source.replace(marker, pre_release, 1))
+          PY
+          sed -i 's#android:authorities="com.techflyers.compose.file.explorer.provider"#android:authorities="${applicationId}.provider"#' app/src/main/AndroidManifest.xml
+          sed -i 's#"com.techflyers.compose.file.explorer.provider"#"${globalClass.packageName}.provider"#' app/src/main/java/com/techflyers/compose/file/explorer/screen/main/tab/files/holder/LocalFileHolder.kt
+          sed -i 's#"com.techflyers.compose.file.explorer.provider"#"${context.packageName}.provider"#g' app/src/main/java/com/techflyers/compose/file/explorer/screen/viewer/latex/LatexViewerActivity.kt
+
+      # The preRelease build type is minified and uses release signing, while
+      # its application ID suffix allows it to be installed beside production.
+      - name: Build pre-release APK
+        run: ./gradlew --no-daemon --stacktrace assemblePreRelease
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: prism-universal-pre-release
+          path: app/build/outputs/apk/preRelease/app-universal-preRelease.apk
+          if-no-files-found: error
+
+      - name: Clean up signing material
+        if: ${{ always() }}
+        run: rm -f local.properties prism-release.jks
