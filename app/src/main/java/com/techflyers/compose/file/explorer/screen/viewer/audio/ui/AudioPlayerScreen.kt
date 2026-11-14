@@ -17,6 +17,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
+import android.content.res.Configuration
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,15 +28,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -139,6 +150,8 @@ fun MusicPlayerScreen(
     onDelete: ((Uri) -> Boolean)? = null
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val playerState by audioPlayerInstance.playerState.collectAsState()
     val metadata by audioPlayerInstance.metadata.collectAsState()
     val isEqualizerVisible by audioPlayerInstance.isEqualizerVisible.collectAsState()
@@ -283,12 +296,13 @@ fun MusicPlayerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .windowInsetsPadding(
+                        WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Status bar spacing
-                Spacer(modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars))
-
                 // Top controls
                 TopControls(
                     onEqualizerClick = { audioPlayerInstance.toggleEqualizer() },
@@ -362,103 +376,209 @@ fun MusicPlayerScreen(
                     }
                 )
 
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Album art with rotation animation
-                AlbumArt(
-                    isPlaying = playerState.isPlaying,
-                    metadata = metadata,
-                    audioPlayerColorScheme = customColorScheme
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Track counter (when playlist has multiple tracks)
-                if (playerState.totalTracks > 1) {
-                    Text(
-                        text = "${playerState.currentTrackIndex + 1} / ${playerState.totalTracks}",
-                        color = customColorScheme.tintColor.copy(alpha = 0.5f),
-                        fontSize = 12.sp,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-
-                // Song info
-                SongInfo(metadata = metadata, colorScheme = customColorScheme)
-
-                playerState.playbackErrorTitle?.let { errTitle ->
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                if (isLandscape) {
+                    // Landscape two-pane layout
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Left pane: Album art with rotation animation & track counter
                         Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = errTitle,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer
+                            AlbumArt(
+                                isPlaying = playerState.isPlaying,
+                                metadata = metadata,
+                                audioPlayerColorScheme = customColorScheme,
+                                artSize = 175.dp
                             )
-                            playerState.playbackErrorDetails?.let { details ->
+                            if (playerState.totalTracks > 1) {
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = details,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                            }
-                            playerState.codecDiagnosticLog?.takeIf { it.isNotBlank() }?.let { diag ->
-                                Text(
-                                    text = diag,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                    text = "${playerState.currentTrackIndex + 1} / ${playerState.totalTracks}",
+                                    color = customColorScheme.tintColor.copy(alpha = 0.5f),
+                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                             }
                         }
+
+                        // Right pane: Track metadata, seekbar, controls (scrollable if needed)
+                        Column(
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            SongInfo(metadata = metadata, colorScheme = customColorScheme)
+
+                            playerState.playbackErrorTitle?.let { errTitle ->
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = errTitle,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                        playerState.playbackErrorDetails?.let { details ->
+                                            Text(
+                                                text = details,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            ProgressBar(
+                                currentPosition = playerState.currentPosition,
+                                duration = playerState.duration,
+                                onSeek = { audioPlayerInstance.seekTo(it) },
+                                colorScheme = customColorScheme
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            MainControls(
+                                isPlaying = playerState.isPlaying,
+                                isLoading = playerState.isLoading,
+                                hasPrevious = playerState.currentTrackIndex > 0 || playerState.totalTracks > 1,
+                                hasNext = playerState.currentTrackIndex < playerState.totalTracks - 1 || playerState.totalTracks > 1,
+                                onPlayPause = { audioPlayerInstance.playPause() },
+                                onSkipNext = { audioPlayerInstance.skipNext() },
+                                onSkipPrevious = { audioPlayerInstance.skipPrevious() },
+                                colorScheme = customColorScheme
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            AdditionalControls(
+                                playbackSpeed = playerState.playbackSpeed,
+                                repeatMode = playerState.repeatMode,
+                                onSpeedChange = { audioPlayerInstance.setPlaybackSpeed(it) },
+                                onRepeatToggle = { audioPlayerInstance.toggleRepeatMode() },
+                                colorScheme = customColorScheme
+                            )
+                        }
                     }
+                } else {
+                    // Portrait Layout
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    AlbumArt(
+                        isPlaying = playerState.isPlaying,
+                        metadata = metadata,
+                        audioPlayerColorScheme = customColorScheme,
+                        artSize = 280.dp
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    if (playerState.totalTracks > 1) {
+                        Text(
+                            text = "${playerState.currentTrackIndex + 1} / ${playerState.totalTracks}",
+                            color = customColorScheme.tintColor.copy(alpha = 0.5f),
+                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    SongInfo(metadata = metadata, colorScheme = customColorScheme)
+
+                    playerState.playbackErrorTitle?.let { errTitle ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = errTitle,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                playerState.playbackErrorDetails?.let { details ->
+                                    Text(
+                                        text = details,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                playerState.codecDiagnosticLog?.takeIf { it.isNotBlank() }?.let { diag ->
+                                    Text(
+                                        text = diag,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    ProgressBar(
+                        currentPosition = playerState.currentPosition,
+                        duration = playerState.duration,
+                        onSeek = { audioPlayerInstance.seekTo(it) },
+                        colorScheme = customColorScheme
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    MainControls(
+                        isPlaying = playerState.isPlaying,
+                        isLoading = playerState.isLoading,
+                        hasPrevious = playerState.currentTrackIndex > 0 || playerState.totalTracks > 1,
+                        hasNext = playerState.currentTrackIndex < playerState.totalTracks - 1 || playerState.totalTracks > 1,
+                        onPlayPause = { audioPlayerInstance.playPause() },
+                        onSkipNext = { audioPlayerInstance.skipNext() },
+                        onSkipPrevious = { audioPlayerInstance.skipPrevious() },
+                        colorScheme = customColorScheme
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    AdditionalControls(
+                        playbackSpeed = playerState.playbackSpeed,
+                        repeatMode = playerState.repeatMode,
+                        onSpeedChange = { audioPlayerInstance.setPlaybackSpeed(it) },
+                        onRepeatToggle = { audioPlayerInstance.toggleRepeatMode() },
+                        colorScheme = customColorScheme
+                    )
                 }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Progress bar
-                ProgressBar(
-                    currentPosition = playerState.currentPosition,
-                    duration = playerState.duration,
-                    onSeek = { audioPlayerInstance.seekTo(it) },
-                    colorScheme = customColorScheme
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Main controls
-                MainControls(
-                    isPlaying = playerState.isPlaying,
-                    isLoading = playerState.isLoading,
-                    hasPrevious = playerState.currentTrackIndex > 0 || playerState.totalTracks > 1,
-                    hasNext = playerState.currentTrackIndex < playerState.totalTracks - 1 || playerState.totalTracks > 1,
-                    onPlayPause = { audioPlayerInstance.playPause() },
-                    onSkipNext = { audioPlayerInstance.skipNext() },
-                    onSkipPrevious = { audioPlayerInstance.skipPrevious() },
-                    colorScheme = customColorScheme
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Additional controls
-                AdditionalControls(
-                    playbackSpeed = playerState.playbackSpeed,
-                    repeatMode = playerState.repeatMode,
-                    onSpeedChange = { audioPlayerInstance.setPlaybackSpeed(it) },
-                    onRepeatToggle = { audioPlayerInstance.toggleRepeatMode() },
-                    colorScheme = customColorScheme
-                )
             }
 
             // Volume overlay
@@ -950,12 +1070,15 @@ fun AudioTrackInfoDialog(
 fun AlbumArt(
     isPlaying: Boolean,
     metadata: AudioMetadata,
-    audioPlayerColorScheme: AudioPlayerColorScheme
+    audioPlayerColorScheme: AudioPlayerColorScheme,
+    artSize: Dp = 280.dp
 ) {
+    val innerSize = (artSize.value - 20).dp
+    val iconSize = (artSize.value * 0.43f).dp
     RotatingContainer(isRotating = isPlaying) {
         Box(
             modifier = Modifier
-                .size(280.dp)
+                .size(artSize)
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
@@ -972,7 +1095,7 @@ fun AlbumArt(
                     bitmap = metadata.albumArt.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier
-                        .size(260.dp)
+                        .size(innerSize)
                         .clip(CircleShape),
                     contentScale = ContentScale.Crop
                 )
@@ -980,7 +1103,7 @@ fun AlbumArt(
                 Icon(
                     Icons.Default.MusicNote,
                     contentDescription = null,
-                    modifier = Modifier.size(120.dp),
+                    modifier = Modifier.size(iconSize),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                 )
             }

@@ -54,6 +54,7 @@ import com.techflyers.compose.file.explorer.office.OfficeEngine
 import com.techflyers.compose.file.explorer.office.OfficeEngineMode
 import com.techflyers.compose.file.explorer.office.OfficeEngineState
 import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDropAction
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 
 @Composable
 fun BehaviorContainer() {
@@ -411,6 +412,32 @@ fun BehaviorContainer() {
             icon = Icons.Rounded.SmartDisplay,
             switchState = prefs.autoHideVideoControls,
             onSwitchChange = { prefs.autoHideVideoControls = it }
+        )
+
+        PreferenceDivider()
+
+        val decoderChoices = listOf(
+            "Auto (Hardware first, fallback to Software on error)",
+            "Software (FFmpeg / CPU priority)",
+            "Hardware (MediaCodec / GPU priority)"
+        )
+        val currentDecoderIdx = prefs.videoDecoderMode.coerceIn(0, decoderChoices.lastIndex)
+
+        PreferenceItem(
+            label = "Media Decoder Mode",
+            supportingText = decoderChoices[currentDecoderIdx],
+            icon = Icons.Rounded.VideoFile,
+            onClick = {
+                prefs.singleChoiceDialog.show(
+                    title = "Media Decoder Mode",
+                    description = "Auto starts with Hardware (MediaCodec) for high performance and power efficiency, and automatically falls back to the bundled FFmpeg software decoder when a codec or profile is unsupported.",
+                    choices = decoderChoices,
+                    selectedChoice = currentDecoderIdx,
+                    onSelect = { idx ->
+                        prefs.videoDecoderMode = VideoDecoderMode.fromOrdinal(idx).ordinal
+                    }
+                )
+            }
         )
 
         PreferenceDivider()

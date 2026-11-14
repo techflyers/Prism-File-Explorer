@@ -1,5 +1,7 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.state
 
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+
 data class DialogsState(
     val showRenameDialog: Boolean = false,
     val showNewZipFileDialog: Boolean = false,
@@ -18,4 +20,5 @@ data class DialogsState(
     val showArchivePasswordDialog: Boolean = false,
     val showArchiveErrorDialog: Boolean = false,
     val showShareFolderCompressDialog: Boolean = false,
+    val bookmarkToRename: ContentHolder? = null,
 )

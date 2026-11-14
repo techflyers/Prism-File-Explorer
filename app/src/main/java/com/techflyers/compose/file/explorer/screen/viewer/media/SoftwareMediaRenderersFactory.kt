@@ -9,25 +9,38 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.video.VideoRendererEventListener
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import java.util.ArrayList
 
 /**
- * Provides a Software-First Media3 RenderersFactory combining:
- * 1. [ExtendedFfmpegVideoRenderer] + bundled `NextRenderersFactory` (`FfmpegVideoRenderer`, `FfmpegAudioRenderer`)
- *    unlocking all 45+ FFmpeg decoders compiled into `libavcodec.so` (.mov QuickTime, Apple ProRes, MJPEG,
- *    Sorenson SVQ1/SVQ3, QuickTime Animation RLE, Apple Video RPZA, Apple Graphics SMC, Cinepak, DV,
- *    HEVC/H.265, H.264 10-bit, MPEG-4/DivX/Xvid, AV1, VP8, VP9, WMV/VC-1, H.263, MPEG-1/2, Theora,
- *    ALAC, PCM sowt/twos/in24/in32/fl32/fl64, AC-3, E-AC-3, DTS, TrueHD, Opus, Vorbis, FLAC, MP3, AMR).
- * 2. A Software-Preferring [MediaCodecSelector] that prioritizes Android's software codecs (`c2.android.*`, `OMX.google.*`,
- *    `softwareOnly`) ahead of SoC hardware codecs when [preferSoftwareDecoding] is enabled.
+ * Provides a configurable Media3 RenderersFactory supporting Auto (Hardware-first with Software fallback),
+ * Software-first (FFmpeg + c2.android.*), and Hardware-first (`MediaCodec`) modes:
+ * 1. In `AUTO` or `HARDWARE` mode ([preferSoftwareDecoding] = `false`), hardware `MediaCodec` renderers run first
+ *    for maximum performance and battery efficiency, while [ExtendedFfmpegVideoRenderer], `FfmpegVideoRenderer`,
+ *    and `FfmpegAudioRenderer` are registered immediately after (`EXTENSION_RENDERER_MODE_ON`) to handle any codec
+ *    not supported by hardware. If hardware decoding fails at runtime, the player retries with [preferSoftwareDecoding] = `true`.
+ * 2. In `SOFTWARE` mode ([preferSoftwareDecoding] = `true`), [ExtendedFfmpegVideoRenderer], `FfmpegVideoRenderer`,
+ *    `FfmpegAudioRenderer`, and Android software codecs (`c2.android.*`, `OMX.google.*`) take first priority (`EXTENSION_RENDERER_MODE_PREFER`).
  */
 @OptIn(UnstableApi::class)
 object SoftwareMediaRenderersFactory {
 
     fun create(
         context: Context,
-        preferSoftwareDecoding: Boolean = true
+        mode: VideoDecoderMode,
+        forceSoftwareFallback: Boolean = false
+    ): DefaultRenderersFactory {
+        val preferSoftware = mode == VideoDecoderMode.SOFTWARE || forceSoftwareFallback
+        return create(
+            context = context,
+            preferSoftwareDecoding = preferSoftware
+        )
+    }
+
+    fun create(
+        context: Context,
+        preferSoftwareDecoding: Boolean = false
     ): DefaultRenderersFactory {
         val extensionMode = if (preferSoftwareDecoding) {
             DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER

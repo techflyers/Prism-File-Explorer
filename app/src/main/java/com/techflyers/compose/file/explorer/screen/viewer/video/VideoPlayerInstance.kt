@@ -13,19 +13,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.extractor.DefaultExtractorsFactory
-import androidx.media3.extractor.mp4.Mp4Extractor
-import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.isNot
 import com.techflyers.compose.file.explorer.common.name
 import com.techflyers.compose.file.explorer.common.showMsg
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
 import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaQueueManager
 import com.techflyers.compose.file.explorer.screen.viewer.archive.ArchiveMediaSession
@@ -51,7 +48,21 @@ class VideoPlayerInstance(
     val playlist: List<Uri> = listOf(),
     val archiveSession: ArchiveMediaSession? = null
 ) : ViewerInstance {
-    private val _playerState = MutableStateFlow(VideoPlayerState())
+    private val initialMode = runCatching {
+        VideoDecoderMode.fromOrdinal(globalClass.preferencesManager.videoDecoderMode)
+    }.getOrDefault(VideoDecoderMode.AUTO)
+
+    private val _playerState = MutableStateFlow(
+        VideoPlayerState(
+            decoderMode = initialMode,
+            preferSoftwareDecoder = initialMode == VideoDecoderMode.SOFTWARE,
+            activeDecoderLabel = formatModeDecoderLabel(
+                mode = initialMode,
+                preferSoftware = initialMode == VideoDecoderMode.SOFTWARE,
+                decoderName = null
+            )
+        )
+    )
     val playerState: StateFlow<VideoPlayerState> = _playerState.asStateFlow()
     private var exoPlayer: ExoPlayer? = null
     private var appContext: Context? = null
@@ -59,6 +70,8 @@ class VideoPlayerInstance(
     private var mediaNotificationHelper: MediaNotificationHelper? = null
     private var audioFallbackRetriedForIndex: Int = -1
     private var softwareFallbackRetriedForIndex: Int = -1
+    private var hardwareFallbackRetriedForIndex: Int = -1
+    private var hasSyncedInitialPreference: Boolean = false
 
     // Per-video URI custom or overridden subtitle selection
     private val customSubtitlesByVideoUri = mutableMapOf<Uri, MutableList<SubtitleItem>>()
@@ -66,6 +79,28 @@ class VideoPlayerInstance(
 
     companion object {
         val SUBTITLE_EXTENSIONS = setOf("srt", "vtt", "ass", "ssa", "ttml", "dfxp", "xml")
+
+        fun formatModeDecoderLabel(
+            mode: VideoDecoderMode,
+            preferSoftware: Boolean,
+            decoderName: String?
+        ): String {
+            val modePrefix = when (mode) {
+                VideoDecoderMode.AUTO -> "Auto • "
+                VideoDecoderMode.SOFTWARE -> ""
+                VideoDecoderMode.HARDWARE -> ""
+            }
+            if (decoderName.isNullOrBlank()) {
+                return if (preferSoftware) "${modePrefix}SW (FFmpeg)" else "${modePrefix}HW (MediaCodec)"
+            }
+            val lower = decoderName.lowercase()
+            val isSw = lower.contains("ffmpeg") ||
+                lower.contains("dav1d") ||
+                lower.startsWith("c2.android.") ||
+                lower.startsWith("omx.google.") ||
+                lower.contains(".sw.")
+            return if (isSw) "${modePrefix}SW ($decoderName)" else "${modePrefix}HW ($decoderName)"
+        }
 
         fun resolveSubtitleMimeType(fileName: String): String {
             return when (fileName.substringAfterLast('.', "").lowercase()) {
@@ -248,17 +283,36 @@ class VideoPlayerInstance(
         preservePlaylistIndex: Int? = null
     ) {
         appContext = context.applicationContext
+        if (!hasSyncedInitialPreference) {
+            hasSyncedInitialPreference = true
+            val prefMode = runCatching {
+                VideoDecoderMode.fromOrdinal(globalClass.preferencesManager.videoDecoderMode)
+            }.getOrDefault(VideoDecoderMode.AUTO)
+            val initialPreferSw = prefMode == VideoDecoderMode.SOFTWARE
+            _playerState.update {
+                it.copy(
+                    decoderMode = prefMode,
+                    preferSoftwareDecoder = initialPreferSw
+                )
+            }
+        }
+
+        val currentMode = _playerState.value.decoderMode
         val preferSw = _playerState.value.preferSoftwareDecoder
         _playerState.update {
             it.copy(
                 isLoading = true,
                 isReady = false,
                 usePlatformPlayerFallback = false,
-                activeDecoderLabel = if (preferSw) "SW (FFmpeg)" else "HW (MediaCodec)",
+                activeDecoderLabel = formatModeDecoderLabel(
+                    mode = currentMode,
+                    preferSoftware = preferSw,
+                    decoderName = null
+                ),
                 playbackErrorTitle = null,
                 playbackErrorDetails = null,
                 codecDiagnosticLog = null,
-                trackWarningMessage = null,
+                trackWarningMessage = if (preservePlaybackPositionMs != null) it.trackWarningMessage else null,
                 playlist = playlist
             )
         }
@@ -342,13 +396,11 @@ class VideoPlayerInstance(
                         initializedTimestampMs: Long,
                         initializationDurationMs: Long
                     ) {
-                        val lower = decoderName.lowercase()
-                        val isSw = lower.contains("ffmpeg") ||
-                            lower.contains("dav1d") ||
-                            lower.startsWith("c2.android.") ||
-                            lower.startsWith("omx.google.") ||
-                            lower.contains(".sw.")
-                        val friendly = if (isSw) "SW ($decoderName)" else "HW ($decoderName)"
+                        val friendly = formatModeDecoderLabel(
+                            mode = _playerState.value.decoderMode,
+                            preferSoftware = _playerState.value.preferSoftwareDecoder,
+                            decoderName = decoderName
+                        )
                         _playerState.update { it.copy(activeDecoderLabel = friendly) }
                     }
                 })
@@ -394,6 +446,7 @@ class VideoPlayerInstance(
                         val currentIndex = player.currentMediaItemIndex
                         audioFallbackRetriedForIndex = -1
                         softwareFallbackRetriedForIndex = -1
+                        hardwareFallbackRetriedForIndex = -1
                         val currentUri = mediaItem?.localConfiguration?.uri ?: uris.getOrNull(currentIndex) ?: uri
                         val trackTitle = if (currentUri.scheme == "file") {
                             currentUri.path?.let { File(it).name } ?: currentUri.name
@@ -401,6 +454,11 @@ class VideoPlayerInstance(
                             currentUri.name
                         } ?: globalClass.getString(R.string.unknown)
                         val (subs, selectedSub) = discoverSubtitlesForVideo(context, currentUri)
+
+                        // If in AUTO mode and a previous item fell back to SW, reset to HW-first for the new track
+                        val mode = _playerState.value.decoderMode
+                        val shouldResetToHwInAuto = mode == VideoDecoderMode.AUTO && _playerState.value.preferSoftwareDecoder
+
                         _playerState.update { currentState ->
                             currentState.copy(
                                 currentPlaylistIndex = currentIndex,
@@ -419,6 +477,22 @@ class VideoPlayerInstance(
                         updateNotification()
                         archiveSession?.let { session ->
                             ArchiveMediaQueueManager.prefetchWindow(session, currentIndex, windowSize = 2)
+                        }
+                        if (shouldResetToHwInAuto) {
+                            _playerState.update {
+                                it.copy(
+                                    preferSoftwareDecoder = false,
+                                    activeDecoderLabel = formatModeDecoderLabel(mode, false, null)
+                                )
+                            }
+                            CoroutineScope(Dispatchers.Main).launch {
+                                initializePlayer(
+                                    context = context,
+                                    uri = uri,
+                                    preservePlaybackPositionMs = 0L,
+                                    preservePlaylistIndex = currentIndex
+                                )
+                            }
                         }
                     }
                 })
@@ -449,21 +523,34 @@ class VideoPlayerInstance(
     }
 
     /**
-     * Toggles between Software-first (FFmpeg + c2.android.*) and Hardware-first decoding
-     * while preserving the current playlist index and playback timestamp.
+     * Sets a specific [VideoDecoderMode] (`AUTO`, `SOFTWARE`, `HARDWARE`), saves it to user preferences,
+     * and reinitializes the player at the current position.
      */
-    fun toggleDecoderMode(context: Context) {
+    fun setDecoderMode(context: Context, mode: VideoDecoderMode) {
         val currentPos = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
         val currentIdx = exoPlayer?.currentMediaItemIndex ?: _playerState.value.currentPlaylistIndex
-        val nextPreferSw = !_playerState.value.preferSoftwareDecoder
+        val preferSw = mode == VideoDecoderMode.SOFTWARE
+        softwareFallbackRetriedForIndex = -1
+        hardwareFallbackRetriedForIndex = -1
+
+        runCatching {
+            globalClass.preferencesManager.videoDecoderMode = mode.ordinal
+        }
+
         _playerState.update {
             it.copy(
-                preferSoftwareDecoder = nextPreferSw,
-                activeDecoderLabel = if (nextPreferSw) "SW (FFmpeg)" else "HW (MediaCodec)"
+                decoderMode = mode,
+                preferSoftwareDecoder = preferSw,
+                activeDecoderLabel = formatModeDecoderLabel(mode, preferSw, null),
+                trackWarningMessage = null
             )
         }
-        val modeLabel = if (nextPreferSw) "Software Decoder (FFmpeg)" else "Hardware Decoder"
-        globalClass.showMsg("Switched to $modeLabel")
+        val modeLabel = when (mode) {
+            VideoDecoderMode.AUTO -> "Auto (Hardware first, Software fallback)"
+            VideoDecoderMode.SOFTWARE -> "Software Decoder (FFmpeg)"
+            VideoDecoderMode.HARDWARE -> "Hardware Decoder (MediaCodec)"
+        }
+        globalClass.showMsg("Decoder mode: $modeLabel")
         CoroutineScope(Dispatchers.Main).launch {
             initializePlayer(
                 context = context,
@@ -472,6 +559,16 @@ class VideoPlayerInstance(
                 preservePlaylistIndex = currentIdx
             )
         }
+    }
+
+    /**
+     * Toggles between Software-first (FFmpeg + c2.android.*) and Hardware-first decoding
+     * (used by the error recovery dialog and quick toggle) while preserving the current playback timestamp.
+     */
+    fun toggleDecoderMode(context: Context) {
+        val nextPreferSw = !_playerState.value.preferSoftwareDecoder
+        val targetMode = if (nextPreferSw) VideoDecoderMode.SOFTWARE else VideoDecoderMode.HARDWARE
+        setDecoderMode(context, targetMode)
     }
 
     private fun inspectTracksSupport(tracks: Tracks) {
@@ -487,12 +584,17 @@ class VideoPlayerInstance(
         val diagnosticReport = buildTrackDiagnostics(tracks)
 
         if (videoGroups.isNotEmpty() && !hasSupportedVideo) {
-            // If we were in Hardware mode, automatically retry in Software (FFmpeg) mode first!
+            // If we were in Hardware / Auto mode (preferSoftwareDecoder == false), automatically retry in Software (FFmpeg) mode!
             val currentIdx = exoPlayer?.currentMediaItemIndex ?: 0
             val ctx = appContext
             if (!_playerState.value.preferSoftwareDecoder && ctx != null && softwareFallbackRetriedForIndex != currentIdx) {
                 softwareFallbackRetriedForIndex = currentIdx
-                _playerState.update { it.copy(preferSoftwareDecoder = true, activeDecoderLabel = "SW (FFmpeg)") }
+                _playerState.update {
+                    it.copy(
+                        preferSoftwareDecoder = true,
+                        activeDecoderLabel = formatModeDecoderLabel(it.decoderMode, true, null)
+                    )
+                }
                 CoroutineScope(Dispatchers.Main).launch {
                     initializePlayer(
                         context = ctx,
@@ -522,6 +624,27 @@ class VideoPlayerInstance(
         }
 
         if (audioGroups.isNotEmpty() && !hasSupportedAudio) {
+            val currentIdx = exoPlayer?.currentMediaItemIndex ?: 0
+            val ctx = appContext
+            if (!_playerState.value.preferSoftwareDecoder && ctx != null && softwareFallbackRetriedForIndex != currentIdx) {
+                softwareFallbackRetriedForIndex = currentIdx
+                _playerState.update {
+                    it.copy(
+                        preferSoftwareDecoder = true,
+                        activeDecoderLabel = formatModeDecoderLabel(it.decoderMode, true, null)
+                    )
+                }
+                CoroutineScope(Dispatchers.Main).launch {
+                    initializePlayer(
+                        context = ctx,
+                        uri = uri,
+                        preservePlaybackPositionMs = 0L,
+                        preservePlaylistIndex = currentIdx
+                    )
+                }
+                return
+            }
+
             val firstAudio = audioGroups.first().getTrackFormat(0)
             val audioCodec = describeCodecName(firstAudio.sampleMimeType, firstAudio.codecs)
             if (videoGroups.isEmpty()) {
@@ -551,7 +674,6 @@ class VideoPlayerInstance(
         val currentPos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
         val ctx = appContext
 
-        // If Hardware decoder failed, automatically fallback to Software (FFmpeg) decoder!
         val isDecoderFailure = error.errorCode in setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
             PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
@@ -559,13 +681,36 @@ class VideoPlayerInstance(
             PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
             PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
         )
+
+        // 1. If Hardware decoder failed (in AUTO or HARDWARE mode), automatically fallback to Software (FFmpeg) decoder!
         if (isDecoderFailure && !_playerState.value.preferSoftwareDecoder && ctx != null && softwareFallbackRetriedForIndex != currentIdx) {
             softwareFallbackRetriedForIndex = currentIdx
             _playerState.update {
                 it.copy(
                     preferSoftwareDecoder = true,
-                    activeDecoderLabel = "SW (FFmpeg)",
+                    activeDecoderLabel = formatModeDecoderLabel(it.decoderMode, true, null),
                     trackWarningMessage = "Hardware decoder failed; switched to FFmpeg software decoder."
+                )
+            }
+            CoroutineScope(Dispatchers.Main).launch {
+                initializePlayer(
+                    context = ctx,
+                    uri = uri,
+                    preservePlaybackPositionMs = currentPos,
+                    preservePlaylistIndex = currentIdx
+                )
+            }
+            return
+        }
+
+        // 2. If Software decoder failed (in SOFTWARE mode), automatically try Hardware decoder as fallback!
+        if (isDecoderFailure && _playerState.value.preferSoftwareDecoder && ctx != null && hardwareFallbackRetriedForIndex != currentIdx && softwareFallbackRetriedForIndex != currentIdx) {
+            hardwareFallbackRetriedForIndex = currentIdx
+            _playerState.update {
+                it.copy(
+                    preferSoftwareDecoder = false,
+                    activeDecoderLabel = formatModeDecoderLabel(it.decoderMode, false, null),
+                    trackWarningMessage = "Software decoder failed; switched to Hardware decoder."
                 )
             }
             CoroutineScope(Dispatchers.Main).launch {

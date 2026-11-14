@@ -168,7 +168,7 @@ private fun Modifier.soraScrollbarImpl(
     val scrollbarWidthDp = 8.dp
     val minThumbLengthDp = 56.dp
     val cornerRadiusDp = 2.dp
-    val hitZoneWidthDp = 14.dp
+    val hitZoneWidthDp = 36.dp
 
     return this
         .onSizeChanged { trackHeightPx = it.height.toFloat() }
@@ -208,22 +208,20 @@ private fun Modifier.soraScrollbarImpl(
             if (!metrics.canScroll) return@pointerInput
             val hitWidthPx = hitZoneWidthDp.toPx()
             val minThumbPx = minThumbLengthDp.toPx()
-            val dragThresholdPx = 6.dp.toPx()
+            val dragThresholdPx = 4.dp.toPx()
+            val slopPx = 24.dp.toPx()
 
             awaitPointerEventScope {
                 while (true) {
-                    // Use Main pass with requireUnconsumed = true so child IconButtons (e.g. Copy SHA-256, Open in new tab)
-                    // are never blocked or hijacked by the scrollbar.
-                    val down = awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Main)
-                    if (!visible && !isHolding) continue
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val inHitZone = down.position.x >= size.width - hitWidthPx
                     if (!inHitZone) continue
 
                     val thumbH = (trackHeightPx * metrics.thumbSizeFraction).coerceAtLeast(minThumbPx)
                     val usable = (trackHeightPx - thumbH).coerceAtLeast(1f)
                     val thumbTop = metrics.thumbFraction * usable
-                    val onThumb = down.position.y in (thumbTop - 16f)..(thumbTop + thumbH + 16f)
-                    if (!onThumb) continue
+                    val onThumbOrTrack = down.position.y in (thumbTop - slopPx)..(thumbTop + thumbH + slopPx) || visible
+                    if (!onThumbOrTrack) continue
 
                     var draggingThumb = false
 

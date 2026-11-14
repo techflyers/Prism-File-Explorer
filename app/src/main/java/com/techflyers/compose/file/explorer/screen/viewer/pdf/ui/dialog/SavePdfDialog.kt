@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -164,17 +165,13 @@ fun SavePdfDialog(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            OutlinedTextField(
-                                value = copyFileName,
-                                onValueChange = { copyFileName = it },
-                                label = { Text("File Name") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                                )
+                            FilenameExtensionInput(
+                                initialFullName = copyFileName,
+                                onFullNameChanged = { copyFileName = it },
+                                label = "File Name",
+                                outlined = true,
+                                isFolder = false,
+                                modifier = Modifier.fillMaxWidth()
                             )
 
                             FlowRow(

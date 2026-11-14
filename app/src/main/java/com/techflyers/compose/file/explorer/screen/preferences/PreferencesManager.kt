@@ -30,6 +30,7 @@ import com.techflyers.compose.file.explorer.screen.preferences.constant.DragDrop
 import com.techflyers.compose.file.explorer.screen.preferences.constant.FileItemSize
 import com.techflyers.compose.file.explorer.screen.preferences.constant.TerminalAppPreference
 import com.techflyers.compose.file.explorer.screen.preferences.constant.ThemePreference
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefDataStore
 import com.techflyers.compose.file.explorer.screen.preferences.misc.prefMutableState
 import kotlinx.coroutines.flow.first
@@ -93,6 +94,24 @@ class PreferencesManager {
         keyName = "topToolbarOverflowConfig",
         defaultValue = "",
         getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var emptyAreaMenuOrder by prefMutableState(
+        keyName = "emptyAreaMenuOrder",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var emptyAreaMenuHidden by prefMutableState(
+        keyName = "emptyAreaMenuHidden",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var pinnedFilesInTabs by prefMutableState(
+        keyName = "pinnedFilesInTabs",
+        defaultValue = emptySet<String>(),
+        getPreferencesKey = { stringSetPreferencesKey(it) }
     )
 
     var showToolbarSubtitle by prefMutableState(
@@ -375,6 +394,12 @@ class PreferencesManager {
         getPreferencesKey = { booleanPreferencesKey(it) }
     )
 
+    var videoDecoderMode by prefMutableState(
+        keyName = "videoDecoderMode",
+        defaultValue = VideoDecoderMode.AUTO.ordinal,
+        getPreferencesKey = { intPreferencesKey(it) }
+    )
+
     var startupTabs by prefMutableState(
         keyName = "startupTabs",
         defaultValue = StartupTabs.default().toJson(),
@@ -386,6 +411,40 @@ class PreferencesManager {
         defaultValue = emptySet(),
         getPreferencesKey = { stringSetPreferencesKey(it) }
     )
+
+    private var bookmarkTitlesJson by prefMutableState(
+        keyName = "bookmarkTitlesJson",
+        defaultValue = "",
+        getPreferencesKey = { stringPreferencesKey(it) }
+    )
+
+    var bookmarkTitles: Map<String, String>
+        get() = fromJson<Map<String, String>>(bookmarkTitlesJson) ?: emptyMap()
+        set(value) {
+            bookmarkTitlesJson = value.toJson()
+        }
+
+    fun getBookmarkTitle(path: String): String? = bookmarkTitles[path]?.takeIf { it.isNotBlank() }
+
+    fun setBookmarkTitle(path: String, title: String) {
+        val trimmed = title.trim()
+        val current = bookmarkTitles.toMutableMap()
+        if (trimmed.isEmpty()) {
+            current.remove(path)
+        } else {
+            current[path] = trimmed
+        }
+        bookmarkTitles = current
+    }
+
+    fun removeBookmark(path: String) {
+        bookmarks = bookmarks - path
+        if (path in bookmarkTitles) {
+            val current = bookmarkTitles.toMutableMap()
+            current.remove(path)
+            bookmarkTitles = current
+        }
+    }
 
     // Stores the IDs of sidebar drawer sections that have been collapsed by the user.
     var drawerCollapsedSections by prefMutableState(

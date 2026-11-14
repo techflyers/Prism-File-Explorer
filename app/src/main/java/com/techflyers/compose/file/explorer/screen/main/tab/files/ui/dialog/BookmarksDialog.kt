@@ -1,10 +1,8 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,13 +13,16 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkAdd
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,15 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kevinnzou.compose.swipebox.SwipeBox
-import com.kevinnzou.compose.swipebox.SwipeDirection
-import com.kevinnzou.compose.swipebox.widget.SwipeIcon
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.isNot
@@ -66,22 +63,33 @@ fun BookmarksDialog(
         val bookmarks = remember {
             mutableStateListOf<LocalFileHolder>()
         }
+        var hasLoaded by remember { mutableStateOf(false) }
+        var bookmarkToRename by remember { mutableStateOf<LocalFileHolder?>(null) }
+        var showManualAddDialog by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             withContext(Dispatchers.IO) {
                 val originalList = globalClass.preferencesManager.bookmarks
-                bookmarks.addAll(
-                    originalList.map { LocalFileHolder(File(it)) }.filter { it.isValid() }
-                )
+                val titles = globalClass.preferencesManager.bookmarkTitles
+                val loaded = originalList.mapNotNull { path ->
+                    val file = File(path)
+                    val customTitle = titles[path]
+                    val holder = LocalFileHolder(file, cachedName = customTitle)
+                    if (holder.isValid()) holder else null
+                }
 
-                if (bookmarks.size isNot originalList.size) {
+                withContext(Dispatchers.Main) {
+                    bookmarks.clear()
+                    bookmarks.addAll(loaded)
+                    hasLoaded = true
+                }
+
+                if (loaded.size isNot originalList.size) {
                     globalClass.preferencesManager.bookmarks =
-                        bookmarks.map { it.uniquePath }.toSet()
+                        loaded.map { it.uniquePath }.toSet()
                 }
             }
         }
-
-        var showManualAddDialog by remember { mutableStateOf(false) }
 
         if (showManualAddDialog) {
             AddCustomFolderDialog(
@@ -90,8 +98,32 @@ fun BookmarksDialog(
                 onDismissRequest = { showManualAddDialog = false },
                 onConfirm = { path ->
                     globalClass.preferencesManager.bookmarks = globalClass.preferencesManager.bookmarks + path
-                    bookmarks.add(0, LocalFileHolder(File(path)))
+                    val titles = globalClass.preferencesManager.bookmarkTitles
+                    bookmarks.add(0, LocalFileHolder(File(path), cachedName = titles[path]))
                     globalClass.showMsg(globalClass.getString(R.string.added_to_bookmarks))
+                }
+            )
+        }
+
+        if (bookmarkToRename != null) {
+            val target = bookmarkToRename!!
+            val currentTitle = globalClass.preferencesManager.getBookmarkTitle(target.uniquePath)
+                ?: target.file.name.ifEmpty { target.uniquePath }
+            RenameBookmarkDialog(
+                show = true,
+                currentName = currentTitle,
+                targetPath = target.uniquePath,
+                onDismissRequest = { bookmarkToRename = null },
+                onConfirm = { newName ->
+                    globalClass.preferencesManager.setBookmarkTitle(target.uniquePath, newName)
+                    val index = bookmarks.indexOfFirst { it.uniquePath == target.uniquePath }
+                    if (index != -1) {
+                        bookmarks[index] = LocalFileHolder(
+                            file = target.file,
+                            cachedName = newName.trim().ifEmpty { null }
+                        )
+                    }
+                    bookmarkToRename = null
                 }
             )
         }
@@ -120,7 +152,7 @@ fun BookmarksDialog(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
                 )
-                androidx.compose.material3.IconButton(
+                IconButton(
                     onClick = { showManualAddDialog = true },
                     modifier = Modifier.size(32.dp)
                 ) {
@@ -136,11 +168,12 @@ fun BookmarksDialog(
             val canBookmarkCurrent = tab.activeFolder is LocalFileHolder && tab.activeFolder.isFolder &&
                     !globalClass.preferencesManager.bookmarks.contains(tab.activeFolder.uniquePath)
             if (canBookmarkCurrent) {
-                androidx.compose.material3.OutlinedButton(
+                OutlinedButton(
                     onClick = {
                         val path = tab.activeFolder.uniquePath
                         globalClass.preferencesManager.bookmarks = globalClass.preferencesManager.bookmarks + path
-                        bookmarks.add(0, LocalFileHolder(File(path)))
+                        val titles = globalClass.preferencesManager.bookmarkTitles
+                        bookmarks.add(0, LocalFileHolder(File(path), cachedName = titles[path]))
                         globalClass.showMsg(globalClass.getString(R.string.added_to_bookmarks))
                     },
                     modifier = Modifier
@@ -162,64 +195,88 @@ fun BookmarksDialog(
 
             Space(size = 8.dp)
 
-            AnimatedVisibility(globalClass.preferencesManager.bookmarks.isNotEmpty()) {
-                LazyColumn(Modifier.animateContentSize()) {
+            if (bookmarks.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     itemsIndexed(
                         items = bookmarks,
-                        key = { index, item -> item.uniquePath }
+                        key = { _, item -> item.uniquePath }
                     ) { index, item ->
-                        SwipeBox(
-                            modifier = Modifier.fillMaxWidth(),
-                            swipeDirection = SwipeDirection.EndToStart,
-                            endContentWidth = 60.dp,
-                            endContent = { swipeableState, endSwipeProgress ->
-                                SwipeIcon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = stringResource(R.string.delete),
-                                    tint = Color.White,
-                                    background = Color(0xFFFA1E32),
-                                    weight = 1f,
-                                    iconSize = 20.dp
-                                ) {
-                                    globalClass.preferencesManager.bookmarks -= item.uniquePath
-                                }
-                            }
-                        ) { _, _, _ ->
+                        Column(
                             Modifier
                                 .fillMaxWidth()
-                            Column(
-                                Modifier
-                                    .animateItem()
+                                .animateItem()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
                                     .combinedClickable(
                                         onClick = {
+                                            if (!item.file.exists()) {
+                                                globalClass.showMsg(
+                                                    if (item.isFolder) R.string.folder_does_not_exist else R.string.file_no_longer_exists
+                                                )
+                                                return@combinedClickable
+                                            }
                                             if (item.isFile()) {
                                                 tab.openFile(context, item)
                                             } else {
-                                                tab.requestNewTab(FilesTab(item))
+                                                tab.openFolder(LocalFileHolder(item.file))
                                             }
                                             onDismissRequest()
                                         },
-                                        onLongClick = { }
-                                    )
+                                        onLongClick = {
+                                            bookmarkToRename = item
+                                        }
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Space(size = 4.dp)
-                                FileItemRow(
-                                    item = item,
-                                    fileDetails = item.uniquePath.trimToLastTwoSegments(),
-                                    ignoreSizePreferences = true
-                                )
-                                Space(size = 4.dp)
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 56.dp),
-                                    thickness = 0.5.dp
-                                )
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FileItemRow(
+                                        item = item,
+                                        fileDetails = item.uniquePath.trimToLastTwoSegments(),
+                                        ignoreSizePreferences = true
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { bookmarkToRename = item },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = stringResource(R.string.rename),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val path = item.uniquePath
+                                        globalClass.preferencesManager.removeBookmark(path)
+                                        bookmarks.remove(item)
+                                    },
+                                    modifier = Modifier
+                                        .padding(end = 12.dp)
+                                        .size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = stringResource(R.string.delete),
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
+                            Space(size = 4.dp)
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 56.dp),
+                                thickness = 0.5.dp
+                            )
                         }
                     }
                 }
-            }
-
-            AnimatedVisibility(globalClass.preferencesManager.bookmarks.isEmpty()) {
+            } else if (hasLoaded) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

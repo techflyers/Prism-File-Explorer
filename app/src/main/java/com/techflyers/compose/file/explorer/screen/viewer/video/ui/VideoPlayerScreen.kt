@@ -36,14 +36,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -73,6 +78,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.rounded.AutoMode
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeveloperBoard
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -83,8 +89,10 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.SubtitlesOff
+import androidx.core.content.FileProvider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -115,7 +123,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,9 +149,9 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.toFormattedTime
-import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ExtendedMetadataSheet
 import com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.ui.FileSelectionDialog
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance
 import com.techflyers.compose.file.explorer.screen.viewer.video.model.SubtitleItem
@@ -240,6 +247,10 @@ fun VideoPlayerScreen(
             delay(3000)
             videoPlayerInstance.setControlsVisible(false)
         }
+    }
+
+    LaunchedEffect(playerState.showControls) {
+        (context as? VideoPlayerActivity)?.configureImmersiveWindow(playerState.showControls)
     }
 
     // ── Auto-hide floating unlock button after 3 seconds ──────────────────────
@@ -559,6 +570,10 @@ fun VideoPlayerScreen(
                         videoPlayerInstance.toggleDecoderMode(context)
                         interactionCount++
                     },
+                    onSelectDecoderMode = { mode ->
+                        videoPlayerInstance.setDecoderMode(context, mode)
+                        interactionCount++
+                    },
                     onRotateScreen = {
                         val act = context as? Activity
                         act?.let {
@@ -572,13 +587,18 @@ fun VideoPlayerScreen(
                         interactionCount++
                     },
                     onEnterPiP = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val videoActivity = context as? VideoPlayerActivity
+                        if (videoActivity != null) {
+                            videoActivity.enterPipMode()
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             try {
                                 val isPlayingNow = videoPlayerInstance.playerState.value.isPlaying
                                 val iconId = if (isPlayingNow) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
                                 val title = if (isPlayingNow) "Pause" else "Play"
 
-                                val intent = Intent("ACTION_MEDIA_CONTROL")
+                                val intent = Intent("ACTION_MEDIA_CONTROL").apply {
+                                    `package` = context.packageName
+                                }
                                 val pendingIntent = android.app.PendingIntent.getBroadcast(
                                     context,
                                     0,
@@ -597,6 +617,32 @@ fun VideoPlayerScreen(
                                 android.util.Log.e("VideoPlayerScreen", "Failed to enter PiP: ${e.message}")
                             }
                         }
+                    },
+                    onShare = {
+                        val targetUri = playerState.playlist.getOrNull(playerState.currentPlaylistIndex) ?: videoUri
+                        val shareUri = if (targetUri.scheme == "file") {
+                            val file = File(targetUri.path ?: "")
+                            if (file.exists()) {
+                                try {
+                                    FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        file
+                                    )
+                                } catch (_: Exception) {
+                                    targetUri
+                                }
+                            } else targetUri
+                        } else targetUri
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "video/*"
+                            putExtra(Intent.EXTRA_STREAM, shareUri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(shareIntent, context.getString(R.string.share))
+                        )
+                        interactionCount++
                     },
                     onPlaylistClick = {
                         showPlaylist = true
@@ -666,7 +712,10 @@ fun VideoPlayerScreen(
                 exit = fadeOut(animationSpec = tween(200)),
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .windowInsetsPadding(
+                        WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+                    )
                     .padding(16.dp)
             ) {
                 IconButton(
@@ -844,7 +893,10 @@ fun VideoPlayerScreen(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+            )
                         .padding(horizontal = 16.dp, vertical = 72.dp)
                 ) {
                     Row(
@@ -1156,6 +1208,7 @@ fun VideoControls(
     onBackPressed: () -> Unit,
     onSpeedChange: (Float) -> Unit,
     onToggleDecoderMode: () -> Unit = {},
+    onSelectDecoderMode: (VideoDecoderMode) -> Unit = {},
     onRotateScreen: () -> Unit,
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
@@ -1163,6 +1216,7 @@ fun VideoControls(
     onPlayNext: () -> Unit,
     onPlayPrevious: () -> Unit,
     onOpenWith: (() -> Unit)? = null,
+    onShare: () -> Unit = {},
     onInfoClick: () -> Unit = {},
     onDelete: () -> Unit,
     onLock: () -> Unit,
@@ -1226,12 +1280,14 @@ fun VideoControls(
                 onToggleMute = onToggleMute,
                 onSpeedChange = onSpeedChange,
                 onToggleDecoderMode = onToggleDecoderMode,
+                onSelectDecoderMode = onSelectDecoderMode,
                 onSpeedMenuExpandedChanged = onSpeedMenuExpandedChanged,
                 onRotateScreen = onRotateScreen,
                 onEnterPiP = onEnterPiP,
                 onPlaylistClick = onPlaylistClick,
                 onSubtitleClick = onSubtitleClick,
                 onOpenWith = onOpenWith,
+                onShare = onShare,
                 onInfoClick = onInfoClick,
                 onDelete = onDelete,
                 onLock = onLock,
@@ -1324,12 +1380,14 @@ fun TopBar(
     onToggleMute: () -> Unit,
     onSpeedChange: (Float) -> Unit,
     onToggleDecoderMode: () -> Unit = {},
+    onSelectDecoderMode: (VideoDecoderMode) -> Unit = {},
     onSpeedMenuExpandedChanged: (Boolean) -> Unit = {},
     onRotateScreen: () -> Unit,
     onEnterPiP: () -> Unit,
     onPlaylistClick: () -> Unit,
     onSubtitleClick: () -> Unit = {},
     onOpenWith: (() -> Unit)? = null,
+    onShare: () -> Unit = {},
     onInfoClick: () -> Unit = {},
     onDelete: () -> Unit,
     onLock: () -> Unit,
@@ -1338,6 +1396,7 @@ fun TopBar(
     modifier: Modifier = Modifier,
 ) {
     var speedMenuExpanded by remember { mutableStateOf(false) }
+    var decoderMenuExpanded by remember { mutableStateOf(false) }
     var overflowMenuExpanded by remember { mutableStateOf(false) }
 
     val speedDisplay = if (playerState.playbackSpeed == playerState.playbackSpeed.toLong().toFloat()) {
@@ -1359,6 +1418,22 @@ fun TopBar(
     }
     val lockDesc = stringResource(R.string.lock_controls)
     val metadataDesc = stringResource(R.string.extended_metadata)
+
+    val decoderBadge = when (playerState.decoderMode) {
+        VideoDecoderMode.AUTO -> if (playerState.preferSoftwareDecoder) "AUTO•SW" else "AUTO"
+        VideoDecoderMode.SOFTWARE -> "SW"
+        VideoDecoderMode.HARDWARE -> "HW"
+    }
+    val decoderLabel = when (playerState.decoderMode) {
+        VideoDecoderMode.AUTO -> "Decoder: Auto (${if (playerState.preferSoftwareDecoder) "SW Fallback" else "HW Priority"})"
+        VideoDecoderMode.SOFTWARE -> "Decoder: Software (FFmpeg)"
+        VideoDecoderMode.HARDWARE -> "Decoder: Hardware (MediaCodec)"
+    }
+    val decoderIcon = when (playerState.decoderMode) {
+        VideoDecoderMode.AUTO -> Icons.Rounded.AutoMode
+        VideoDecoderMode.SOFTWARE -> Icons.Rounded.Memory
+        VideoDecoderMode.HARDWARE -> Icons.Rounded.DeveloperBoard
+    }
 
     val allActions = buildList {
         add(
@@ -1391,12 +1466,13 @@ fun TopBar(
         add(
             VideoTopBarAction(
                 id = "decoder",
-                label = if (playerState.preferSoftwareDecoder) "Decoder: Software (FFmpeg)" else "Decoder: Hardware",
-                badgeText = if (playerState.preferSoftwareDecoder) "SW" else "HW",
-                icon = if (playerState.preferSoftwareDecoder) Icons.Rounded.Memory else Icons.Rounded.DeveloperBoard,
-                tint = if (playerState.preferSoftwareDecoder) colorScheme.primary else Color.White,
+                label = decoderLabel,
+                badgeText = decoderBadge,
+                icon = decoderIcon,
+                tint = if (playerState.preferSoftwareDecoder || playerState.decoderMode == VideoDecoderMode.SOFTWARE) colorScheme.primary else Color.White,
                 onClick = {
-                    onToggleDecoderMode()
+                    decoderMenuExpanded = true
+                    onSpeedMenuExpandedChanged(true)
                     onUserInteraction()
                 }
             )
@@ -1484,6 +1560,17 @@ fun TopBar(
                 }
             )
         )
+        add(
+            VideoTopBarAction(
+                id = "share",
+                label = "Share Video",
+                icon = Icons.Rounded.Share,
+                onClick = {
+                    onShare()
+                    onUserInteraction()
+                }
+            )
+        )
         onOpenWith?.let { openClick ->
             add(
                 VideoTopBarAction(
@@ -1521,7 +1608,10 @@ fun TopBar(
                     )
                 )
             )
-            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+            )
             .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
         // Reserve 48.dp for Back button + almeno 120.dp for Title + 16.dp spacing = 184.dp
@@ -1606,22 +1696,37 @@ fun TopBar(
                         )
                     }
                 } else if (action.id == "decoder") {
-                    Surface(
-                        onClick = action.onClick,
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (playerState.preferSoftwareDecoder) {
-                            colorScheme.primary.copy(alpha = 0.22f)
-                        } else {
-                            Color.White.copy(alpha = 0.14f)
-                        },
-                        modifier = Modifier.padding(horizontal = 2.dp)
-                    ) {
-                        Text(
-                            text = action.badgeText ?: "SW",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = action.tint,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                    Box {
+                        Surface(
+                            onClick = action.onClick,
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (playerState.preferSoftwareDecoder) {
+                                colorScheme.primary.copy(alpha = 0.22f)
+                            } else {
+                                Color.White.copy(alpha = 0.14f)
+                            },
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        ) {
+                            Text(
+                                text = action.badgeText ?: "AUTO",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = action.tint,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                        }
+                        DecoderModeDropdownMenu(
+                            expanded = decoderMenuExpanded,
+                            currentMode = playerState.decoderMode,
+                            onDismiss = {
+                                decoderMenuExpanded = false
+                                onSpeedMenuExpandedChanged(false)
+                            },
+                            onModeSelected = { selectedMode ->
+                                decoderMenuExpanded = false
+                                onSpeedMenuExpandedChanged(false)
+                                onSelectDecoderMode(selectedMode)
+                            }
                         )
                     }
                 } else {
@@ -1693,7 +1798,7 @@ fun TopBar(
                                 },
                                 onClick = {
                                     overflowMenuExpanded = false
-                                    if (action.id != "speed") {
+                                    if (action.id != "speed" && action.id != "decoder") {
                                         onSpeedMenuExpandedChanged(false)
                                     }
                                     action.onClick()
@@ -1717,8 +1822,73 @@ fun TopBar(
                             }
                         )
                     }
+                    if (inlineActions.none { it.id == "decoder" }) {
+                        DecoderModeDropdownMenu(
+                            expanded = decoderMenuExpanded,
+                            currentMode = playerState.decoderMode,
+                            onDismiss = {
+                                decoderMenuExpanded = false
+                                onSpeedMenuExpandedChanged(false)
+                            },
+                            onModeSelected = { selectedMode ->
+                                decoderMenuExpanded = false
+                                onSpeedMenuExpandedChanged(false)
+                                onSelectDecoderMode(selectedMode)
+                            }
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DecoderModeDropdownMenu(
+    expanded: Boolean,
+    currentMode: VideoDecoderMode,
+    onDismiss: () -> Unit,
+    onModeSelected: (VideoDecoderMode) -> Unit
+) {
+    val options = listOf(
+        Triple(VideoDecoderMode.AUTO, "Auto (HW first, SW fallback)", Icons.Rounded.AutoMode),
+        Triple(VideoDecoderMode.SOFTWARE, "Software (FFmpeg)", Icons.Rounded.Memory),
+        Triple(VideoDecoderMode.HARDWARE, "Hardware (MediaCodec)", Icons.Rounded.DeveloperBoard)
+    )
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss
+    ) {
+        options.forEach { (mode, label, icon) ->
+            val isSelected = currentMode == mode
+            DropdownMenuItem(
+                leadingIcon = {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isSelected) colorScheme.primary else colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                text = {
+                    Text(
+                        text = label,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isSelected) colorScheme.primary else colorScheme.onSurface
+                    )
+                },
+                trailingIcon = if (isSelected) {
+                    {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else null,
+                onClick = { onModeSelected(mode) }
+            )
         }
     }
 }
@@ -1891,7 +2061,10 @@ fun BottomControls(
                     )
                 )
             )
-            .windowInsetsPadding(WindowInsets.navigationBars)
+            .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         var isDragging by remember { mutableStateOf(false) }

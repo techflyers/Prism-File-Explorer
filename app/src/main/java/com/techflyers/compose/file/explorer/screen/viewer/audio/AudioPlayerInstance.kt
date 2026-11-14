@@ -82,11 +82,30 @@ class AudioPlayerInstance(
     private var positionTrackingJob: Job? = null
     private var sleepTimerJob: Job? = null
     private var mediaNotificationHelper: MediaNotificationHelper? = null
+    private var softwareFallbackRetriedForIndex: Int = -1
+    private var preferSoftwareAudioDecoding: Boolean = false
 
     @OptIn(UnstableApi::class)
-    suspend fun initializePlayer(context: Context, uri: Uri) {
+    suspend fun initializePlayer(
+        context: Context,
+        uri: Uri,
+        preservePositionMs: Long? = null,
+        preserveTrackIndex: Int? = null,
+        forceSoftwareFallback: Boolean = false
+    ) {
         appContext = context.applicationContext
+        val prefMode = runCatching {
+            com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode.fromOrdinal(
+                globalClass.preferencesManager.videoDecoderMode
+            )
+        }.getOrDefault(com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode.AUTO)
+        preferSoftwareAudioDecoding = forceSoftwareFallback ||
+            prefMode == com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode.SOFTWARE
+
         withContext(Dispatchers.Main) {
+            exoPlayer?.release()
+            exoPlayer = null
+
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -94,13 +113,10 @@ class AudioPlayerInstance(
 
             val renderersFactory = com.techflyers.compose.file.explorer.screen.viewer.media.SoftwareMediaRenderersFactory.create(
                 context = context,
-                preferSoftwareDecoding = true
+                preferSoftwareDecoding = preferSoftwareAudioDecoding
             )
 
-            val extractorsFactory = DefaultExtractorsFactory()
-                .setConstantBitrateSeekingEnabled(true)
-                .setConstantBitrateSeekingAlwaysEnabled(true)
-                .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
+            val extractorsFactory = com.techflyers.compose.file.explorer.screen.viewer.media.PrismExtractorsFactory()
 
             val trackSelector = DefaultTrackSelector(context).apply {
                 setParameters(
@@ -123,9 +139,10 @@ class AudioPlayerInstance(
                 }
                 setMediaItems(mediaItems)
 
-                // Start from the item matching the originally-opened URI
-                val startIndex = uris.indexOfFirst { it == uri }.coerceAtLeast(0)
-                seekTo(startIndex, 0)
+                // Start from the item matching the originally-opened URI or preserved index
+                val startIndex = preserveTrackIndex
+                    ?: uris.indexOfFirst { it == uri }.coerceAtLeast(0)
+                seekTo(startIndex, preservePositionMs ?: 0L)
 
                 prepare()
                 playWhenReady = true
@@ -161,6 +178,21 @@ class AudioPlayerInstance(
                     override fun onTracksChanged(tracks: Tracks) {
                         val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
                         if (audioGroups.isNotEmpty() && audioGroups.none { it.isSupported }) {
+                            val curIdx = exoPlayer?.currentMediaItemIndex ?: 0
+                            val ctx = appContext
+                            if (!preferSoftwareAudioDecoding && ctx != null && softwareFallbackRetriedForIndex != curIdx) {
+                                softwareFallbackRetriedForIndex = curIdx
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    initializePlayer(
+                                        context = ctx,
+                                        uri = uri,
+                                        preservePositionMs = 0L,
+                                        preserveTrackIndex = curIdx,
+                                        forceSoftwareFallback = true
+                                    )
+                                }
+                                return
+                            }
                             val fmt = audioGroups.first().getTrackFormat(0)
                             val codecDesc = com.techflyers.compose.file.explorer.screen.viewer.video.VideoPlayerInstance.describeCodecName(
                                 fmt.sampleMimeType,
@@ -178,6 +210,29 @@ class AudioPlayerInstance(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        val curIdx = exoPlayer?.currentMediaItemIndex ?: 0
+                        val curPos = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
+                        val ctx = appContext
+                        val isDecoderFailure = error.errorCode in setOf(
+                            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+                            PlaybackException.ERROR_CODE_DECODING_FAILED,
+                            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+                            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+                        )
+                        if (isDecoderFailure && !preferSoftwareAudioDecoding && ctx != null && softwareFallbackRetriedForIndex != curIdx) {
+                            softwareFallbackRetriedForIndex = curIdx
+                            CoroutineScope(Dispatchers.Main).launch {
+                                initializePlayer(
+                                    context = ctx,
+                                    uri = uri,
+                                    preservePositionMs = curPos,
+                                    preserveTrackIndex = curIdx,
+                                    forceSoftwareFallback = true
+                                )
+                            }
+                            return
+                        }
                         _playerState.update {
                             it.copy(
                                 isLoading = false,

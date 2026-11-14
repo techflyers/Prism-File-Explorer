@@ -33,6 +33,7 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.isValidAsFileName
 import com.techflyers.compose.file.explorer.common.ui.CheckableText
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
@@ -108,30 +109,17 @@ fun CreateNewFileDialog(
                         )
                     }
 
-                    TextField(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .autoShowKeyboard(),
-                        value = newNameInput,
-                        onValueChange = {
-                            newNameInput = it
-                        },
-                        label = { Text(text = stringResource(R.string.name)) },
-                        placeholder = { Text("New Folder / New File") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        colors = TextFieldDefaults.colors(
-                            errorIndicatorColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent
-                        ),
+                    FilenameExtensionInput(
+                        initialFullName = newNameInput,
+                        isFolder = false,
+                        autoFocusName = true,
                         isError = error.isNotEmpty(),
                         supportingText = if (error.isNotEmpty()) {
-                            { Text(error) }
+                            { Text(error, color = MaterialTheme.colorScheme.error) }
                         } else if (newNameInput.isBlank()) {
                             { Text("Leave empty for auto-generated name", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        } else null
+                        } else null,
+                        onFullNameChanged = { newNameInput = it }
                     )
 
                     CheckableText(

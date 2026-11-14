@@ -58,6 +58,7 @@ import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.isValidAsFileName
 import com.techflyers.compose.file.explorer.common.joinFileName
 import com.techflyers.compose.file.explorer.common.splitFileName
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
 import com.techflyers.compose.file.explorer.screen.main.MainActivity
@@ -699,22 +700,10 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
 
         if (showRenameDialog && currentResolvedPath != null) {
             val currentFile = File(currentResolvedPath)
-            val split = remember(currentFile.absolutePath, currentFile.name) {
-                splitFileName(currentFile.name, isFolder = false)
+            var newNameInput by remember(currentFile.absolutePath, currentFile.name) {
+                mutableStateOf(currentFile.name)
             }
-            var nameInput by remember(currentFile.absolutePath, currentFile.name) {
-                mutableStateOf(TextFieldValue(split.first, TextRange(split.first.length)))
-            }
-            var extensionInput by remember(currentFile.absolutePath, currentFile.name) {
-                mutableStateOf(TextFieldValue(split.second, TextRange(split.second.length)))
-            }
-            val newNameInput = joinFileName(nameInput.text, extensionInput.text)
             var error by remember(currentFile.absolutePath) { mutableStateOf("") }
-            val extensionFocusRequester = remember { FocusRequester() }
-            val moveToExtension = {
-                extensionInput = extensionInput.copy(selection = TextRange(extensionInput.text.length))
-                extensionFocusRequester.requestFocus()
-            }
 
             LaunchedEffect(newNameInput) {
                 val parent = currentFile.parentFile
@@ -731,7 +720,7 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                 }
             }
 
-            val canRename = error.isEmpty() && nameInput.text.isNotBlank() && newNameInput != currentFile.name
+            val canRename = error.isEmpty() && newNameInput.isNotBlank() && newNameInput != currentFile.name
 
             val executeRename: () -> Unit = {
                 if (canRename) {
@@ -825,122 +814,16 @@ fun ImageViewerScreen(instance: ImageViewerInstance) {
                             )
                         }
 
-                        Row(
+                        FilenameExtensionInput(
+                            initialFullName = newNameInput,
+                            onFullNameChanged = { newNameInput = it },
+                            onConfirm = { executeRename() },
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            TextField(
-                                modifier = Modifier
-                                    .weight(1.4f)
-                                    .autoShowKeyboard()
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
-                                            if (!globalClass.preferencesManager.disableEnterFocusExtension) {
-                                                moveToExtension()
-                                            } else {
-                                                executeRename()
-                                            }
-                                            true
-                                        } else false
-                                    },
-                                value = nameInput,
-                                onValueChange = {
-                                    val hasNewline = it.text.contains('\n') || it.text.contains('\r')
-                                    val sanitized = it.text.replace("\n", "").replace("\r", "")
-                                    nameInput = if (sanitized != it.text) {
-                                        it.copy(
-                                            text = sanitized,
-                                            selection = TextRange(
-                                                it.selection.start.coerceIn(0, sanitized.length),
-                                                it.selection.end.coerceIn(0, sanitized.length)
-                                            )
-                                        )
-                                    } else {
-                                        it
-                                    }
-                                    if (hasNewline) {
-                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
-                                            moveToExtension()
-                                        } else {
-                                            executeRename()
-                                        }
-                                    }
-                                },
-                                label = { Text(text = stringResource(R.string.name)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    imeAction = if (globalClass.preferencesManager.disableEnterFocusExtension) ImeAction.Done else ImeAction.Next
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onNext = {
-                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
-                                            moveToExtension()
-                                        } else {
-                                            executeRename()
-                                        }
-                                    },
-                                    onDone = {
-                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
-                                            moveToExtension()
-                                        } else {
-                                            executeRename()
-                                        }
-                                    },
-                                    onGo = {
-                                        if (!globalClass.preferencesManager.disableEnterFocusExtension) {
-                                            moveToExtension()
-                                        } else {
-                                            executeRename()
-                                        }
-                                    }
-                                ),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = TextFieldDefaults.colors(
-                                    errorIndicatorColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                ),
-                                isError = error.isNotEmpty()
-                            )
-                            TextField(
-                                modifier = Modifier
-                                    .weight(0.8f)
-                                    .focusRequester(extensionFocusRequester)
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
-                                            executeRename()
-                                            true
-                                        } else false
-                                    },
-                                value = extensionInput,
-                                onValueChange = {
-                                    val hasNewline = it.text.contains('\n') || it.text.contains('\r')
-                                    val clean = it.text.replace(".", "").replace("\n", "").replace("\r", "")
-                                    val newSelection = if (clean != it.text) TextRange(clean.length) else it.selection
-                                    extensionInput = it.copy(text = clean, selection = newSelection)
-                                    if (hasNewline) {
-                                        executeRename()
-                                    }
-                                },
-                                label = { Text(text = stringResource(R.string.extension)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(
-                                    onDone = { executeRename() },
-                                    onNext = { executeRename() },
-                                    onGo = { executeRename() }
-                                ),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = TextFieldDefaults.colors(
-                                    errorIndicatorColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                )
-                            )
-                        }
+                            isFolder = false,
+                            label = stringResource(R.string.name),
+                            extensionLabel = stringResource(R.string.extension),
+                            isError = error.isNotEmpty()
+                        )
 
                         if (error.isNotEmpty()) {
                             Text(

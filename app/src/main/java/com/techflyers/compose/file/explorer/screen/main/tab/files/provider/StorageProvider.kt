@@ -488,8 +488,16 @@ object StorageProvider {
         return getMediaFiles(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO, sortingPrefs, limit, offset)
     }
 
-    fun getBookmarks() = globalClass.preferencesManager.bookmarks
-        .map { LocalFileHolder(File(it)) } as ArrayList<LocalFileHolder>
+    fun getBookmarks(): ArrayList<LocalFileHolder> {
+        val titles = globalClass.preferencesManager.bookmarkTitles
+        val list = ArrayList<LocalFileHolder>()
+        for (path in globalClass.preferencesManager.bookmarks) {
+            val file = File(path)
+            val title = titles[path]
+            list.add(LocalFileHolder(file, cachedName = title))
+        }
+        return list
+    }
 
     @Volatile
     private var cachedAllDeviceFiles: ArrayList<RecentFile>? = null

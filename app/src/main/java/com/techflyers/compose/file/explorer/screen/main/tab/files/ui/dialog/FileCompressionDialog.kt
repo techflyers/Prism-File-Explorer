@@ -51,6 +51,7 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.isValidAsFileName
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
@@ -261,21 +262,13 @@ fun FileCompressionDialog(
                     }
 
                     // ── Archive name ──────────────────────────────────────────
-                    TextField(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .autoShowKeyboard(),
-                        value = newNameInput,
-                        onValueChange = { newNameInput = it },
-                        label = { Text(text = stringResource(R.string.name)) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        colors = TextFieldDefaults.colors(
-                            errorIndicatorColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent
-                        ),
+                    FilenameExtensionInput(
+                        initialFullName = newNameInput,
+                        onFullNameChanged = { newNameInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        isFolder = false,
+                        autoFocusName = true,
+                        label = stringResource(R.string.name),
                         isError = error.isNotEmpty(),
                         supportingText = if (error.isNotEmpty()) {
                             { Text(error) }

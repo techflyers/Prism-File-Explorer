@@ -32,6 +32,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.File
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.FileViewConfigDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ImportPrefsDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.OpenWithAppListDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.RenameBookmarkDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.RenameDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SavedDirectoryComparisonDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SearchDialog
@@ -112,6 +113,23 @@ fun Dialogs(tab: FilesTab) {
         tab = tab,
         onDismissRequest = { tab.toggleBookmarksDialog(false) }
     )
+
+    val bookmarkToRename = dialogsState.value.bookmarkToRename
+    if (bookmarkToRename != null) {
+        val currentTitle = globalClass.preferencesManager.getBookmarkTitle(bookmarkToRename.uniquePath)
+            ?: bookmarkToRename.displayName
+        RenameBookmarkDialog(
+            show = true,
+            currentName = currentTitle,
+            targetPath = bookmarkToRename.uniquePath,
+            onDismissRequest = { tab.toggleRenameBookmarkDialog(null) },
+            onConfirm = { newName ->
+                globalClass.preferencesManager.setBookmarkTitle(bookmarkToRename.uniquePath, newName)
+                tab.toggleRenameBookmarkDialog(null)
+                tab.reloadFiles()
+            }
+        )
+    }
 
     SearchDialog(
         show = dialogsState.value.showSearchPenal,

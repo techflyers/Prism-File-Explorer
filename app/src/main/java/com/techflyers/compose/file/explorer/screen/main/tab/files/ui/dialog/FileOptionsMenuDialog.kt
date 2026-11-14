@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FileCopy
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -576,16 +577,23 @@ fun FileOptionsMenuDialog(
             }
 
             if (tab.activeFolder is VirtualFileHolder && (tab.activeFolder as VirtualFileHolder).type == VirtualFileHolder.BOOKMARKS) {
+                if (targetFiles.size == 1) {
+                    val target = targetFiles.first()
+                    FileOption(
+                        Icons.Rounded.Edit,
+                        stringResource(R.string.rename)
+                    ) {
+                        onDismissRequest()
+                        tab.toggleRenameBookmarkDialog(target)
+                    }
+                }
                 FileOption(
                     Icons.Rounded.BookmarkAdd,
                     stringResource(R.string.remove_from_bookmarks)
                 ) {
                     onDismissRequest()
                     val toRemove = targetFiles.map { it.uniquePath }
-                    val newBookmarks = globalClass.preferencesManager.bookmarks.filter {
-                        !toRemove.contains(it)
-                    }
-                    globalClass.preferencesManager.bookmarks = newBookmarks.toSet()
+                    toRemove.forEach { globalClass.preferencesManager.removeBookmark(it) }
                     tab.unselectAllFiles()
                     tab.reloadFiles()
                 }
@@ -599,6 +607,17 @@ fun FileOptionsMenuDialog(
                     globalClass.preferencesManager.bookmarks += targetFiles.map { it.uniquePath }
                     globalClass.showMsg(R.string.added_to_bookmarks)
                     tab.unselectAllFiles()
+                }
+            }
+
+            if (targetFiles.isNotEmpty()) {
+                val allPinnedInTab = targetFiles.all { tab.isPinned(it) }
+                FileOption(
+                    Icons.Rounded.PushPin,
+                    if (allPinnedInTab) "Unpin from top" else "Pin to top"
+                ) {
+                    onDismissRequest()
+                    tab.togglePin(targetFiles)
                 }
             }
 

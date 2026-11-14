@@ -38,12 +38,14 @@ fun Modifier.unifiedFileGestureDetector(
     coroutineScope: CoroutineScope,
     findItemIndexAt: (Offset, IntSize, Boolean) -> Int?,
     scrollBy: suspend (Float, Offset, IntSize) -> Unit,
-    onOpenMenu: (ContentHolder) -> Unit
+    onOpenMenu: (ContentHolder) -> Unit,
+    onEmptyAreaLongPress: ((Offset) -> Unit)? = null
 ): Modifier {
     var listCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val currentFindItemIndexAt by rememberUpdatedState(findItemIndexAt)
     val currentScrollBy by rememberUpdatedState(scrollBy)
     val currentOnOpenMenu by rememberUpdatedState(onOpenMenu)
+    val currentOnEmptyAreaLongPress by rememberUpdatedState(onEmptyAreaLongPress)
 
     return this
         .onGloballyPositioned { listCoordinates = it }
@@ -51,7 +53,34 @@ fun Modifier.unifiedFileGestureDetector(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 tab.cancelPendingAutoScroll()
-                val initialIndex = currentFindItemIndexAt(down.position, size, false) ?: return@awaitEachGesture
+                val detectedIndex = currentFindItemIndexAt(down.position, size, false)
+                if (detectedIndex == null) {
+                    val emptyCallback = currentOnEmptyAreaLongPress
+                    if (emptyCallback == null) return@awaitEachGesture
+                    var currentDown = down
+                    var isLongPressTriggered = false
+                    try {
+                        withTimeout(300L) {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.size > 1) return@withTimeout
+                                val change = event.changes.find { it.id == currentDown.id } ?: return@withTimeout
+                                if (!change.pressed) return@withTimeout
+                                val dist = (change.position - down.position).getDistance()
+                                if (dist > viewConfiguration.touchSlop) return@withTimeout
+                                currentDown = change
+                            }
+                        }
+                    } catch (_: PointerEventTimeoutCancellationException) {
+                        isLongPressTriggered = true
+                    }
+                    if (isLongPressTriggered) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        emptyCallback(down.position)
+                    }
+                    return@awaitEachGesture
+                }
+                val initialIndex: Int = detectedIndex
                 val initialItem = tab.contentSnapshot.getOrNull(initialIndex) ?: return@awaitEachGesture
                 val wasAlreadySelected = tab.selectedFiles.containsKey(initialItem.uniquePath)
                 val previousAnchorIndex = tab.lastSelectedFileIndex
@@ -115,7 +144,7 @@ fun Modifier.unifiedFileGestureDetector(
 
                 var hasMoved = false
                 var currentPosition = down.position
-                var lastAppliedRangeIndex = initialIndex
+                var lastAppliedRangeIndex: Int = initialIndex
                 var autoScrollJob: Job? = null
                 var tabHoverJob: Job? = null
                 var lastHoveredTabIndex = -1
@@ -259,7 +288,7 @@ fun Modifier.unifiedFileGestureDetector(
                                     autoScrollJob = null
                                 }
                             } else {
-                                val targetIndex = currentFindItemIndexAt(currentPosition, size, true)
+                                val targetIndex: Int = currentFindItemIndexAt(currentPosition, size, true)
                                     ?: lastAppliedRangeIndex
                                 if (targetIndex != lastAppliedRangeIndex) {
                                     lastAppliedRangeIndex = targetIndex
@@ -326,7 +355,7 @@ fun Modifier.unifiedFileGestureDetector(
                             if (wasAlreadySelected) {
                                 tab.completeDragDrop()
                             } else {
-                                val finalIndex = currentFindItemIndexAt(currentPosition, size, true)
+                                val finalIndex: Int = currentFindItemIndexAt(currentPosition, size, true)
                                     ?: lastAppliedRangeIndex
                                 tab.lastSelectedFileIndex = finalIndex
                                 tab.selectedFilesCount = tab.selectedFiles.size

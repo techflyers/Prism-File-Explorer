@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -439,9 +438,7 @@ fun PinnedFilesSection(
             pinnedFiles.forEachIndexed { index, it ->
                 var showDeleteOption by remember(it.uniquePath) { mutableStateOf(false) }
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
@@ -508,8 +505,8 @@ fun PinnedFilesSection(
                     AnimatedVisibility(visible = showDeleteOption) {
                         Row(
                             modifier = Modifier
-                                .fillMaxHeight()
-                                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(
                                 onClick = {

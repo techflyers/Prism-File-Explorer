@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -122,17 +123,13 @@ fun ImagesToPdfDialog(
                         )
                     }
                 } else {
-                    OutlinedTextField(
-                        value = outputName,
-                        onValueChange = { outputName = it },
-                        label = { Text("Output PDF Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
+                    FilenameExtensionInput(
+                        initialFullName = outputName,
+                        onFullNameChanged = { outputName = it },
+                        label = "Output PDF Name",
+                        outlined = true,
+                        isFolder = false,
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     // Fit to A4

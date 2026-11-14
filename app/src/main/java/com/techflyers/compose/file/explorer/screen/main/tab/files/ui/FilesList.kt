@@ -77,6 +77,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontStyle
@@ -92,6 +98,7 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import com.techflyers.compose.file.explorer.common.toFormattedDate
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTask
 import com.techflyers.compose.file.explorer.screen.main.tab.files.task.CopyTaskParameters
@@ -136,7 +143,6 @@ import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.ui.Isolate
 import com.techflyers.compose.file.explorer.common.ui.Space
-import com.techflyers.compose.file.explorer.common.ui.fastScrollbar
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.coil.canUseCoil
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.imageFileType
@@ -154,7 +160,16 @@ import kotlinx.coroutines.runBlocking
 fun ColumnScope.FilesList(tab: FilesTab) {
     val preferencesManager = globalClass.preferencesManager
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     var isRefreshing by remember { mutableStateOf(false) }
+    var showEmptyAreaMenu by remember { mutableStateOf(false) }
+    var emptyMenuTouchOffset by remember { mutableStateOf(Offset.Zero) }
+    var showCustomizeEmptyMenuDialog by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val onEmptyAreaLongPress: (Offset) -> Unit = { offset ->
+        emptyMenuTouchOffset = offset
+        showEmptyAreaMenu = true
+    }
 
     LaunchedEffect(preferencesManager.showDirectoryTypeFilterRibbon, tab.activeFolder.uniquePath) {
         if (!preferencesManager.showDirectoryTypeFilterRibbon && tab.selectedTypeFilters.isNotEmpty()) {
@@ -341,14 +356,14 @@ fun ColumnScope.FilesList(tab: FilesTab) {
             )
     ) {
         if (tab.activeFolderContent.isEmpty() && !tab.isLoading && !tab.isCategoryLoading) {
-            EmptyFolderContent(tab)
+            EmptyFolderContent(tab, onEmptyAreaLongPress)
         }
 
         // Disable elastic overscroll bounce when spring effect disabled
         val overscrollConfig = if (preferencesManager.disableSpringEffect) null else OverscrollConfiguration()
         CompositionLocalProvider(LocalOverscrollConfiguration provides overscrollConfig) {
         if (preferencesManager.disablePullDownToRefresh) {
-            FilesListContent(tab, parentFolder, parentFolderResolved)
+            FilesListContent(tab, parentFolder, parentFolderResolved, onEmptyAreaLongPress)
         } else if (preferencesManager.disableSpringEffect) {
             val noSpringState = rememberPullToRefreshState()
             PullToRefreshBox(
@@ -372,7 +387,7 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                     )
                 }
             ) {
-                FilesListContent(tab, parentFolder, parentFolderResolved)
+                FilesListContent(tab, parentFolder, parentFolderResolved, onEmptyAreaLongPress)
             }
         } else {
             PullToRefreshBox(
@@ -388,10 +403,97 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                FilesListContent(tab, parentFolder, parentFolderResolved)
+                FilesListContent(tab, parentFolder, parentFolderResolved, onEmptyAreaLongPress)
             }
         }
         } // end CompositionLocalProvider
+
+        // Interactive Fast Scrollbar + Sort Pill
+        FilesFastScrollbar(
+            items = tab.contentSnapshot,
+            sortMethod = tab.sortingPrefs.sortMethod,
+            listState = if (tab.viewConfig.viewType == ViewType.LIST) tab.activeColumnListState else null,
+            gridState = if (tab.viewConfig.viewType == ViewType.GRID) tab.activeListState else null,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
+
+        // Empty-Area Context Menu
+        DropdownMenu(
+            expanded = showEmptyAreaMenu,
+            onDismissRequest = { showEmptyAreaMenu = false },
+            offset = with(density) {
+                DpOffset(emptyMenuTouchOffset.x.toDp(), emptyMenuTouchOffset.y.toDp())
+            }
+        ) {
+            val actions = remember(showEmptyAreaMenu) { EmptyAreaAction.getOrderedVisibleActions() }
+            actions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.title) },
+                    leadingIcon = { Icon(action.icon, contentDescription = null) },
+                    onClick = {
+                        showEmptyAreaMenu = false
+                        when (action) {
+                            EmptyAreaAction.NEW_TAB -> globalClass.mainActivityManager.addTabAndSelect(FilesTab(tab.activeFolder))
+                            EmptyAreaAction.DUPLICATE_TAB -> {
+                                val idx = globalClass.mainActivityManager.state.value.tabs.indexOfFirst { it.id == tab.id }
+                                if (idx >= 0) globalClass.mainActivityManager.duplicateTabAt(idx)
+                            }
+                            EmptyAreaAction.CLOSE_TAB -> {
+                                val idx = globalClass.mainActivityManager.state.value.tabs.indexOfFirst { it.id == tab.id }
+                                if (idx >= 0) globalClass.mainActivityManager.removeTabAt(idx)
+                            }
+                            EmptyAreaAction.REOPEN_CLOSED_TAB -> globalClass.mainActivityManager.reopenLastClosedTab()
+                            EmptyAreaAction.OPEN_IN_TERMINAL -> {
+                                if (tab.activeFolder is LocalFileHolder) {
+                                    com.techflyers.compose.file.explorer.screen.terminal.TerminalLauncher.openTerminal(
+                                        context,
+                                        (tab.activeFolder as LocalFileHolder).file.absolutePath
+                                    )
+                                } else {
+                                    globalClass.showMsg("Not a local folder")
+                                }
+                            }
+                            EmptyAreaAction.CREATE_NEW -> tab.toggleCreateNewFileDialog(true)
+                            EmptyAreaAction.PASTE_HERE -> {
+                                val task = globalClass.taskManager.pendingTasks.filterIsInstance<CopyTask>().lastOrNull()
+                                if (task != null) {
+                                    globalClass.taskManager.runTask(task.id, CopyTaskParameters(tab.activeFolder))
+                                } else {
+                                    globalClass.showMsg("No pending tasks to paste")
+                                }
+                            }
+                            EmptyAreaAction.SELECT_ALL -> tab.selectAllFiles(false)
+                            EmptyAreaAction.SORT_BY -> tab.toggleSortingMenu(true)
+                            EmptyAreaAction.TOGGLE_HIDDEN -> {
+                                globalClass.preferencesManager.showHiddenFiles = !globalClass.preferencesManager.showHiddenFiles
+                                tab.reloadFiles()
+                            }
+                            EmptyAreaAction.REFRESH -> {
+                                tab.invalidateFolderListingCache(tab.activeFolder.uniquePath)
+                                tab.openFolder(tab.activeFolder, true, true)
+                            }
+                            EmptyAreaAction.FOLDER_PROPERTIES -> {
+                                tab.targetFile = tab.activeFolder
+                                tab.toggleFilePropertiesDialog(true)
+                            }
+                        }
+                    }
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Customize menu…") },
+                leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+                onClick = {
+                    showEmptyAreaMenu = false
+                    showCustomizeEmptyMenuDialog = true
+                }
+            )
+        }
+
+        if (showCustomizeEmptyMenuDialog) {
+            CustomizeEmptyAreaMenuDialog(onDismiss = { showCustomizeEmptyMenuDialog = false })
+        }
 
         LoadingOverlay(tab)
 
@@ -489,11 +591,12 @@ fun ColumnScope.FilesList(tab: FilesTab) {
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Medium
                                 )
-                                OutlinedTextField(
-                                    value = renameInput,
-                                    onValueChange = { renameInput = it },
-                                    label = { Text(stringResource(R.string.rename_file_hint)) },
-                                    singleLine = true,
+                                FilenameExtensionInput(
+                                    initialFullName = renameInput,
+                                    onFullNameChanged = { renameInput = it },
+                                    label = stringResource(R.string.rename_file_hint),
+                                    outlined = true,
+                                    isFolder = firstFile.isFolder,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Text(
@@ -561,11 +664,18 @@ fun ColumnScope.FilesList(tab: FilesTab) {
 
                                 if (selectedFileForRename != null) {
                                     HorizontalDivider()
-                                    OutlinedTextField(
-                                        value = multiRenameInput,
-                                        onValueChange = { multiRenameInput = it },
-                                        label = { Text("Rename selected file") },
-                                        singleLine = true,
+                                    FilenameExtensionInput(
+                                        initialFullName = multiRenameInput,
+                                        onFullNameChanged = { multiRenameInput = it },
+                                        label = "Rename selected file",
+                                        outlined = true,
+                                        isFolder = selectedFileForRename?.isFolder ?: false,
+                                        onConfirm = {
+                                            selectedFileForRename?.let { f ->
+                                                mostRecentCopyTask.setCustomTargetName(f.uniquePath, multiRenameInput)
+                                            }
+                                            selectedFileForRename = null
+                                        },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
@@ -776,11 +886,22 @@ fun ColumnScope.FilesList(tab: FilesTab) {
 }
 
 @Composable
-private fun EmptyFolderContent(tab: FilesTab) {
+private fun EmptyFolderContent(
+    tab: FilesTab,
+    onEmptyAreaLongPress: ((Offset) -> Unit)? = null
+) {
     val preferencesManager = globalClass.preferencesManager
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(tab.activeFolder.uniquePath) {
+                detectTapGestures(
+                    onLongPress = { offset ->
+                        onEmptyAreaLongPress?.invoke(offset)
+                    }
+                )
+            },
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -903,11 +1024,12 @@ private fun LoadingOverlay(tab: FilesTab) {
 private fun FilesListContent(
     tab: FilesTab,
     parentFolder: ContentHolder?,
-    parentFolderResolved: Boolean
+    parentFolderResolved: Boolean,
+    onEmptyAreaLongPress: ((Offset) -> Unit)? = null
 ) {
     when (tab.viewConfig.viewType) {
-        ViewType.LIST -> FilesListColumns(tab, parentFolder, parentFolderResolved)
-        ViewType.GRID -> FilesListGrid(tab, parentFolder, parentFolderResolved)
+        ViewType.LIST -> FilesListColumns(tab, parentFolder, parentFolderResolved, onEmptyAreaLongPress)
+        ViewType.GRID -> FilesListGrid(tab, parentFolder, parentFolderResolved, onEmptyAreaLongPress)
     }
 }
 
@@ -916,7 +1038,8 @@ private fun FilesListContent(
 fun FilesListColumns(
     tab: FilesTab,
     parentFolder: ContentHolder?,
-    parentFolderResolved: Boolean
+    parentFolderResolved: Boolean,
+    onEmptyAreaLongPress: ((Offset) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
@@ -1204,7 +1327,8 @@ fun FilesListColumns(
                     coroutineScope = coroutineScope,
                     findItemIndexAt = { offset, size, clamp -> findColumnItemIndex(offset, size.width.toFloat(), clamp) },
                     scrollBy = { delta, offset, size -> getScrollStateForOffset(offset, size.width.toFloat())?.scrollBy(delta) },
-                    onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) }
+                    onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) },
+                    onEmptyAreaLongPress = onEmptyAreaLongPress
                 )
         ) {
             columnSlices.forEachIndexed { colIndex, slice ->
@@ -1212,8 +1336,7 @@ fun FilesListColumns(
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .fastScrollbar(listState),
+                        .fillMaxHeight(),
                     state = listState,
                     contentPadding = PaddingValues(bottom = bottomContentPadding)
                 ) {
@@ -1242,7 +1365,12 @@ fun FilesListColumns(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResolved: Boolean) {
+fun FilesListGrid(
+    tab: FilesTab,
+    parentFolder: ContentHolder?,
+    parentFolderResolved: Boolean,
+    onEmptyAreaLongPress: ((Offset) -> Unit)? = null
+) {
     val context = LocalContext.current
     val selectionHighlightColor = colorScheme.surfaceContainerHigh.copy(alpha = 1f)
     val highlightColor = colorScheme.primary.copy(alpha = 0.05f)
@@ -1445,7 +1573,6 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
         contentPadding = PaddingValues(bottom = bottomContentPadding),
         modifier = Modifier
             .fillMaxSize()
-            .fastScrollbar(tab.activeListState)
             .unifiedFileGestureDetector(
                 tab = tab,
                 viewConfiguration = viewConfiguration,
@@ -1453,7 +1580,8 @@ fun FilesListGrid(tab: FilesTab, parentFolder: ContentHolder?, parentFolderResol
                 coroutineScope = coroutineScope,
                 findItemIndexAt = { offset, _, clamp -> findGridItemIndex(offset, clamp) },
                 scrollBy = { delta, _, _ -> tab.activeListState.scrollBy(delta) },
-                onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) }
+                onOpenMenu = { item -> tab.toggleFileOptionsMenu(item) },
+                onEmptyAreaLongPress = onEmptyAreaLongPress
             )
     ) {
         val maxSiblingSize = tab.maxSiblingSize
@@ -1613,21 +1741,34 @@ private fun ColumnFileItem(
                     item.displayName
                 }
 
-                MiddleEllipsisText(
-                    text = displayText,
-                    isFolder = item.isFolder || (prefs.hideFileExtensions && item.isFile()),
-                    isSelected = isSelected,
-                    fontSize = fontSize.sp,
-                    fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
-                    fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
-                    lineHeight = (fontSize + 2).sp,
-                    maxLines = viewConfigs.filenameMaxLines,
-                    color = if (isSelected) {
-                        colorScheme.primary
-                    } else {
-                        Color.Unspecified
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (tab.isPinned(item)) {
+                        Icon(
+                            imageVector = Icons.Rounded.PushPin,
+                            contentDescription = "Pinned",
+                            tint = colorScheme.primary,
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(14.dp)
+                        )
                     }
-                )
+                    MiddleEllipsisText(
+                        text = displayText,
+                        isFolder = item.isFolder || (prefs.hideFileExtensions && item.isFile()),
+                        isSelected = isSelected,
+                        fontSize = fontSize.sp,
+                        fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
+                        fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
+                        lineHeight = (fontSize + 2).sp,
+                        maxLines = viewConfigs.filenameMaxLines,
+                        color = if (isSelected) {
+                            colorScheme.primary
+                        } else {
+                            Color.Unspecified
+                        },
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
 
                 FileDetails(
                     item = item,
@@ -1806,8 +1947,20 @@ private fun GridFileItem(
                             .background(
                                 color = colorScheme.surface.copy(alpha = 0.6f)
                             )
-                            .padding(4.dp)
+                            .padding(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
+                        if (tab.isPinned(item)) {
+                            Icon(
+                                imageVector = Icons.Rounded.PushPin,
+                                contentDescription = "Pinned",
+                                tint = colorScheme.primary,
+                                modifier = Modifier
+                                    .padding(end = 2.dp)
+                                    .size(12.dp)
+                            )
+                        }
                         val fontSize = FileItemSizeMap.getFontSize(viewConfigs.itemSize) * 0.8
                         MiddleEllipsisText(
                             text = item.displayName,
@@ -1831,21 +1984,37 @@ private fun GridFileItem(
             }
             if (!viewConfigs.galleryMode) {
                 Space(size = 4.dp)
-                MiddleEllipsisText(
-                    text = item.displayName,
-                    isFolder = item.isFolder,
-                    isSelected = isSelected,
-                    fontSize = (FileItemSizeMap.getFontSize(viewConfigs.itemSize) - 3).sp,
-                    fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
-                    fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
-                    maxLines = viewConfigs.filenameMaxLines,
-                    textAlign = TextAlign.Center,
-                    color = if (isSelected) {
-                        colorScheme.primary
-                    } else {
-                        colorScheme.onSurface
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (tab.isPinned(item)) {
+                        Icon(
+                            imageVector = Icons.Rounded.PushPin,
+                            contentDescription = "Pinned",
+                            tint = colorScheme.primary,
+                            modifier = Modifier
+                                .padding(end = 2.dp)
+                                .size(12.dp)
+                        )
                     }
-                )
+                    MiddleEllipsisText(
+                        text = item.displayName,
+                        isFolder = item.isFolder,
+                        isSelected = isSelected,
+                        fontSize = (FileItemSizeMap.getFontSize(viewConfigs.itemSize) - 3).sp,
+                        fontWeight = if (isHighlighted && !isSelected) FontWeight.Medium else null,
+                        fontStyle = if (isHighlighted && !isSelected) FontStyle.Italic else FontStyle.Normal,
+                        maxLines = viewConfigs.filenameMaxLines,
+                        textAlign = TextAlign.Center,
+                        color = if (isSelected) {
+                            colorScheme.primary
+                        } else {
+                            colorScheme.onSurface
+                        }
+                    )
+                }
                 Space(size = 2.dp)
                 FileDetailsCompact(
                     item = item,

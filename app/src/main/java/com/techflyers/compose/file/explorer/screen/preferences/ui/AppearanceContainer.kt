@@ -42,6 +42,7 @@ import com.techflyers.compose.file.explorer.common.showMsg
 import com.techflyers.compose.file.explorer.common.toJson
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.SelectionRibbonSettingsDialog
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.CustomizeEmptyAreaMenuDialog
 import com.techflyers.compose.file.explorer.screen.main.ui.TopToolbarSettingsDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeLayout
 import com.techflyers.compose.file.explorer.screen.main.tab.home.data.HomeSectionIds
@@ -55,6 +56,7 @@ fun AppearanceContainer() {
     val prefs = globalClass.preferencesManager
     var showSelectionRibbonSettingsDialog by remember { mutableStateOf(false) }
     var showTopToolbarSettingsDialog by remember { mutableStateOf(false) }
+    var showEmptyAreaMenuDialog by remember { mutableStateOf(false) }
 
     Container(
         title = stringResource(R.string.appearance),
@@ -93,6 +95,18 @@ fun AppearanceContainer() {
         )
         if (showTopToolbarSettingsDialog) {
             TopToolbarSettingsDialog(onDismiss = { showTopToolbarSettingsDialog = false })
+        }
+
+        PreferenceDivider()
+
+        PreferenceItem(
+            label = "Customize empty-area context menu",
+            supportingText = "Reorder or toggle actions shown when long-pressing empty space in Files tab",
+            icon = Icons.Rounded.CallToAction,
+            onClick = { showEmptyAreaMenuDialog = true }
+        )
+        if (showEmptyAreaMenuDialog) {
+            CustomizeEmptyAreaMenuDialog(onDismiss = { showEmptyAreaMenuDialog = false })
         }
 
         PreferenceDivider()

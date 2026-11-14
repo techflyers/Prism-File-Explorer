@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
@@ -161,11 +162,12 @@ fun MergeImagesDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = outputName,
-                    onValueChange = { outputName = it },
-                    label = { Text("Output filename") },
-                    singleLine = true,
+                FilenameExtensionInput(
+                    initialFullName = outputName,
+                    onFullNameChanged = { outputName = it },
+                    label = "Output filename",
+                    outlined = true,
+                    isFolder = false,
                     modifier = Modifier.fillMaxWidth()
                 )
 

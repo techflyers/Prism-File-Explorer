@@ -191,6 +191,8 @@ fun CompactFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
     onLongClick: (() -> Unit)? = null
 ) {
     val containerColor = if (selected) {
@@ -209,7 +211,7 @@ fun CompactFilterChip(
         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
     }
 
-    Box(
+    Row(
         modifier = modifier
             .heightIn(min = 26.dp)
             .clip(RoundedCornerShape(6.dp))
@@ -220,8 +222,12 @@ fun CompactFilterChip(
                 onLongClick = onLongClick
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        contentAlignment = Alignment.Center
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        if (leadingIcon != null) {
+            leadingIcon()
+        }
         Text(
             text = label,
             fontSize = 12.sp,
@@ -230,6 +236,9 @@ fun CompactFilterChip(
             color = contentColor,
             maxLines = 1
         )
+        if (trailingIcon != null) {
+            trailingIcon()
+        }
     }
 }
 

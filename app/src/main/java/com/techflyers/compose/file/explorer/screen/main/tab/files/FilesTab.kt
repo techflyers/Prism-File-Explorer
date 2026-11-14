@@ -268,6 +268,31 @@ class FilesTab(
     private var lastKnownCategoryCount: Int = -1
     private var lastKnownCategoryMaxDate: Long = -1L
 
+    var selectedTimeFilter by mutableStateOf(TimeFilterOption.ALL)
+
+    val pinnedPaths = mutableStateListOf<String>().apply {
+        addAll(globalClass.preferencesManager.pinnedFilesInTabs)
+    }
+
+    fun isPinned(holder: ContentHolder): Boolean {
+        return pinnedPaths.contains(holder.uniquePath)
+    }
+
+    fun togglePin(holders: List<ContentHolder>) {
+        if (holders.isEmpty()) return
+        val allCurrentlyPinned = holders.all { isPinned(it) }
+        holders.forEach { item ->
+            if (allCurrentlyPinned) {
+                pinnedPaths.remove(item.uniquePath)
+            } else if (!pinnedPaths.contains(item.uniquePath)) {
+                pinnedPaths.add(item.uniquePath)
+            }
+        }
+        globalClass.preferencesManager.pinnedFilesInTabs = pinnedPaths.toSet()
+        unselectAllFiles()
+        updateContentSnapshot()
+    }
+
     fun updateContentSnapshot() {
         val activeFilters = selectedTypeFilters
         val configuredFilters = if (activeFilters.isNotEmpty()) {
@@ -276,9 +301,12 @@ class FilesTab(
         } else {
             emptyList()
         }
-        val filtered = if (activeFilters.isNotEmpty()) {
+        val now = System.currentTimeMillis()
+        val filtered = if (activeFilters.isNotEmpty() || selectedTimeFilter != TimeFilterOption.ALL) {
             activeFolderContent.filter { item ->
-                if (configuredFilters.isNotEmpty()) {
+                val matchesType = if (activeFilters.isEmpty()) {
+                    true
+                } else if (configuredFilters.isNotEmpty()) {
                     val anyFolderFilter = configuredFilters.any { "__folder__" in it.extensions }
                     if (item.isFolder && !anyFolderFilter) {
                         true
@@ -290,12 +318,25 @@ class FilesTab(
                         matchesTypeFilterExtension(item.extension, filter)
                     }
                 }
+                val matchesTime = selectedTimeFilter == TimeFilterOption.ALL ||
+                    selectedTimeFilter.matches(item.lastModified, now)
+
+                matchesType && matchesTime
             }
         } else {
             activeFolderContent.toList()
         }
-        contentSnapshot = filtered
-        maxSiblingSize = filtered.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
+
+        val pinnedSet = pinnedPaths.toHashSet()
+        val finalOrdered = if (pinnedSet.isEmpty()) {
+            filtered
+        } else {
+            val (pinned, unpinned) = filtered.partition { pinnedSet.contains(it.uniquePath) }
+            pinned + unpinned
+        }
+
+        contentSnapshot = finalOrdered
+        maxSiblingSize = finalOrdered.maxOfOrNull { it.size }?.coerceAtLeast(1L) ?: 1L
     }
 
     private fun matchesTypeFilterExtension(ext: String, filter: String?): Boolean {
@@ -895,6 +936,21 @@ class FilesTab(
     }
 
 
+    fun selectAllFiles(invertIfAllSelected: Boolean = false) {
+        if (invertIfAllSelected && selectedFiles.size == activeFolderContent.size) {
+            unselectAllFiles()
+            return
+        }
+        unselectAllFiles(false)
+        activeFolderContent.forEach {
+            selectedFiles[it.uniquePath] = it
+        }
+        selectedFilesCount = selectedFiles.size
+        dragSelectionVersion++
+        updateSelectedFilesSize()
+        quickReloadFiles()
+    }
+
     fun unselectAllFiles(quickReload: Boolean = true) {
         selectedFiles.clear()
         selectedFilesCount = 0
@@ -1179,7 +1235,7 @@ class FilesTab(
                         isCategoryLoading = hasMoreAfterFirst
                         activeFolderContent.clear()
                         activeFolderContent.addAll(uniqueFirstPage)
-                        if (selectedTypeFilters.isEmpty()) {
+                        if (selectedTypeFilters.isEmpty() && selectedTimeFilter == TimeFilterOption.ALL && pinnedPaths.isEmpty()) {
                             contentSnapshot = uniqueFirstPage.toList()
                             maxSiblingSize = firstMaxSiblingSize
                         } else {
@@ -1249,7 +1305,7 @@ class FilesTab(
                             withContext(Dispatchers.Main) {
                                 if (requestGeneration != listingGeneration.get()) return@withContext
                                 activeFolderContent.addAll(batchToCommit)
-                                if (selectedTypeFilters.isEmpty()) {
+                                if (selectedTypeFilters.isEmpty() && selectedTimeFilter == TimeFilterOption.ALL && pinnedPaths.isEmpty()) {
                                     contentSnapshot = snapshotCopy
                                     maxSiblingSize = snapshotMax
                                 } else {
@@ -1276,7 +1332,7 @@ class FilesTab(
                         withContext(Dispatchers.Main) {
                             if (requestGeneration != listingGeneration.get()) return@withContext
                             activeFolderContent.addAll(batchToCommit)
-                            if (selectedTypeFilters.isEmpty()) {
+                            if (selectedTypeFilters.isEmpty() && selectedTimeFilter == TimeFilterOption.ALL && pinnedPaths.isEmpty()) {
                                 contentSnapshot = snapshotCopy
                                 maxSiblingSize = snapshotMax
                             } else {
@@ -1319,7 +1375,7 @@ class FilesTab(
                                         withContext(Dispatchers.Main) {
                                             if (requestGeneration != listingGeneration.get()) return@withContext
                                             activeFolderContent.addAll(uniqueWalkBatch)
-                                            if (selectedTypeFilters.isEmpty()) {
+                                            if (selectedTypeFilters.isEmpty() && selectedTimeFilter == TimeFilterOption.ALL && pinnedPaths.isEmpty()) {
                                                 contentSnapshot = snapshotCopy
                                                 maxSiblingSize = snapshotMax
                                             } else {
@@ -1535,9 +1591,16 @@ class FilesTab(
     }
 
     private fun validateBookmarks() {
-        globalClass.preferencesManager.bookmarks = globalClass.preferencesManager.bookmarks.filter {
+        val validBookmarks = globalClass.preferencesManager.bookmarks.filter {
             File(it).exists()
         }.toSet()
+        if (validBookmarks.size != globalClass.preferencesManager.bookmarks.size) {
+            globalClass.preferencesManager.bookmarks = validBookmarks
+            val validTitles = globalClass.preferencesManager.bookmarkTitles.filterKeys { File(it).exists() }
+            if (validTitles.size != globalClass.preferencesManager.bookmarkTitles.size) {
+                globalClass.preferencesManager.bookmarkTitles = validTitles
+            }
+        }
     }
 
     private fun validateSearchResult() {
@@ -2197,6 +2260,10 @@ class FilesTab(
 
     fun toggleBookmarksDialog(show: Boolean) {
         _dialogsState.update { it.copy(showBookmarkDialog = show) }
+    }
+
+    fun toggleRenameBookmarkDialog(target: ContentHolder?) {
+        _dialogsState.update { it.copy(bookmarkToRename = target) }
     }
 
     fun toggleDeleteConfirmationDialog(show: Boolean) {

@@ -2,6 +2,7 @@ package com.techflyers.compose.file.explorer.screen.viewer.video.model
 
 import android.net.Uri
 import androidx.media3.common.Player
+import com.techflyers.compose.file.explorer.screen.preferences.constant.VideoDecoderMode
 
 data class SubtitleItem(
     val uri: Uri,
@@ -30,8 +31,9 @@ data class VideoPlayerState(
     val availableSubtitles: List<SubtitleItem> = emptyList(),
     val selectedSubtitleUri: Uri? = null,
     val subtitleTextSizeSp: Float = 20f,
-    val preferSoftwareDecoder: Boolean = true,
-    val activeDecoderLabel: String = "SW (FFmpeg)",
+    val decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+    val preferSoftwareDecoder: Boolean = false,
+    val activeDecoderLabel: String = "Auto • HW (MediaCodec)",
     val usePlatformPlayerFallback: Boolean = false,
     val playbackErrorTitle: String? = null,
     val playbackErrorDetails: String? = null,

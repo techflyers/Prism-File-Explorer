@@ -225,6 +225,14 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
 
                     if (renamed) {
                         com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
+                        if (globalClass.preferencesManager.bookmarks.contains(localFile.uniquePath)) {
+                            val existingTitle = globalClass.preferencesManager.getBookmarkTitle(localFile.uniquePath)
+                            globalClass.preferencesManager.removeBookmark(localFile.uniquePath)
+                            globalClass.preferencesManager.bookmarks = globalClass.preferencesManager.bookmarks + newFile.path
+                            if (existingTitle != null) {
+                                globalClass.preferencesManager.setBookmarkTitle(newFile.path, existingTitle)
+                            }
+                        }
                         itemToRename.status = TaskContentStatus.SUCCESS
                     } else {
                         val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(

@@ -15,6 +15,11 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import android.util.Rational
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerActivity
 import com.techflyers.compose.file.explorer.screen.viewer.ViewerInstance
@@ -30,8 +35,12 @@ class VideoPlayerActivity : ViewerActivity() {
 
     private val pipReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "ACTION_MEDIA_CONTROL") {
-                activeInstance?.playPause()
+            if (intent?.action == ACTION_PIP_CONTROL) {
+                when (intent.getStringExtra(EXTRA_PIP_ACTION)) {
+                    PIP_ACTION_REWIND -> activeInstance?.seekBy(-10_000L)
+                    PIP_ACTION_PLAY_PAUSE -> activeInstance?.playPause()
+                    PIP_ACTION_FORWARD -> activeInstance?.seekBy(10_000L)
+                }
                 updatePictureInPictureParams()
             }
         }
@@ -39,14 +48,32 @@ class VideoPlayerActivity : ViewerActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        configureImmersiveWindow(showBars = false)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val filter = IntentFilter("ACTION_MEDIA_CONTROL")
+            val filter = IntentFilter(ACTION_PIP_CONTROL)
             androidx.core.content.ContextCompat.registerReceiver(
                 this,
                 pipReceiver,
                 filter,
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
             )
+        }
+    }
+
+    fun configureImmersiveWindow(showBars: Boolean) {
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (showBars) {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -108,27 +135,96 @@ class VideoPlayerActivity : ViewerActivity() {
         }
     }
 
-    private fun updatePictureInPictureParams() {
+    fun buildPipParams(): PictureInPictureParams {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            throw UnsupportedOperationException("PiP requires Android O+")
+        }
+        val isPlaying = activeInstance?.playerState?.value?.isPlaying ?: false
+
+        val rewindIntent = Intent(ACTION_PIP_CONTROL).apply {
+            `package` = packageName
+            putExtra(EXTRA_PIP_ACTION, PIP_ACTION_REWIND)
+        }
+        val rewindPending = PendingIntent.getBroadcast(
+            this,
+            101,
+            rewindIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val rewindAction = RemoteAction(
+            Icon.createWithResource(this, android.R.drawable.ic_media_rew),
+            "Rewind 10s",
+            "Rewind 10s",
+            rewindPending
+        )
+
+        val playPauseIntent = Intent(ACTION_PIP_CONTROL).apply {
+            `package` = packageName
+            putExtra(EXTRA_PIP_ACTION, PIP_ACTION_PLAY_PAUSE)
+        }
+        val playPausePending = PendingIntent.getBroadcast(
+            this,
+            102,
+            playPauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseTitle = if (isPlaying) "Pause" else "Play"
+        val playPauseAction = RemoteAction(
+            Icon.createWithResource(this, playPauseIcon),
+            playPauseTitle,
+            playPauseTitle,
+            playPausePending
+        )
+
+        val forwardIntent = Intent(ACTION_PIP_CONTROL).apply {
+            `package` = packageName
+            putExtra(EXTRA_PIP_ACTION, PIP_ACTION_FORWARD)
+        }
+        val forwardPending = PendingIntent.getBroadcast(
+            this,
+            103,
+            forwardIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val forwardAction = RemoteAction(
+            Icon.createWithResource(this, android.R.drawable.ic_media_ff),
+            "Forward 10s",
+            "Forward 10s",
+            forwardPending
+        )
+
+        val builder = PictureInPictureParams.Builder()
+            .setActions(listOf(rewindAction, playPauseAction, forwardAction))
+
+        val width = activeInstance?.getPlayer()?.videoSize?.width ?: 0
+        val height = activeInstance?.getPlayer()?.videoSize?.height ?: 0
+        if (width > 0 && height > 0) {
+            val rational = Rational(width, height)
+            val floatRatio = rational.toFloat()
+            if (floatRatio in 0.418410f..2.390000f) {
+                builder.setAspectRatio(rational)
+            }
+        }
+
+        return builder.build()
+    }
+
+    fun enterPipMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val isPlayingNow = activeInstance?.playerState?.value?.isPlaying ?: false
-            val iconId = if (isPlayingNow) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            val title = if (isPlayingNow) "Pause" else "Play"
+            try {
+                enterPictureInPictureMode(buildPipParams())
+            } catch (e: Exception) {
+                android.util.Log.e("VideoPlayerActivity", "Failed to enter PiP: ${e.message}")
+            }
+        }
+    }
 
-            val intent = Intent("ACTION_MEDIA_CONTROL")
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                0,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val icon = Icon.createWithResource(this, iconId)
-            val action = RemoteAction(icon, title, title, pendingIntent)
-
-            val params = PictureInPictureParams.Builder()
-                .setActions(listOf(action))
-                .build()
-            setPictureInPictureParams(params)
+    fun updatePictureInPictureParams() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                setPictureInPictureParams(buildPipParams())
+            } catch (_: Exception) {}
         }
     }
 
@@ -149,29 +245,7 @@ class VideoPlayerActivity : ViewerActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val isPlaying = activeInstance?.playerState?.value?.isPlaying ?: false
             if (isPlaying) {
-                try {
-                    val isPlayingNow = activeInstance?.playerState?.value?.isPlaying ?: false
-                    val iconId = if (isPlayingNow) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-                    val title = if (isPlayingNow) "Pause" else "Play"
-
-                    val intent = Intent("ACTION_MEDIA_CONTROL")
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        this,
-                        0,
-                        intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-
-                    val icon = Icon.createWithResource(this, iconId)
-                    val action = RemoteAction(icon, title, title, pendingIntent)
-
-                    val pipParams = PictureInPictureParams.Builder()
-                        .setActions(listOf(action))
-                        .build()
-                    enterPictureInPictureMode(pipParams)
-                } catch (e: Exception) {
-                    android.util.Log.e("VideoPlayerActivity", "Failed to enter PiP: ${e.message}")
-                }
+                enterPipMode()
             }
         }
     }
@@ -225,6 +299,12 @@ class VideoPlayerActivity : ViewerActivity() {
     }
 
     companion object {
+        const val ACTION_PIP_CONTROL = "com.techflyers.compose.file.explorer.ACTION_PIP_CONTROL"
+        const val EXTRA_PIP_ACTION = "extra_pip_action"
+        const val PIP_ACTION_REWIND = "pip_rewind"
+        const val PIP_ACTION_PLAY_PAUSE = "pip_play_pause"
+        const val PIP_ACTION_FORWARD = "pip_forward"
+
         fun resolveFilePath(context: Context, uri: Uri, extraPath: String? = null): String? {
             if (!extraPath.isNullOrEmpty() && File(extraPath).exists()) {
                 return extraPath

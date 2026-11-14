@@ -40,6 +40,7 @@ import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.base.BaseActivity
 import com.techflyers.compose.file.explorer.common.getUriInfo
 import com.techflyers.compose.file.explorer.common.showMsg
+import com.techflyers.compose.file.explorer.common.ui.FilenameExtensionInput
 import com.techflyers.compose.file.explorer.common.ui.autoShowKeyboard
 import com.techflyers.compose.file.explorer.common.ui.fastScrollbar
 import com.techflyers.compose.file.explorer.screen.main.MainActivity
@@ -719,18 +720,18 @@ class ShareReceiverActivity : BaseActivity() {
         val conflict = remember(value, existingFiles) {
             existingFiles.any { it.displayName.equals(value.trim(), ignoreCase = false) }
         }
-        OutlinedTextField(
-            value = value,
-            onValueChange = { onValueChange(it.replace("/", "").replace("\\", "")) },
-            label = { Text(label) },
+        FilenameExtensionInput(
+            initialFullName = value,
+            onFullNameChanged = { onValueChange(it.replace("/", "").replace("\\", "")) },
+            label = label,
+            outlined = true,
+            isFolder = false,
             isError = conflict,
+            autoFocusName = false,
             supportingText = if (conflict) {
                 { Text("Name exists — will be auto-renamed.", color = MaterialTheme.colorScheme.primary) }
             } else null,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
+            modifier = Modifier.fillMaxWidth()
         )
     }
 

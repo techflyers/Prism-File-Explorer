@@ -12,6 +12,7 @@ import androidx.compose.foundation.OverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -51,6 +53,7 @@ import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote
 import com.techflyers.compose.file.explorer.screen.main.tab.files.service.remote.NetworkConnectionsService
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
+import com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.RenameBookmarkDialog
 import com.techflyers.compose.file.explorer.screen.main.tab.nfile_tools.*
 import com.techflyers.compose.file.explorer.screen.preferences.PreferencesActivity
 import com.techflyers.compose.file.explorer.common.toFormattedSize
@@ -244,6 +247,7 @@ fun NFileDrawerContent(
                 "bookmarks" -> {
                 if (preferencesManager.showBookmarksInDrawer) {
                     var showAddBookmarkDialog by remember { mutableStateOf(false) }
+                    var bookmarkToRename by remember { mutableStateOf<Pair<String, String>?>(null) }
                     val bookmarks = preferencesManager.bookmarks
                     val bookmarksTitle = stringResource(R.string.bookmarks)
 
@@ -255,6 +259,20 @@ fun NFileDrawerContent(
                             onDismissRequest = { showAddBookmarkDialog = false },
                             onConfirm = { path ->
                                 preferencesManager.bookmarks = preferencesManager.bookmarks + path
+                            }
+                        )
+                    }
+
+                    if (bookmarkToRename != null) {
+                        val (path, currentTitle) = bookmarkToRename!!
+                        RenameBookmarkDialog(
+                            show = true,
+                            currentName = currentTitle,
+                            targetPath = path,
+                            onDismissRequest = { bookmarkToRename = null },
+                            onConfirm = { newName ->
+                                preferencesManager.setBookmarkTitle(path, newName)
+                                bookmarkToRename = null
                             }
                         )
                     }
@@ -295,18 +313,42 @@ fun NFileDrawerContent(
                                 val isHidden = itemId in hiddenItems
                                 if (isEditMode || !isHidden) {
                                     val file = File(path)
+                                    val customTitle = preferencesManager.getBookmarkTitle(path)
+                                    val label = customTitle ?: file.name.ifEmpty { path }
                                     DrawerItem(
                                         icon = Icons.Rounded.Bookmark,
-                                        label = file.name.ifEmpty { path },
+                                        label = label,
                                         isEditMode = isEditMode,
                                         isHiddenItem = isHidden,
-                                        onToggleVisibility = { toggleItemHidden(itemId) }
+                                        onToggleVisibility = { toggleItemHidden(itemId) },
+                                        onEdit = { bookmarkToRename = path to label },
+                                        onLongClick = { bookmarkToRename = path to label }
                                     ) {
-                                        manager.replaceCurrentTabWith(
-                                            FilesTab(LocalFileHolder(file)),
-                                            keepCurrentTabAsParent = true
-                                        )
-                                        onNavigate()
+                                        val holder = LocalFileHolder(file, cachedName = customTitle)
+                                        if (!file.exists()) {
+                                            globalClass.showMsg(
+                                                if (file.isDirectory) R.string.folder_does_not_exist else R.string.file_no_longer_exists
+                                            )
+                                        } else if (file.isFile) {
+                                            val activeTab = manager.getActiveTab()
+                                            if (activeTab is FilesTab) {
+                                                activeTab.openFile(context, holder)
+                                            } else {
+                                                holder.open(
+                                                    context = context,
+                                                    anonymous = false,
+                                                    skipSupportedExtensions = !globalClass.preferencesManager.useBuiltInViewer,
+                                                    customMimeType = null
+                                                )
+                                            }
+                                            onNavigate()
+                                        } else {
+                                            manager.replaceCurrentTabWith(
+                                                FilesTab(holder),
+                                                keepCurrentTabAsParent = true
+                                            )
+                                            onNavigate()
+                                        }
                                     }
                                 }
                             }
@@ -1065,6 +1107,7 @@ private fun DrawerSectionHeader(title: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DrawerItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1075,6 +1118,8 @@ private fun DrawerItem(
     isEditMode: Boolean = false,
     isHiddenItem: Boolean = false,
     onToggleVisibility: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Row(
@@ -1083,13 +1128,16 @@ private fun DrawerItem(
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(8.dp))
             .alpha(if (isHiddenItem) 0.45f else 1f)
-            .clickable {
-                if (isEditMode && onToggleVisibility != null) {
-                    onToggleVisibility()
-                } else {
-                    onClick()
-                }
-            }
+            .combinedClickable(
+                onClick = {
+                    if (isEditMode && onToggleVisibility != null) {
+                        onToggleVisibility()
+                    } else {
+                        onClick()
+                    }
+                },
+                onLongClick = onLongClick
+            )
             .padding(vertical = 12.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1109,6 +1157,20 @@ private fun DrawerItem(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        if (isEditMode && onEdit != null) {
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = stringResource(R.string.rename),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         if (isEditMode && onToggleVisibility != null) {
             IconButton(
                 onClick = onToggleVisibility,
