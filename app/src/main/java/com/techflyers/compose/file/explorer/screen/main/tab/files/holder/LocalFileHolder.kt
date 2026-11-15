@@ -155,7 +155,10 @@ class LocalFileHolder(
 
     override val canRead: Boolean by lazy { file.canRead() }
 
-    override val canWrite: Boolean by lazy { file.canWrite() }
+    override val canWrite: Boolean
+        get() = file.canWrite() ||
+            com.techflyers.compose.file.explorer.saf.SafStorageManager.canWrite(file) ||
+            com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged
 
     val mimeType by lazy { file.mimeType ?: anyFileType }
 
@@ -640,22 +643,33 @@ class LocalFileHolder(
         lastCreationError = null
         val newFile = File(file, name)
         var caughtError: Throwable? = null
-        try {
-            java.nio.file.Files.createFile(newFile.toPath())
-            com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
-            onCreated(LocalFileHolder(newFile))
-            return
-        } catch (e: Throwable) {
-            caughtError = e
+        if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(newFile)) {
+            try {
+                java.nio.file.Files.createFile(newFile.toPath())
+                com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
+                onCreated(LocalFileHolder(newFile))
+                return
+            } catch (e: Throwable) {
+                caughtError = e
+            }
+            try {
+                if (newFile.createNewFile()) {
+                    com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
+                    onCreated(LocalFileHolder(newFile))
+                    return
+                }
+            } catch (e: Throwable) {
+                if (caughtError == null) caughtError = e
+            }
         }
-        try {
-            if (newFile.createNewFile()) {
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(newFile)) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(newFile) &&
+                com.techflyers.compose.file.explorer.saf.SafStorageManager.createFile(newFile, promptIfNeeded = false)
+            ) {
                 com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(newFile)
                 onCreated(LocalFileHolder(newFile))
                 return
             }
-        } catch (e: Throwable) {
-            if (caughtError == null) caughtError = e
         }
         if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
             if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createFile(newFile.absolutePath)) {
@@ -680,20 +694,30 @@ class LocalFileHolder(
             return
         }
         var caughtError: Throwable? = null
-        try {
-            java.nio.file.Files.createDirectory(newFolder.toPath())
-            onCreated(LocalFileHolder(newFolder))
-            return
-        } catch (e: Throwable) {
-            caughtError = e
+        if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(newFolder)) {
+            try {
+                java.nio.file.Files.createDirectory(newFolder.toPath())
+                onCreated(LocalFileHolder(newFolder))
+                return
+            } catch (e: Throwable) {
+                caughtError = e
+            }
+            try {
+                if (newFolder.mkdir()) {
+                    onCreated(LocalFileHolder(newFolder))
+                    return
+                }
+            } catch (e: Throwable) {
+                if (caughtError == null) caughtError = e
+            }
         }
-        try {
-            if (newFolder.mkdir()) {
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(newFolder)) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(newFolder) &&
+                com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(newFolder, promptIfNeeded = false)
+            ) {
                 onCreated(LocalFileHolder(newFolder))
                 return
             }
-        } catch (e: Throwable) {
-            if (caughtError == null) caughtError = e
         }
         if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
             if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.createDirectory(newFolder.absolutePath)) {
@@ -803,16 +827,28 @@ class LocalFileHolder(
     }
 
     fun writeText(text: String) {
-        try {
-            file.writeText(text)
-        } catch (e: Exception) {
-            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
-                if (!com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.writeText(file.absolutePath, text)) {
-                    throw e
-                }
-            } else {
-                throw e
+        var written = false
+        var caughtException: Exception? = null
+        if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(file)) {
+            try {
+                file.writeText(text)
+                written = true
+            } catch (e: Exception) {
+                caughtException = e
             }
+        }
+        if (!written && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(file)) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.writeText(file, text, promptIfNeeded = true)) {
+                written = true
+            }
+        }
+        if (!written && com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.isPrivileged) {
+            if (com.techflyers.compose.file.explorer.screen.main.tab.files.shizuku.ShizukuManager.writeText(file.absolutePath, text)) {
+                written = true
+            }
+        }
+        if (!written) {
+            throw (caughtException ?: java.io.IOException("Unable to write to ${file.absolutePath}"))
         }
         details = emptyString
         resetCachedTimestamp()

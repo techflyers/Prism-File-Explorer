@@ -130,7 +130,10 @@ class ExtractTask(
                         val destDirName = ArchiveManager.getCleanArchiveBaseName(archiveName)
                         if (parentPath == "/") "/$destDirName" else "$parentPath/$destDirName"
                     }
-                    File(destDirPath).mkdirs()
+                    val destDirFile = File(destDirPath)
+                    if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destDirFile)) {
+                        destDirFile.mkdirs()
+                    }
 
                     val pwd = parameters?.password
                     android.util.Log.d(

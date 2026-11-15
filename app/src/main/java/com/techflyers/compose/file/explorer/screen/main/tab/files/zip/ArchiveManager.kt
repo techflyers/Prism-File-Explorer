@@ -917,6 +917,65 @@ object ArchiveManager {
         isAborted: (() -> Boolean)? = null,
         onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
     ) = withContext(Dispatchers.IO) {
+        val targetDestDir = File(destinationDir)
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(targetDestDir)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(targetDestDir)) {
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = targetDestDir,
+                    isFolder = true
+                )
+                throw ArchiveOperationException(
+                    summary = "Extraction failed: $reason",
+                    diagnosticLog = reason ?: "SD card write access not granted"
+                )
+            }
+            val stagingDir = File(globalClass.cleanOnExitDir.file, "saf_extract_all_${UUID.randomUUID()}").apply { mkdirs() }
+            try {
+                extractAllInternal(
+                    archivePath = archivePath,
+                    destinationDir = stagingDir.absolutePath,
+                    password = password,
+                    isAborted = isAborted,
+                    onProgress = onProgress
+                )
+                if (isAborted?.invoke() == true) return@withContext
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyDirectoryFromLocal(
+                        sourceDir = stagingDir,
+                        destDir = targetDestDir,
+                        overwrite = true,
+                        promptIfNeeded = false,
+                        isAborted = isAborted
+                    ) { fileName ->
+                        onProgress?.invoke(-1f, fileName)
+                    }
+                ) {
+                    throw ArchiveOperationException(
+                        summary = "Failed to write extracted files to SD card",
+                        diagnosticLog = "SafStorageManager.copyDirectoryFromLocal failed for ${targetDestDir.absolutePath}"
+                    )
+                }
+            } finally {
+                stagingDir.deleteRecursively()
+            }
+            return@withContext
+        }
+
+        extractAllInternal(
+            archivePath = archivePath,
+            destinationDir = destinationDir,
+            password = password,
+            isAborted = isAborted,
+            onProgress = onProgress
+        )
+    }
+
+    private suspend fun extractAllInternal(
+        archivePath: String,
+        destinationDir: String,
+        password: String? = null,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) = withContext(Dispatchers.IO) {
         val accessiblePath = resolveAccessibleArchivePath(archivePath)
 
         if (isLz4Archive(accessiblePath)) {
@@ -1106,6 +1165,59 @@ object ArchiveManager {
         password: String? = null
     ) = withContext(Dispatchers.IO) {
         if (internalPaths.isEmpty()) return@withContext
+        val targetDestDir = File(destinationDir)
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(targetDestDir)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(targetDestDir)) {
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = targetDestDir,
+                    isFolder = true
+                )
+                throw ArchiveOperationException(
+                    summary = "Member extraction failed: $reason",
+                    diagnosticLog = reason ?: "SD card write access not granted"
+                )
+            }
+            val stagingDir = File(globalClass.cleanOnExitDir.file, "saf_extract_members_${UUID.randomUUID()}").apply { mkdirs() }
+            try {
+                extractMembersInternal(
+                    archivePath = archivePath,
+                    internalPaths = internalPaths,
+                    destinationDir = stagingDir.absolutePath,
+                    password = password
+                )
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyDirectoryFromLocal(
+                        sourceDir = stagingDir,
+                        destDir = targetDestDir,
+                        overwrite = true,
+                        promptIfNeeded = false
+                    )
+                ) {
+                    throw ArchiveOperationException(
+                        summary = "Failed to write extracted members to SD card",
+                        diagnosticLog = "SafStorageManager.copyDirectoryFromLocal failed for ${targetDestDir.absolutePath}"
+                    )
+                }
+            } finally {
+                stagingDir.deleteRecursively()
+            }
+            return@withContext
+        }
+
+        extractMembersInternal(
+            archivePath = archivePath,
+            internalPaths = internalPaths,
+            destinationDir = destinationDir,
+            password = password
+        )
+    }
+
+    private suspend fun extractMembersInternal(
+        archivePath: String,
+        internalPaths: List<String>,
+        destinationDir: String,
+        password: String? = null
+    ) = withContext(Dispatchers.IO) {
+        if (internalPaths.isEmpty()) return@withContext
         val accessiblePath = resolveAccessibleArchivePath(archivePath)
 
         if (isLz4Archive(accessiblePath)) {
@@ -1272,12 +1384,60 @@ object ArchiveManager {
         extractMembers(archivePath, listOf(internalPath), destinationDir, password)
     }
 
+    private suspend fun resolveEditableArchivePath(originalPath: String): String = withContext(Dispatchers.IO) {
+        val originalFile = File(originalPath)
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(originalFile)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(originalFile)) {
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = originalFile,
+                    isFolder = false
+                )
+                throw ArchiveOperationException(
+                    summary = "Archive modification failed: $reason",
+                    diagnosticLog = reason ?: "SD card write access not granted"
+                )
+            }
+            val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
+            val dest = File(cacheParent, "archive_edit_${UUID.randomUUID()}_${originalFile.name}")
+            originalFile.inputStream().use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            return@withContext dest.absolutePath
+        }
+        resolveAccessibleArchivePath(originalPath)
+    }
+
+    private fun copyModifiedArchiveToDestination(src: File, dst: File) {
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(dst)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = src,
+                    destination = dst,
+                    overwrite = true,
+                    promptIfNeeded = true
+                )
+            ) {
+                throw ArchiveOperationException(
+                    summary = "Failed to save modified archive to SD card",
+                    diagnosticLog = "SafStorageManager.copyFromLocal failed for ${dst.absolutePath}"
+                )
+            }
+        } else {
+            src.copyTo(dst, overwrite = true)
+        }
+    }
+
     private fun syncBackIfCached(originalPath: String, accessiblePath: String) {
         if (originalPath != accessiblePath) {
             val src = File(accessiblePath)
             val dst = File(originalPath)
-            if (src.exists() && !isSplitArchivePart(originalPath)) {
-                src.copyTo(dst, overwrite = true)
+            try {
+                if (src.exists() && !isSplitArchivePart(originalPath)) {
+                    copyModifiedArchiveToDestination(src, dst)
+                }
+            } finally {
+                if (src.name.startsWith("archive_edit_")) {
+                    src.delete()
+                }
             }
         }
     }
@@ -1297,7 +1457,7 @@ object ArchiveManager {
         if (isCompound) {
             deleteMembersFromCompound(archivePath, internalPaths)
         } else {
-            val accessiblePath = resolveAccessibleArchivePath(archivePath)
+            val accessiblePath = resolveEditableArchivePath(archivePath)
             val args = mutableListOf("d", accessiblePath, "-y")
             if (!password.isNullOrEmpty()) {
                 args.add("-p$password")
@@ -1367,7 +1527,7 @@ object ArchiveManager {
             if (!compResult.success) {
                 throw build7zaFailureException("Compound recompression failed", compResult.exitCode, compResult.output, compArgs)
             }
-            tempOuter.copyTo(File(archivePath), overwrite = true)
+            copyModifiedArchiveToDestination(tempOuter, File(archivePath))
         } finally {
             tempDir.deleteRecursively()
         }
@@ -1382,7 +1542,7 @@ object ArchiveManager {
         password: String? = null
     ) = withContext(Dispatchers.IO) {
         if (renameMap.isEmpty()) return@withContext
-        val accessiblePath = resolveAccessibleArchivePath(archivePath)
+        val accessiblePath = resolveEditableArchivePath(archivePath)
         val ext = archivePath.substringAfterLast('.', "").lowercase()
 
         // 7z and zip formats support native 'rn' command: 7z rn a.zip old1 new1 old2 new2 ...
@@ -1481,7 +1641,7 @@ object ArchiveManager {
         if (isCompound) {
             addOrUpdateMembersToCompound(archivePath, items)
         } else {
-            val accessiblePath = resolveAccessibleArchivePath(archivePath)
+            val accessiblePath = resolveEditableArchivePath(archivePath)
             val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
             val stagingDir = File(cacheParent, "add_batch_staging_${UUID.randomUUID()}").apply { mkdirs() }
             try {
@@ -1585,7 +1745,7 @@ object ArchiveManager {
             if (!compResult.success) {
                 throw build7zaFailureException("Compound recompress failed", compResult.exitCode, compResult.output, compArgs)
             }
-            tempOuter.copyTo(File(archivePath), overwrite = true)
+            copyModifiedArchiveToDestination(tempOuter, File(archivePath))
         } finally {
             tempDir.deleteRecursively()
         }
@@ -1600,7 +1760,7 @@ object ArchiveManager {
         isDirectory: Boolean,
         password: String? = null
     ) = withContext(Dispatchers.IO) {
-        val accessiblePath = resolveAccessibleArchivePath(archivePath)
+        val accessiblePath = resolveEditableArchivePath(archivePath)
         val cacheParent = globalClass.externalCacheDir ?: globalClass.cacheDir
         val stagingDir = File(cacheParent, "new_entry_staging_${UUID.randomUUID()}").apply { mkdirs() }
         try {
@@ -1660,6 +1820,89 @@ object ArchiveManager {
         } else {
             archivePath
         }
+        val targetArchiveFile = File(cleanArchivePath)
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(targetArchiveFile)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(targetArchiveFile)) {
+                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = targetArchiveFile,
+                    isFolder = false
+                )
+                throw ArchiveOperationException(
+                    summary = "Compression failed: $reason",
+                    diagnosticLog = reason ?: "SD card write access not granted"
+                )
+            }
+            val stagingDir = File(globalClass.cleanOnExitDir.file, "saf_compress_${UUID.randomUUID()}").apply { mkdirs() }
+            val stagedArchiveFile = File(stagingDir, targetArchiveFile.name)
+            try {
+                compressInternal(
+                    sourcePaths = sourcePaths,
+                    cleanArchivePath = stagedArchiveFile.absolutePath,
+                    password = password,
+                    compressionLevel = compressionLevel,
+                    splitVolumeSize = splitVolumeSize,
+                    workingDir = workingDir,
+                    isAborted = isAborted,
+                    onProgress = onProgress
+                )
+                if (isAborted?.invoke() == true) return@withContext
+                val destParentDir = targetArchiveFile.parentFile ?: throw ArchiveOperationException(
+                    summary = "Invalid destination folder for archive",
+                    diagnosticLog = "Target parent directory is null for $cleanArchivePath"
+                )
+                val generatedFiles = stagingDir.listFiles()?.filter { it.isFile }?.sortedBy { it.name } ?: emptyList()
+                if (generatedFiles.isEmpty()) {
+                    throw ArchiveOperationException(
+                        summary = "Compression produced no output archive",
+                        diagnosticLog = "No output files found in staging directory for $cleanArchivePath"
+                    )
+                }
+                for (genFile in generatedFiles) {
+                    if (isAborted?.invoke() == true) return@withContext
+                    val finalDest = File(destParentDir, genFile.name)
+                    if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                            source = genFile,
+                            destination = finalDest,
+                            overwrite = true,
+                            promptIfNeeded = false,
+                            isAborted = isAborted
+                        )
+                    ) {
+                        throw ArchiveOperationException(
+                            summary = "Failed to write archive ${genFile.name} to SD card",
+                            diagnosticLog = "SafStorageManager.copyFromLocal failed for ${finalDest.absolutePath}"
+                        )
+                    }
+                    com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider.notifyFileMutated(finalDest)
+                }
+            } finally {
+                stagingDir.deleteRecursively()
+            }
+            return@withContext
+        }
+
+        compressInternal(
+            sourcePaths = sourcePaths,
+            cleanArchivePath = cleanArchivePath,
+            password = password,
+            compressionLevel = compressionLevel,
+            splitVolumeSize = splitVolumeSize,
+            workingDir = workingDir,
+            isAborted = isAborted,
+            onProgress = onProgress
+        )
+    }
+
+    private suspend fun compressInternal(
+        sourcePaths: List<String>,
+        cleanArchivePath: String,
+        password: String? = null,
+        compressionLevel: Int = 5,
+        splitVolumeSize: String? = null,
+        workingDir: String? = null,
+        isAborted: (() -> Boolean)? = null,
+        onProgress: ((progressPercent: Float, currentFile: String) -> Unit)? = null
+    ) {
         val lowerName = cleanArchivePath.lowercase()
         val ext = when {
             lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") -> "tgz"

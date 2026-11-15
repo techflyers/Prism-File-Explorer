@@ -794,7 +794,10 @@ class ShareReceiverActivity : BaseActivity() {
                 when (destHolder) {
                     is LocalFileHolder -> {
                         val destFolder = destHolder.file
-                        if (sharedUris.isNotEmpty()) {
+                        val needsSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destFolder)
+                        if (needsSaf && !com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(destFolder)) {
+                            allSuccess = false
+                        } else if (sharedUris.isNotEmpty()) {
                             sharedUris.forEachIndexed { idx, uri ->
                                 try {
                                     val customName = names.getOrNull(idx)?.trim()?.ifBlank { null }
@@ -803,7 +806,20 @@ class ShareReceiverActivity : BaseActivity() {
                                     val targetName = customName ?: fallback
                                     val destFile = getUniqueLocalFile(destFolder, targetName)
                                     contentResolver.openInputStream(uri)?.use { input ->
-                                        destFile.outputStream().use { output -> input.copyTo(output) }
+                                        if (needsSaf) {
+                                            val out = com.techflyers.compose.file.explorer.saf.SafStorageManager.openFileOutputStream(
+                                                file = destFile,
+                                                overwrite = true,
+                                                promptIfNeeded = false
+                                            )
+                                            if (out != null) {
+                                                out.use { output -> input.copyTo(output) }
+                                            } else {
+                                                allSuccess = false
+                                            }
+                                        } else {
+                                            destFile.outputStream().use { output -> input.copyTo(output) }
+                                        }
                                     } ?: run { allSuccess = false }
                                 } catch (e: Exception) {
                                     allSuccess = false
@@ -815,7 +831,18 @@ class ShareReceiverActivity : BaseActivity() {
                                 val name = names.firstOrNull()?.trim()?.ifBlank { null }
                                     ?: "shared_text_${System.currentTimeMillis()}.txt"
                                 val textFile = getUniqueLocalFile(destFolder, name)
-                                textFile.writeText(sharedText!!)
+                                if (needsSaf) {
+                                    if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.writeText(
+                                            file = textFile,
+                                            text = sharedText!!,
+                                            promptIfNeeded = false
+                                        )
+                                    ) {
+                                        allSuccess = false
+                                    }
+                                } else {
+                                    textFile.writeText(sharedText!!)
+                                }
                             } catch (e: Exception) {
                                 allSuccess = false
                                 e.printStackTrace()

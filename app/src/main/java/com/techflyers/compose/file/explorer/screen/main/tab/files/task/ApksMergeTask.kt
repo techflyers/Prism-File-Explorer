@@ -158,10 +158,13 @@ class ApksMergeTask(
         }
 
         val safePrefix = inputFile.nameWithoutExtension.padEnd(3, '_')
-        val outputFile = if (parameters!!.autoSign) {
+        val finalTargetFile = File(inputFile.parentFile, inputFile.nameWithoutExtension + "-unsigned.apk")
+        val needsSaf = !parameters!!.autoSign &&
+            com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(finalTargetFile)
+        val outputFile = if (parameters!!.autoSign || needsSaf) {
             File.createTempFile(safePrefix, ".apk")
         } else {
-            File(inputFile.parentFile, inputFile.nameWithoutExtension + "-unsigned.apk")
+            finalTargetFile
         }
 
         progressMonitor.apply {
@@ -198,6 +201,20 @@ class ApksMergeTask(
         }
 
         if (outputFile.exists() && outputFile.length() > 0) {
+            if (needsSaf) {
+                val copied = com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = outputFile,
+                    destination = finalTargetFile,
+                    overwrite = true,
+                    promptIfNeeded = true
+                )
+                outputFile.delete()
+                if (copied && finalTargetFile.exists()) {
+                    return LocalFileHolder(finalTargetFile)
+                }
+                markAsFailed(globalClass.resources.getString(R.string.apk_bundle_merge_failed))
+                return null
+            }
             return LocalFileHolder(outputFile)
         }
 
@@ -216,10 +233,16 @@ class ApksMergeTask(
             return null
         }
 
-        val outputFile = File(
+        val finalOutputFile = File(
             sourceFile.file.parentFile,
             sourceFile.file.nameWithoutExtension + "-signed.apk"
         )
+        val needsSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(finalOutputFile)
+        val outputFile = if (needsSaf) {
+            File(globalClass.cleanOnExitDir.file, "signed_${System.currentTimeMillis()}_${finalOutputFile.name}")
+        } else {
+            finalOutputFile
+        }
 
         progressMonitor.apply {
             progress = 0.8f
@@ -270,6 +293,20 @@ class ApksMergeTask(
 
             // Clean up temp file after successful signing
             inputFile.delete()
+            if (needsSaf) {
+                val copied = com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = outputFile,
+                    destination = finalOutputFile,
+                    overwrite = true,
+                    promptIfNeeded = true
+                )
+                outputFile.delete()
+                if (!copied || !finalOutputFile.exists()) {
+                    markAsFailed(globalClass.resources.getString(R.string.apk_bundle_sign_failed))
+                    return null
+                }
+                return finalOutputFile
+            }
             return outputFile
 
         } catch (e: Exception) {

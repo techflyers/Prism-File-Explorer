@@ -512,7 +512,13 @@ class CopyTask(
                     .getOrDefault(targetFile.absolutePath == local.file.absolutePath)
             }
             if (!isMovedOntoSelf && local.file.exists()) {
-                val deleted = local.file.deleteRecursively()
+                var deleted = false
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(local.file)) {
+                    deleted = local.file.deleteRecursively()
+                }
+                if (!deleted && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(local.file)) {
+                    deleted = com.techflyers.compose.file.explorer.saf.SafStorageManager.delete(local.file, promptIfNeeded = true)
+                }
                 if (!deleted && ShizukuManager.isPrivileged) {
                     ShizukuManager.delete(local.uniquePath)
                 }
@@ -523,7 +529,13 @@ class CopyTask(
         sourceFiles.forEach { content ->
             val file = (content as LocalFileHolder).file
             if (file.exists() && file.walkTopDown().none { it.isFile }) {
-                var deleted = file.deleteRecursively()
+                var deleted = false
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(file)) {
+                    deleted = file.deleteRecursively()
+                }
+                if (!deleted && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(file)) {
+                    deleted = com.techflyers.compose.file.explorer.saf.SafStorageManager.delete(file, promptIfNeeded = true)
+                }
                 if (!deleted && ShizukuManager.isPrivileged) {
                     ShizukuManager.delete(file.absolutePath)
                 }
@@ -572,25 +584,47 @@ class CopyTask(
                 sample.zipTree.invalidate()
             } else {
                 val pwd = sample.zipTree.password
-                val zipFile = if (pwd.isNullOrEmpty()) {
-                    ZipFile(sourceFile)
-                } else {
-                    ZipFile(sourceFile, pwd.toCharArray())
-                }
-                zipFile.use { zip ->
-                    if (successfulPaths.isNotEmpty()) {
-                        zip.removeFiles(successfulPaths)
+                val useSafForZip = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(sourceFile)
+                val targetZipTarget = if (useSafForZip) {
+                    File(globalClass.cleanOnExitDir.file, "del_zip_${UUID.randomUUID()}_${sourceFile.name}").also {
+                        sourceFile.copyTo(it, overwrite = true)
                     }
-
-                    // Remove empty directories
-                    sourceFiles.forEach { src ->
-                        val zipSrc = src as ZipFileHolder
-                        val hasFiles = zipSrc.node.listFilesAndEmptyDirs().any { !it.isDirectory }
-                        if (!hasFiles) {
-                            try {
-                                zip.removeFile(zipSrc.node.path)
-                            } catch (_: Exception) {}
+                } else {
+                    sourceFile
+                }
+                try {
+                    val zipFile = if (pwd.isNullOrEmpty()) {
+                        ZipFile(targetZipTarget)
+                    } else {
+                        ZipFile(targetZipTarget, pwd.toCharArray())
+                    }
+                    zipFile.use { zip ->
+                        if (successfulPaths.isNotEmpty()) {
+                            zip.removeFiles(successfulPaths)
                         }
+
+                        // Remove empty directories
+                        sourceFiles.forEach { src ->
+                            val zipSrc = src as ZipFileHolder
+                            val hasFiles = zipSrc.node.listFilesAndEmptyDirs().any { !it.isDirectory }
+                            if (!hasFiles) {
+                                try {
+                                    zip.removeFile(zipSrc.node.path)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                    if (useSafForZip) {
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                            source = targetZipTarget,
+                            destination = sourceFile,
+                            overwrite = true,
+                            promptIfNeeded = true
+                        )
+                    }
+                } finally {
+                    if (useSafForZip) {
+                        targetZipTarget.delete()
                     }
                 }
                 sample.zipTree.invalidate()
@@ -619,6 +653,30 @@ class CopyTask(
         preparePendingFiles(sourcePath)
 
         if (progressMonitor.status == TaskStatus.FAILED) return
+
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationHolder.file)) {
+            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrantBlocking(destinationHolder.file)) {
+                markAsFailed(
+                    com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                        targetFile = destinationHolder.file
+                    )
+                )
+                return
+            }
+        }
+        if (deleteSourceFiles) {
+            val firstLocalSource = (sourceFiles.firstOrNull() as? LocalFileHolder)?.file
+            if (firstLocalSource != null && com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(firstLocalSource)) {
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrantBlocking(firstLocalSource)) {
+                    markAsFailed(
+                        com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                            targetFile = firstLocalSource
+                        )
+                    )
+                    return
+                }
+            }
+        }
 
         val totalBytes = pendingFiles.sumOf { item ->
             if (item.content is LocalFileHolder && (item.content as LocalFileHolder).file.isFile) {
@@ -755,9 +813,23 @@ class CopyTask(
             }
             return false
         }
+
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destination)) {
+            return com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                source = source,
+                destination = destination,
+                overwrite = overwrite,
+                promptIfNeeded = true,
+                isAborted = { aborted },
+                onBytesCopied = onBytesCopied
+            )
+        }
+
         if (destination.exists()) {
             if (!overwrite) return false
-            destination.delete()
+            if (!destination.delete() && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destination)) {
+                com.techflyers.compose.file.explorer.saf.SafStorageManager.delete(destination, promptIfNeeded = true)
+            }
         }
         destination.parentFile?.mkdirs()
 
@@ -793,8 +865,18 @@ class CopyTask(
             true
         } catch (e: Exception) {
             lastOperationException = e
-            logger.logError(e)
             try { destination.delete() } catch (_: Exception) {}
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destination)) {
+                return com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = source,
+                    destination = destination,
+                    overwrite = overwrite,
+                    promptIfNeeded = true,
+                    isAborted = { aborted },
+                    onBytesCopied = onBytesCopied
+                )
+            }
+            logger.logError(e)
             false
         }
     }
@@ -816,12 +898,35 @@ class CopyTask(
                     }
                     return false
                 }
-                destination.parentFile?.mkdirs()
+                val destRequiresSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destination)
+                if (destRequiresSaf) {
+                    destination.parentFile?.let {
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(it, promptIfNeeded = true)
+                    }
+                } else {
+                    destination.parentFile?.mkdirs()
+                }
                 if (destination.parentFile?.exists() != true && ShizukuManager.isPrivileged) {
                     ShizukuManager.createDirectory(destination.parentFile?.absolutePath ?: "")
                 }
                 if (deleteSourceFiles) {
-                    if (!canPerformAtomicFileMove) {
+                    val srcRequiresSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(source)
+                    if ((srcRequiresSaf || destRequiresSaf) &&
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.isSameVolume(source, destination)
+                    ) {
+                        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.move(
+                                source = source,
+                                destination = destination,
+                                overwrite = overwrite,
+                                promptIfNeeded = true
+                            )
+                        ) {
+                            onBytesCopied(source.length())
+                            return true
+                        }
+                        return streamCopy(source, destination, overwrite, onBytesCopied)
+                    }
+                    if (srcRequiresSaf || destRequiresSaf || !canPerformAtomicFileMove) {
                         // Fallback to copy only - deletion will be handled by performSourceDeletion()
                         streamCopy(source, destination, overwrite, onBytesCopied)
                     } else {
@@ -848,7 +953,7 @@ class CopyTask(
                 }
             } else {
                 var dirCreated = destination.exists() && destination.isDirectory
-                if (!dirCreated) {
+                if (!dirCreated && !com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destination)) {
                     try {
                         Files.createDirectories(destination.toPath())
                         dirCreated = true
@@ -856,6 +961,12 @@ class CopyTask(
                         lastOperationException = e
                         dirCreated = destination.mkdirs() || destination.exists()
                     }
+                }
+                if (!dirCreated && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destination)) {
+                    dirCreated = com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(
+                        directory = destination,
+                        promptIfNeeded = true
+                    )
                 }
                 if (!dirCreated && ShizukuManager.isPrivileged) {
                     dirCreated = ShizukuManager.createDirectory(destination.absolutePath)
@@ -1444,12 +1555,20 @@ class CopyTask(
                         .distinct()
 
                     // Staging in destination directory enables atomic same-filesystem renameTo()
-                    val tempExtractDir = File(
-                        destinationHolder.file,
-                        ".prism_tmp_${UUID.randomUUID()}"
-                    ).let {
-                        if (it.mkdirs()) it
-                        else File(globalClass.cleanOnExitDir.file, "extract_${UUID.randomUUID()}").apply { mkdirs() }
+                    val destNeedsSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationHolder.file)
+                    if (destNeedsSaf) {
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrantBlocking(destinationHolder.file)
+                    }
+                    val tempExtractDir = if (destNeedsSaf) {
+                        File(globalClass.cleanOnExitDir.file, "extract_${UUID.randomUUID()}").apply { mkdirs() }
+                    } else {
+                        File(
+                            destinationHolder.file,
+                            ".prism_tmp_${UUID.randomUUID()}"
+                        ).let {
+                            if (it.mkdirs()) it
+                            else File(globalClass.cleanOnExitDir.file, "extract_${UUID.randomUUID()}").apply { mkdirs() }
+                        }
                     }
 
                     try {
@@ -1472,23 +1591,37 @@ class CopyTask(
                             updateProgress(index, sourceHolder.displayName)
 
                             if (sourceHolder.isFolder) {
-                                destinationFile.mkdirs()
-                                if (!destinationFile.exists() && ShizukuManager.isPrivileged) {
-                                    ShizukuManager.createDirectory(destinationFile.absolutePath)
+                                var dirCreated = false
+                                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationFile)) {
+                                    dirCreated = destinationFile.mkdirs() || destinationFile.exists()
                                 }
-                                item.status = if (destinationFile.exists()) TaskContentStatus.SUCCESS
+                                if (!dirCreated && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destinationFile)) {
+                                    dirCreated = com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(destinationFile, promptIfNeeded = true)
+                                }
+                                if (!dirCreated && !destinationFile.exists() && ShizukuManager.isPrivileged) {
+                                    dirCreated = ShizukuManager.createDirectory(destinationFile.absolutePath)
+                                }
+                                item.status = if (dirCreated || destinationFile.exists()) TaskContentStatus.SUCCESS
                                 else TaskContentStatus.FAILED
                             } else {
-                                destinationFile.parentFile?.mkdirs()
+                                if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationFile)) {
+                                    destinationFile.parentFile?.let {
+                                        com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(it, promptIfNeeded = true)
+                                    }
+                                } else {
+                                    destinationFile.parentFile?.mkdirs()
+                                }
                                 if (destinationFile.parentFile?.exists() != true && ShizukuManager.isPrivileged) {
                                     ShizukuManager.createDirectory(destinationFile.parentFile?.absolutePath ?: "")
                                 }
                                 val extractedFile = File(tempExtractDir, sourceHolder.node.path)
                                 if (extractedFile.exists()) {
                                     if (destinationFile.exists() && item.status == TaskContentStatus.REPLACE) {
-                                        destinationFile.delete()
+                                        if (!destinationFile.delete() && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destinationFile)) {
+                                            com.techflyers.compose.file.explorer.saf.SafStorageManager.delete(destinationFile, promptIfNeeded = true)
+                                        }
                                     }
-                                    val moved = extractedFile.renameTo(destinationFile) ||
+                                    val moved = (!destNeedsSaf && extractedFile.renameTo(destinationFile)) ||
                                             copyAndMoveFile(extractedFile, destinationFile)
                                     item.status = if (moved && destinationFile.exists()) TaskContentStatus.SUCCESS
                                     else TaskContentStatus.FAILED
@@ -1557,11 +1690,35 @@ class CopyTask(
     }
 
     private fun copyAndMoveFile(source: File, destination: File): Boolean {
+        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destination)) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = source,
+                    destination = destination,
+                    overwrite = true,
+                    promptIfNeeded = true
+                )
+            ) {
+                source.delete()
+                return true
+            }
+        }
         return try {
             source.copyTo(destination, overwrite = true)
             source.delete()
             true
         } catch (e: Exception) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(destination)) {
+                val copied = com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                    source = source,
+                    destination = destination,
+                    overwrite = true,
+                    promptIfNeeded = true
+                )
+                if (copied) {
+                    source.delete()
+                    return true
+                }
+            }
             if (ShizukuManager.isPrivileged) {
                 val copied = ShizukuManager.copy(source.absolutePath, destination.absolutePath)
                 if (copied) {
@@ -1582,15 +1739,37 @@ class CopyTask(
     ): Boolean {
         return try {
             if (sourceHolder.isFile()) {
-                destinationFile.parentFile?.mkdirs()
-                sourceZip.getInputStream(sourceZip.getFileHeader(sourceHolder.node.path))
-                    .use { input ->
-                        destinationFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
+                val useSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationFile)
+                if (useSaf) {
+                    destinationFile.parentFile?.let {
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(it, promptIfNeeded = true)
                     }
+                    sourceZip.getInputStream(sourceZip.getFileHeader(sourceHolder.node.path))
+                        .use { input ->
+                            val out = com.techflyers.compose.file.explorer.saf.SafStorageManager.openFileOutputStream(
+                                file = destinationFile,
+                                overwrite = true,
+                                promptIfNeeded = true
+                            ) ?: return false
+                            out.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                } else {
+                    destinationFile.parentFile?.mkdirs()
+                    sourceZip.getInputStream(sourceZip.getFileHeader(sourceHolder.node.path))
+                        .use { input ->
+                            destinationFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                }
             } else {
-                destinationFile.mkdirs()
+                if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationFile)) {
+                    com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(destinationFile, promptIfNeeded = true)
+                } else {
+                    destinationFile.mkdirs() || destinationFile.exists()
+                }
             }
             true
         } catch (e: Exception) {
@@ -1906,6 +2085,16 @@ class CopyTask(
         if (progressMonitor.status == TaskStatus.FAILED) return
         prepareCopyProgress()
 
+        val destRequiresSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationHolder.file)
+        if (destRequiresSaf && !com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrantBlocking(destinationHolder.file)) {
+            markAsFailed(
+                com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = destinationHolder.file
+                )
+            )
+            return
+        }
+
         pendingFiles.forEachIndexed { index, item ->
             if (!prepareItem(index, item)) return
             val source = item.content as ShizukuFileHolder
@@ -1920,12 +2109,33 @@ class CopyTask(
                 TaskContentStatus.PENDING, TaskContentStatus.REPLACE -> {
                     item.status = try {
                         if (source.isFolder) {
-                            destinationFile.mkdirs()
+                            val created = if (destRequiresSaf) {
+                                com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(destinationFile, promptIfNeeded = true)
+                            } else {
+                                destinationFile.mkdirs() || destinationFile.exists()
+                            }
+                            if (created) TaskContentStatus.SUCCESS else TaskContentStatus.FAILED
                         } else {
-                            destinationFile.parentFile?.mkdirs()
-                            ShizukuManager.copyToLocal(source.uniquePath, destinationFile)
+                            if (destRequiresSaf) {
+                                val temp = File(globalClass.cleanOnExitDir.file, "shizuku_local_${UUID.randomUUID()}")
+                                try {
+                                    ShizukuManager.copyToLocal(source.uniquePath, temp)
+                                    val copied = com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                                        source = temp,
+                                        destination = destinationFile,
+                                        overwrite = true,
+                                        promptIfNeeded = true
+                                    )
+                                    if (copied) TaskContentStatus.SUCCESS else TaskContentStatus.FAILED
+                                } finally {
+                                    temp.delete()
+                                }
+                            } else {
+                                destinationFile.parentFile?.mkdirs()
+                                ShizukuManager.copyToLocal(source.uniquePath, destinationFile)
+                                TaskContentStatus.SUCCESS
+                            }
                         }
-                        TaskContentStatus.SUCCESS
                     } catch (e: Exception) {
                         logger.logError(e)
                         TaskContentStatus.FAILED
@@ -2060,6 +2270,16 @@ class CopyTask(
         if (progressMonitor.status == TaskStatus.FAILED) return
         prepareCopyProgress()
 
+        val destRequiresSaf = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destinationHolder.file)
+        if (destRequiresSaf && !com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrantBlocking(destinationHolder.file)) {
+            markAsFailed(
+                com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                    targetFile = destinationHolder.file
+                )
+            )
+            return
+        }
+
         pendingFiles.forEachIndexed { index, item ->
             if (!prepareItem(index, item)) return
             val source = item.content as RemoteFileHolder
@@ -2075,19 +2295,47 @@ class CopyTask(
                 TaskContentStatus.PENDING, TaskContentStatus.REPLACE, TaskContentStatus.AUTO_RENAME -> {
                     item.status = try {
                         if (source.isFolder) {
-                            destinationFile.mkdirs()
+                            val created = if (destRequiresSaf) {
+                                com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(destinationFile, promptIfNeeded = true)
+                            } else {
+                                destinationFile.mkdirs() || destinationFile.exists()
+                            }
+                            if (created) TaskContentStatus.SUCCESS else TaskContentStatus.FAILED
                         } else {
-                            destinationFile.parentFile?.mkdirs()
-                            source.client.downloadFile(
-                                source.remotePath,
-                                destinationFile.absolutePath
-                            ) { byteProgress ->
-                                val base = (index.toFloat() / pendingFiles.size)
-                                val span = 1f / pendingFiles.size
-                                progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                            if (destRequiresSaf) {
+                                val temp = File(globalClass.cleanOnExitDir.file, "remote_local_${UUID.randomUUID()}")
+                                try {
+                                    source.client.downloadFile(
+                                        source.remotePath,
+                                        temp.absolutePath
+                                    ) { byteProgress ->
+                                        val base = (index.toFloat() / pendingFiles.size)
+                                        val span = 1f / pendingFiles.size
+                                        progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                                    }
+                                    val copied = com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                                        source = temp,
+                                        destination = destinationFile,
+                                        overwrite = true,
+                                        promptIfNeeded = true
+                                    )
+                                    if (copied) TaskContentStatus.SUCCESS else TaskContentStatus.FAILED
+                                } finally {
+                                    temp.delete()
+                                }
+                            } else {
+                                destinationFile.parentFile?.mkdirs()
+                                source.client.downloadFile(
+                                    source.remotePath,
+                                    destinationFile.absolutePath
+                                ) { byteProgress ->
+                                    val base = (index.toFloat() / pendingFiles.size)
+                                    val span = 1f / pendingFiles.size
+                                    progressMonitor.progress = (base + (span * byteProgress.toFloat())).coerceIn(0f, 1f)
+                                }
+                                TaskContentStatus.SUCCESS
                             }
                         }
-                        TaskContentStatus.SUCCESS
                     } catch (e: Exception) {
                         logger.logError(e)
                         TaskContentStatus.FAILED

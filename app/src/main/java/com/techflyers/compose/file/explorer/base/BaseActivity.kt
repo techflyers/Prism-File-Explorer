@@ -38,11 +38,13 @@ import androidx.core.content.ContextCompat
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.ui.SafeSurface
+import com.techflyers.compose.file.explorer.saf.SafStorageManager
 import com.techflyers.compose.file.explorer.theme.FileExplorerTheme
 
 abstract class BaseActivity : AppCompatActivity() {
 
     private val permissionRequestCode = 2027
+    private var safGrantCallback: ((Boolean) -> Unit)? = null
 
     private val checkPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { _ ->
@@ -52,6 +54,47 @@ abstract class BaseActivity : AppCompatActivity() {
                 globalClass.showMsg(R.string.storage_permission_required)
             }
         }
+
+    private val safTreeLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val treeUri = if (result.resultCode == RESULT_OK) result.data?.data else null
+            val granted = SafStorageManager.onSafTreeResult(this, treeUri)
+            val callback = safGrantCallback
+            safGrantCallback = null
+            callback?.invoke(granted)
+        }
+
+    override fun onStart() {
+        super.onStart()
+        SafStorageManager.registerActivity(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        SafStorageManager.registerActivity(this)
+    }
+
+    override fun onDestroy() {
+        SafStorageManager.unregisterActivity(this)
+        super.onDestroy()
+    }
+
+    fun launchSafTreeRequest(
+        volumeInfo: SafStorageManager.RemovableVolumeInfo,
+        onResult: ((Boolean) -> Unit)? = null
+    ): Boolean {
+        return try {
+            safGrantCallback = onResult
+            val intent = SafStorageManager.buildOpenDocumentTreeIntent(this, volumeInfo)
+            safTreeLauncher.launch(intent)
+            true
+        } catch (e: Exception) {
+            safGrantCallback = null
+            SafStorageManager.onSafTreeResult(this, null)
+            onResult?.invoke(false)
+            false
+        }
+    }
 
     open fun onPermissionGranted() {}
 
@@ -78,7 +121,7 @@ abstract class BaseActivity : AppCompatActivity() {
                 this,
                 Manifest.permission.READ_EXTERNAL_STORAGE
             ) == PackageManager.PERMISSION_GRANTED
-                    || ContextCompat.checkSelfPermission(
+                    && ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE
             ) == PackageManager.PERMISSION_GRANTED

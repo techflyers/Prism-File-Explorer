@@ -173,70 +173,108 @@ class CompressTask(
             } else {
                 // Fallback ZIP creation via zip4j with active background progress tracking
                 val pwd = parameters?.password
-                ZipFile(destPath).use { zipOut ->
-                    if (!pwd.isNullOrEmpty()) {
-                        zipOut.setPassword(pwd.toCharArray())
-                    }
-                    zipOut.isRunInThread = true
-                    val pm = zipOut.progressMonitor
-
-                    pendingContent.forEachIndexed { index, itemToCompress ->
-                        if (aborted) {
-                            markAsAborted()
-                            return
+                val destFile = File(destPath)
+                val useSafForZip = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destFile)
+                if (useSafForZip && !com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(destFile)) {
+                    val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                        targetFile = destFile,
+                        isFolder = false
+                    )
+                    markAsFailed(
+                        globalClass.resources.getString(
+                            R.string.task_summary_failed,
+                            reason
+                        )
+                    )
+                    return
+                }
+                val zipTargetFile = if (useSafForZip) {
+                    File(globalClass.cleanOnExitDir.file, "compress_${System.currentTimeMillis()}_${destFile.name}")
+                } else {
+                    destFile
+                }
+                try {
+                    ZipFile(zipTargetFile).use { zipOut ->
+                        if (!pwd.isNullOrEmpty()) {
+                            zipOut.setPassword(pwd.toCharArray())
                         }
+                        zipOut.isRunInThread = true
+                        val pm = zipOut.progressMonitor
 
-                        if (itemToCompress.status == TaskContentStatus.PENDING) {
-                            progressMonitor.apply {
-                                contentName = itemToCompress.content.displayName
-                                remainingContent = pendingContent.size - index
-                            }
-
-                            try {
-                                if (itemToCompress.content.isFolder) {
-                                    addFolderToZip(zipOut, itemToCompress.content)
-                                } else {
-                                    addFileToZip(zipOut, itemToCompress.content)
-                                }
-
-                                while (pm.state == net.lingala.zip4j.progress.ProgressMonitor.State.BUSY) {
-                                    if (aborted) {
-                                        pm.isCancelAllTasks = true
-                                        markAsAborted()
-                                        return
-                                    }
-                                    val subPct = (pm.percentDone / 100f).coerceIn(0f, 1f)
-                                    val overallProgress =
-                                        ((index + subPct) / pendingContent.size).coerceIn(0f, 0.99f)
-                                    val pct = (overallProgress * 100).toInt()
-
-                                    progressMonitor.apply {
-                                        if (!pm.fileName.isNullOrEmpty()) {
-                                            contentName = pm.fileName.substringAfterLast('/')
-                                        }
-                                        remainingContent = pendingContent.size - index
-                                        progress = overallProgress
-                                        processName = "${globalClass.getString(R.string.compressing)} ($pct%)"
-                                    }
-                                    kotlinx.coroutines.delay(50)
-                                }
-
-                                if (pm.result == net.lingala.zip4j.progress.ProgressMonitor.Result.ERROR) {
-                                    throw pm.exception ?: Exception("zip4j compression error")
-                                }
-
-                                itemToCompress.status = TaskContentStatus.SUCCESS
-                            } catch (e: Exception) {
-                                logger.logError(e)
-                                markAsFailed(
-                                    globalClass.resources.getString(
-                                        R.string.task_summary_failed,
-                                        e.message ?: emptyString
-                                    )
-                                )
+                        pendingContent.forEachIndexed { index, itemToCompress ->
+                            if (aborted) {
+                                markAsAborted()
                                 return
                             }
+
+                            if (itemToCompress.status == TaskContentStatus.PENDING) {
+                                progressMonitor.apply {
+                                    contentName = itemToCompress.content.displayName
+                                    remainingContent = pendingContent.size - index
+                                }
+
+                                try {
+                                    if (itemToCompress.content.isFolder) {
+                                        addFolderToZip(zipOut, itemToCompress.content)
+                                    } else {
+                                        addFileToZip(zipOut, itemToCompress.content)
+                                    }
+
+                                    while (pm.state == net.lingala.zip4j.progress.ProgressMonitor.State.BUSY) {
+                                        if (aborted) {
+                                            pm.isCancelAllTasks = true
+                                            markAsAborted()
+                                            return
+                                        }
+                                        val subPct = (pm.percentDone / 100f).coerceIn(0f, 1f)
+                                        val overallProgress =
+                                            ((index + subPct) / pendingContent.size).coerceIn(0f, 0.99f)
+                                        val pct = (overallProgress * 100).toInt()
+
+                                        progressMonitor.apply {
+                                            if (!pm.fileName.isNullOrEmpty()) {
+                                                contentName = pm.fileName.substringAfterLast('/')
+                                            }
+                                            remainingContent = pendingContent.size - index
+                                            progress = overallProgress
+                                            processName = "${globalClass.getString(R.string.compressing)} ($pct%)"
+                                        }
+                                        kotlinx.coroutines.delay(50)
+                                    }
+
+                                    if (pm.result == net.lingala.zip4j.progress.ProgressMonitor.Result.ERROR) {
+                                        throw pm.exception ?: Exception("zip4j compression error")
+                                    }
+
+                                    itemToCompress.status = TaskContentStatus.SUCCESS
+                                } catch (e: Exception) {
+                                    logger.logError(e)
+                                    markAsFailed(
+                                        globalClass.resources.getString(
+                                            R.string.task_summary_failed,
+                                            e.message ?: emptyString
+                                        )
+                                    )
+                                    return
+                                }
+                            }
                         }
+                    }
+                    if (useSafForZip) {
+                        if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                                source = zipTargetFile,
+                                destination = destFile,
+                                overwrite = true,
+                                promptIfNeeded = false,
+                                isAborted = { aborted }
+                            )
+                        ) {
+                            throw java.io.IOException("Failed to write compressed archive to SD card")
+                        }
+                    }
+                } finally {
+                    if (useSafForZip) {
+                        zipTargetFile.delete()
                     }
                 }
             }

@@ -685,39 +685,59 @@ class FilePickerActivity : BaseActivity() {
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (newFolderName.isNotBlank()) {
+                            val folderNameToCreate = newFolderName.trim()
+                            showNewFolderDialog = false
+                            newFolderName = ""
+                            if (folderNameToCreate.isNotBlank()) {
                                 when (val loc = location) {
                                     is PickerLocation.Local -> {
-                                        val newFolder = File(loc.dir, newFolderName.trim())
-                                        var caughtError: Throwable? = null
-                                        val created = try {
-                                            java.nio.file.Files.createDirectory(newFolder.toPath())
-                                            true
-                                        } catch (e: Throwable) {
-                                            caughtError = e
-                                            newFolder.mkdir()
-                                        }
-                                        if (created) {
-                                            location = PickerLocation.Local(newFolder)
-                                        } else {
-                                            val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
-                                                targetFile = newFolder,
-                                                isFolder = true,
-                                                throwable = caughtError
-                                            )
-                                            showMsg(
-                                                com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
-                                                    getString(R.string.failed_to_create_folder),
-                                                    reason
+                                        lifecycleScope.launch {
+                                            val newFolder = File(loc.dir, folderNameToCreate)
+                                            var caughtError: Throwable? = null
+                                            var created = false
+                                            if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(newFolder)) {
+                                                created = withContext(Dispatchers.IO) {
+                                                    try {
+                                                        java.nio.file.Files.createDirectory(newFolder.toPath())
+                                                        true
+                                                    } catch (e: Throwable) {
+                                                        caughtError = e
+                                                        newFolder.mkdir()
+                                                    }
+                                                }
+                                            }
+                                            if (!created && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(newFolder)) {
+                                                if (com.techflyers.compose.file.explorer.saf.SafStorageManager.ensureSafGrant(newFolder)) {
+                                                    created = withContext(Dispatchers.IO) {
+                                                        com.techflyers.compose.file.explorer.saf.SafStorageManager.mkdirs(
+                                                            directory = newFolder,
+                                                            promptIfNeeded = false
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            if (created) {
+                                                location = PickerLocation.Local(newFolder)
+                                            } else {
+                                                val reason = com.techflyers.compose.file.explorer.common.FileOperationError.diagnosePathError(
+                                                    targetFile = newFolder,
+                                                    isFolder = true,
+                                                    throwable = caughtError
                                                 )
-                                            )
+                                                showMsg(
+                                                    com.techflyers.compose.file.explorer.common.FileOperationError.formatMessage(
+                                                        getString(R.string.failed_to_create_folder),
+                                                        reason
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                     is PickerLocation.Remote -> {
                                         lifecycleScope.launch(Dispatchers.IO) {
                                             try {
                                                 val client = RemoteConnectionPool.clientFor(loc.connection)
-                                                val newPath = RemotePaths.join(loc.path, newFolderName.trim())
+                                                val newPath = RemotePaths.join(loc.path, folderNameToCreate)
                                                 client.createDirectory(newPath)
                                                 withContext(Dispatchers.Main) {
                                                     location = PickerLocation.Remote(loc.connection, newPath)
@@ -736,8 +756,6 @@ class FilePickerActivity : BaseActivity() {
                                     }
                                 }
                             }
-                            showNewFolderDialog = false
-                            newFolderName = ""
                         },
                         enabled = newFolderName.isNotBlank()
                     ) {
@@ -895,15 +913,23 @@ class FilePickerActivity : BaseActivity() {
             if (downloadedFiles.isEmpty()) return@launch
 
             val resultIntent = Intent()
+            val isDocumentTreeRequest = intent?.action == Intent.ACTION_OPEN_DOCUMENT_TREE
             val uris = downloadedFiles.mapNotNull { file ->
-                try {
-                    FileProvider.getUriForFile(
-                        this@FilePickerActivity,
-                        "$packageName.provider",
-                        file
+                if (isDocumentTreeRequest) {
+                    android.provider.DocumentsContract.buildTreeDocumentUri(
+                        com.techflyers.compose.file.explorer.saf.PrismDocumentsProvider.AUTHORITY,
+                        file.absolutePath
                     )
-                } catch (e: Exception) {
-                    Uri.fromFile(file)
+                } else {
+                    try {
+                        FileProvider.getUriForFile(
+                            this@FilePickerActivity,
+                            "$packageName.provider",
+                            file
+                        )
+                    } catch (e: Exception) {
+                        Uri.fromFile(file)
+                    }
                 }
             }
 
@@ -923,7 +949,8 @@ class FilePickerActivity : BaseActivity() {
             resultIntent.addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
             )
 
             setResult(Activity.RESULT_OK, resultIntent)

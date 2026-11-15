@@ -211,7 +211,16 @@ class DeleteTask(
 
                 try {
                     val localFile = itemToDelete.source as LocalFileHolder
-                    var deleted = localFile.file.deleteRecursively()
+                    var deleted = false
+                    if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(localFile.file)) {
+                        deleted = localFile.file.deleteRecursively()
+                    }
+                    if (!deleted && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(localFile.file)) {
+                        deleted = com.techflyers.compose.file.explorer.saf.SafStorageManager.delete(
+                            file = localFile.file,
+                            promptIfNeeded = true
+                        )
+                    }
                     if (!deleted && ShizukuManager.isPrivileged) {
                         deleted = ShizukuManager.delete(localFile.uniquePath)
                     }
@@ -345,7 +354,12 @@ class DeleteTask(
             }
 
             // Create temp file for safe operations
-            tempFile = File(sourceZipFile.parent, "${sourceZipFile.nameWithoutExtension}_temp.zip")
+            val useSafForZip = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(sourceZipFile)
+            tempFile = if (useSafForZip) {
+                File(globalClass.cleanOnExitDir.file, "${sourceZipFile.nameWithoutExtension}_temp_${System.currentTimeMillis()}.zip")
+            } else {
+                File(sourceZipFile.parent, "${sourceZipFile.nameWithoutExtension}_temp.zip")
+            }
 
             // Create a set of paths to delete
             val pathsToDelete = mutableSetOf<String>()
@@ -446,15 +460,29 @@ class DeleteTask(
             }
 
             // Replace the original file with the modified one
-            if (!sourceZipFile.delete()) {
-                throw Exception(globalClass.getString(R.string.failed_to_delete_original_zip_file))
-            }
+            if (useSafForZip) {
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                        source = tempFile,
+                        destination = sourceZipFile,
+                        overwrite = true,
+                        promptIfNeeded = true
+                    )
+                ) {
+                    throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
+                }
+                tempFile.delete()
+                tempFile = null
+            } else {
+                if (!sourceZipFile.delete()) {
+                    throw Exception(globalClass.getString(R.string.failed_to_delete_original_zip_file))
+                }
 
-            if (!tempFile.renameTo(sourceZipFile)) {
-                throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
-            }
+                if (!tempFile.renameTo(sourceZipFile)) {
+                    throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
+                }
 
-            tempFile = null // Successfully renamed, don't delete in finally
+                tempFile = null // Successfully renamed, don't delete in finally
+            }
 
             // Mark any remaining pending items as successful (for virtual folders)
             pendingContent.filter { it.status == TaskContentStatus.PENDING }.forEach { item ->

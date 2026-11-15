@@ -209,15 +209,25 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
                     val localFile = itemToRename.source as LocalFileHolder
                     val newFile = File(itemToRename.newPath)
 
-                    var renamed = localFile.file.renameTo(newFile)
-                    if (!renamed && localFile.file.name.equals(newFile.name, ignoreCase = true)) {
-                        val tempFile = File(localFile.file.parentFile, "${localFile.file.name}_tmp_${System.currentTimeMillis()}")
-                        if (localFile.file.renameTo(tempFile)) {
-                            renamed = tempFile.renameTo(newFile)
-                            if (!renamed) {
-                                tempFile.renameTo(localFile.file)
+                    var renamed = false
+                    if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(localFile.file)) {
+                        renamed = localFile.file.renameTo(newFile)
+                        if (!renamed && localFile.file.name.equals(newFile.name, ignoreCase = true)) {
+                            val tempFile = File(localFile.file.parentFile, "${localFile.file.name}_tmp_${System.currentTimeMillis()}")
+                            if (localFile.file.renameTo(tempFile)) {
+                                renamed = tempFile.renameTo(newFile)
+                                if (!renamed) {
+                                    tempFile.renameTo(localFile.file)
+                                }
                             }
                         }
+                    }
+                    if (!renamed && com.techflyers.compose.file.explorer.saf.SafStorageManager.isOnRemovableVolume(localFile.file)) {
+                        renamed = com.techflyers.compose.file.explorer.saf.SafStorageManager.rename(
+                            source = localFile.file,
+                            destination = newFile,
+                            promptIfNeeded = true
+                        )
                     }
                     if (!renamed && ShizukuManager.isPrivileged) {
                         renamed = ShizukuManager.rename(localFile.uniquePath, itemToRename.newPath)
@@ -350,7 +360,12 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
             }
 
             // Create temp file for safe operations
-            tempFile = File(sourceZipFile.parent, "${sourceZipFile.nameWithoutExtension}_temp.zip")
+            val useSafForZip = com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(sourceZipFile)
+            tempFile = if (useSafForZip) {
+                File(globalClass.cleanOnExitDir.file, "${sourceZipFile.nameWithoutExtension}_temp_${System.currentTimeMillis()}.zip")
+            } else {
+                File(sourceZipFile.parent, "${sourceZipFile.nameWithoutExtension}_temp.zip")
+            }
 
             // Create a map of old paths to new paths for all items to rename
             val renameMap = mutableMapOf<String, String>()
@@ -464,15 +479,29 @@ class RenameTask(val sourceContent: List<ContentHolder>) : Task() {
             }
 
             // Replace the original file with the new one
-            if (!sourceZipFile.delete()) {
-                throw Exception(globalClass.getString(R.string.failed_to_delete_original_zip_file))
-            }
+            if (useSafForZip) {
+                if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.copyFromLocal(
+                        source = tempFile,
+                        destination = sourceZipFile,
+                        overwrite = true,
+                        promptIfNeeded = true
+                    )
+                ) {
+                    throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
+                }
+                tempFile.delete()
+                tempFile = null
+            } else {
+                if (!sourceZipFile.delete()) {
+                    throw Exception(globalClass.getString(R.string.failed_to_delete_original_zip_file))
+                }
 
-            if (!tempFile.renameTo(sourceZipFile)) {
-                throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
-            }
+                if (!tempFile.renameTo(sourceZipFile)) {
+                    throw Exception(globalClass.getString(R.string.failed_to_replace_original_zip_file))
+                }
 
-            tempFile = null // Successfully renamed, don't delete in finally
+                tempFile = null // Successfully renamed, don't delete in finally
+            }
 
             // Mark any remaining pending items as successful (for folders without zip entries)
             pendingContent.filter { it.status == TaskContentStatus.PENDING }.forEach { item ->

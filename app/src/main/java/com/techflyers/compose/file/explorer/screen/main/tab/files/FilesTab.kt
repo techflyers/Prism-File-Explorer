@@ -1155,6 +1155,13 @@ class FilesTab(
             try {
                 if (item is LocalFileHolder) {
                     val localFolder = item
+                    if (com.techflyers.compose.file.explorer.saf.SafStorageManager.needsSafGrant(localFolder.file)) {
+                        com.techflyers.compose.file.explorer.saf.SafStorageManager.promptSafGrantOnOpenIfNeeded(
+                            localFolder.file
+                        ) {
+                            reloadFiles()
+                        }
+                    }
                     val dirMtime = localFolder.file.lastModified()
                     val dirChildCount = localFolder.file.list()?.size ?: -1
                     lastKnownDirMtime = dirMtime

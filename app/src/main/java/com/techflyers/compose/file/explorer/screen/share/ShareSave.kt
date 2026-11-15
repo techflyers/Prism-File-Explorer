@@ -34,14 +34,26 @@ fun saveSharedFilesToFolder(
                 val destDir = folder.file
                 if (!destDir.exists() || !destDir.isDirectory) return false
                 if (!textContent.isNullOrEmpty()) {
-                    uniqueFile(destDir, "shared_text_${System.currentTimeMillis()}.txt")
-                        .writeText(textContent)
+                    val txtFile = uniqueFile(destDir, "shared_text_${System.currentTimeMillis()}.txt")
+                    if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(txtFile)) {
+                        if (!com.techflyers.compose.file.explorer.saf.SafStorageManager.writeText(txtFile, textContent, promptIfNeeded = true)) {
+                            return false
+                        }
+                    } else {
+                        txtFile.writeText(textContent)
+                    }
                 }
                 uris.forEach { uri ->
                     val originalName = getSharedFileName(context, uri) ?: "shared_${System.currentTimeMillis()}"
                     val destFile = uniqueFile(destDir, originalName)
                     context.contentResolver.openInputStream(uri)?.use { input ->
-                        destFile.outputStream().use { input.copyTo(it) }
+                        if (com.techflyers.compose.file.explorer.saf.SafStorageManager.requiresSafForWrite(destFile)) {
+                            val out = com.techflyers.compose.file.explorer.saf.SafStorageManager.openFileOutputStream(destFile, promptIfNeeded = true)
+                                ?: return false
+                            out.use { input.copyTo(it) }
+                        } else {
+                            destFile.outputStream().use { input.copyTo(it) }
+                        }
                     }
                 }
                 globalClass.preferencesManager.addSaveLocationToHistory(

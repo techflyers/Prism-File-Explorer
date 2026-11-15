@@ -80,7 +80,13 @@ object FileOperationError {
                 return "Storage is read-only"
             }
 
-            if (parent != null && parent.exists() && !parent.canWrite()) {
+            if (com.techflyers.compose.file.explorer.saf.SafStorageManager.needsSafGrant(targetFile)) {
+                return "SD card write access not granted (please select the SD card root folder when prompted)"
+            }
+
+            if (parent != null && parent.exists() && !parent.canWrite() &&
+                !com.techflyers.compose.file.explorer.saf.SafStorageManager.hasSafGrant(targetFile)
+            ) {
                 return "Permission denied (cannot write to this folder)"
             }
         }
