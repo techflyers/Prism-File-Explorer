@@ -617,6 +617,14 @@
             android:name=".screen.main.tab.files.service.ContentOperationService"
             android:foregroundServiceType="dataSync" />
 
+        <receiver
+            android:name=".screen.main.tab.files.task.ApkInstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.techflyers.compose.file.explorer.action.APK_INSTALL_COMMIT" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".screen.main.tab.files.service.FtpForegroundService"
             android:foregroundServiceType="dataSync" />

@@ -245,6 +245,12 @@ class MainActivity : BaseActivity() {
                         globalClass.preferencesManager.startupTabs = it.toJson()
                     }
 
+                    com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog.ApkPreviewDialog(
+                        show = mainActivityState.apkDialogFile != null,
+                        apkFile = mainActivityState.apkDialogFile,
+                        onDismissRequest = { mainActivityManager.toggleApkDialog(null) }
+                    )
+
                     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                     val drawerScope = rememberCoroutineScope()
 
@@ -749,6 +755,7 @@ class MainActivity : BaseActivity() {
     private fun hasIntent(): Boolean {
         val i = intent ?: return false
         return i.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY) ||
+                i.hasExtra(android.content.pm.PackageInstaller.EXTRA_STATUS) ||
                 i.hasExtra(com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_ARCHIVE) ||
                 i.hasExtra(com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_APK) ||
                 i.hasExtra(com.techflyers.compose.file.explorer.screen.openwith.OpenWithDispatchActivity.EXTRA_OPEN_PREFS)
@@ -757,6 +764,25 @@ class MainActivity : BaseActivity() {
     private fun handleIntent() {
         val currentIntent = intent ?: return
         when {
+            currentIntent.hasExtra(android.content.pm.PackageInstaller.EXTRA_STATUS) -> {
+                val status = currentIntent.getIntExtra(
+                    android.content.pm.PackageInstaller.EXTRA_STATUS,
+                    Int.MIN_VALUE
+                )
+                if (status == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    val confirmIntent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        currentIntent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        currentIntent.getParcelableExtra(Intent.EXTRA_INTENT)
+                    }
+                    confirmIntent?.let {
+                        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(it)
+                    }
+                }
+                intent = null
+            }
             currentIntent.hasExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY) -> {
                 val path = currentIntent.getStringExtra(HOME_SCREEN_SHORTCUT_EXTRA_KEY)
                 if (!path.isNullOrEmpty()) {

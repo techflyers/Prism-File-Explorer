@@ -706,7 +706,7 @@ fun FileOptionsMenuDialog(
                     }
                 }
 
-                if (apkBundleFileType.contains(targetContentHolder.file.extension)) {
+                if (targetContentHolder.isApkBundle()) {
                     FileOption(Icons.Rounded.Merge, stringResource(R.string.convert_to_apk)) {
                         onDismissRequest()
                         globalClass.taskManager.addTaskAndRun(

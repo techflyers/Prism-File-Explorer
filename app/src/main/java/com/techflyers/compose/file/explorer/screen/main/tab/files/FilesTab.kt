@@ -2230,6 +2230,10 @@ class FilesTab(
     }
 
     fun toggleApkDialog(file: LocalFileHolder?) {
+        if (isHomeSearchTab || globalClass.mainActivityManager.getActiveTab() !== this) {
+            globalClass.mainActivityManager.toggleApkDialog(file)
+            return
+        }
         if (file isNot null) {
             targetFile = file
             _dialogsState.update { it.copy(showApkDialog = true) }

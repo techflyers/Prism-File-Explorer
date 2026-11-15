@@ -68,8 +68,18 @@ private fun createAppHolder(
     packageInfo: android.content.pm.PackageInfo,
     appInfo: ApplicationInfo
 ): AppHolder {
-    val appPath = appInfo.sourceDir ?: ""
-    val appFile = File(appPath)
+    val appPath = appInfo.publicSourceDir ?: appInfo.sourceDir ?: ""
+    val splitPaths = (appInfo.splitPublicSourceDirs ?: appInfo.splitSourceDirs)
+        ?.filter { it.isNotBlank() && it != appPath }
+        ?.distinct()
+        ?: emptyList()
+    val allPaths = buildList {
+        if (appPath.isNotEmpty()) add(appPath)
+        addAll(splitPaths)
+    }
+    val totalApkSize = allPaths.sumOf { p ->
+        runCatching { File(p).length() }.getOrDefault(0L)
+    }
     val permissions = packageInfo.requestedPermissions?.toList() ?: emptyList()
     val category = getCategoryName(appInfo.category)
 
@@ -84,7 +94,7 @@ private fun createAppHolder(
             @Suppress("DEPRECATION")
             packageInfo.versionCode
         },
-        size = if (appPath.isNotEmpty()) appFile.length() else 0L,
+        size = totalApkSize,
         isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) isNot 0,
         installDate = Date(packageInfo.firstInstallTime),
         lastUpdateDate = Date(packageInfo.lastUpdateTime),
@@ -95,7 +105,8 @@ private fun createAppHolder(
         dataDir = appInfo.dataDir ?: "",
         uid = appInfo.uid,
         enabled = appInfo.enabled,
-        debuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) isNot 0
+        debuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) isNot 0,
+        splitPaths = splitPaths
     )
 }
 

@@ -283,9 +283,17 @@ class LocalFileHolder(
     }
 
     fun getApkPackageInfo(): Pair<String, String>? {
-        if (!isApk()) return null
+        if (!isApk() && !isApkBundle()) return null
         val cacheKey = "${file.absolutePath}:$lastModified:${file.length()}"
         apkLabelCache.get(cacheKey)?.let { return it }
+
+        if (isApkBundle()) {
+            val pair = com.techflyers.compose.file.explorer.coil.apk.ApkBundleHelper.loadBundleLabelAndPackage(file)
+            if (pair != null) {
+                apkLabelCache.put(cacheKey, pair)
+            }
+            return pair
+        }
 
         return try {
             val pm = globalClass.packageManager
@@ -530,10 +538,12 @@ class LocalFileHolder(
         skipSupportedExtensions: Boolean,
         customMimeType: String?
     ) {
-        val defOpeningMethod = globalClass.preferencesManager.getDefaultOpeningMethod(extension)
-        if (defOpeningMethod != null) {
-            openFileWithPackage(context, defOpeningMethod.packageName, defOpeningMethod.className)
-            return
+        if (customMimeType == null) {
+            val defOpeningMethod = globalClass.preferencesManager.getDefaultOpeningMethod(extension)
+            if (defOpeningMethod != null) {
+                openFileWithPackage(context, defOpeningMethod.packageName, defOpeningMethod.className)
+                return
+            }
         }
 
         // Only run the built-in handler routing when no explicit customMimeType is given.
@@ -833,10 +843,12 @@ class LocalFileHolder(
 
         if (isApk() || isApkBundle()) {
             val activeTab = globalClass.mainActivityManager.getActiveTab()
-            if (activeTab is FilesTab) {
+            if (activeTab is FilesTab && !activeTab.isHomeSearchTab) {
                 activeTab.toggleApkDialog(this)
-                return true
+            } else {
+                globalClass.mainActivityManager.toggleApkDialog(this)
             }
+            return true
         }
 
         // Comic book archives (CBZ, CBR, CB7, CBT) -> dedicated comic viewer
@@ -884,9 +896,10 @@ class LocalFileHolder(
 
         if (skipSupportedExtensions) return false
 
-        // Do not let Magika ONNX override known video/audio files (e.g. .mov files with trailing XMP/plist metadata)
+        // Do not let Magika ONNX override known video/audio/APK files (e.g. .mov files with trailing XMP/plist metadata or APK bundles)
         val isKnownMediaExtension = FileMimeType.videoFileType.contains(extension) ||
-            FileMimeType.audioFileType.contains(extension)
+            FileMimeType.audioFileType.contains(extension) ||
+            isApk() || isApkBundle()
         val magika = if (isKnownMediaExtension) null else MagikaFileTypeDetector.detect(file)
         val skipMagikaOverride = isKnownMediaExtension || (extension.isNotEmpty() &&
             globalClass.preferencesManager.disableMagikaExtOverride)
@@ -1130,6 +1143,7 @@ class LocalFileHolder(
                 FileMimeType.latexFileType.contains(extension) ||
                 FileMimeType.officeFileType.contains(extension) ||
                 FileMimeType.htmlFileType.contains(extension) ||
+                FileMimeType.apkBundleFileType.contains(extension) ||
                 extension == "pdf" || extension == "apk" ||
                 extension == "md" || extension == "markdown" ||
                 isTarCompressed() ||

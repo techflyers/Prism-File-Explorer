@@ -2,7 +2,11 @@ package com.techflyers.compose.file.explorer.common.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -30,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
@@ -50,15 +56,18 @@ fun FilenameExtensionInput(
     onFullNameChanged: (String) -> Unit,
     onConfirm: ((String) -> Unit)? = null
 ) {
-    val initialSplit = remember(initialFullName, isFolder) {
+    val initialSplit = remember {
         splitFileName(initialFullName, isFolder)
     }
 
-    var nameField by remember(initialFullName) {
+    var nameField by remember {
         mutableStateOf(TextFieldValue(initialSplit.first, TextRange(initialSplit.first.length)))
     }
-    var extField by remember(initialFullName) {
+    var extField by remember {
         mutableStateOf(TextFieldValue(initialSplit.second, TextRange(initialSplit.second.length)))
+    }
+    var lastEmittedFullName by remember {
+        mutableStateOf(initialFullName)
     }
 
     val nameFocusRequester = remember { FocusRequester() }
@@ -69,7 +78,17 @@ fun FilenameExtensionInput(
     fun currentJoinedName(): String =
         joinFileName(nameField.text, if (isFolder) "" else extField.text)
 
+    fun emitChange(newName: String, newExt: String) {
+        val joined = joinFileName(newName, if (isFolder) "" else newExt)
+        lastEmittedFullName = joined
+        onFullNameChanged(joined)
+    }
+
     LaunchedEffect(initialFullName) {
+        if (initialFullName == lastEmittedFullName) {
+            return@LaunchedEffect
+        }
+        lastEmittedFullName = initialFullName
         val (b, e) = splitFileName(initialFullName, isFolder)
         if (nameField.text != b) {
             nameField = TextFieldValue(b, TextRange(b.length))
@@ -77,10 +96,6 @@ fun FilenameExtensionInput(
         if (extField.text != e) {
             extField = TextFieldValue(e, TextRange(e.length))
         }
-    }
-
-    LaunchedEffect(nameField.text, extField.text) {
-        onFullNameChanged(currentJoinedName())
     }
 
     LaunchedEffect(autoFocusName) {
@@ -116,62 +131,19 @@ fun FilenameExtensionInput(
     )
     val shape = RoundedCornerShape(6.dp)
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        if (outlined) {
-            OutlinedTextField(
-                value = nameField,
-                onValueChange = { updated ->
-                    val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
-                    val cleaned = updated.text.replace("\n", "").replace("\r", "")
-                    nameField = if (cleaned != updated.text) {
-                        updated.copy(
-                            text = cleaned,
-                            selection = TextRange(
-                                updated.selection.start.coerceIn(0, cleaned.length),
-                                updated.selection.end.coerceIn(0, cleaned.length)
-                            )
-                        )
-                    } else updated
-                    if (hasNewline) {
-                        handleNameEnter()
-                    }
-                },
-                label = { Text(label) },
-                singleLine = false,
-                minLines = 1,
-                maxLines = 5,
-                isError = isError,
-                keyboardOptions = KeyboardOptions(
-                    imeAction = if (isFolder || disableEnterFocusExt) ImeAction.Done else ImeAction.Next
-                ),
-                keyboardActions = KeyboardActions(
-                    onNext = { handleNameEnter() },
-                    onDone = { handleNameEnter() }
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (autoFocusName) Modifier.autoShowKeyboard() else Modifier)
-                    .focusRequester(nameFocusRequester)
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
-                            (event.key == Key.Enter || event.key == Key.NumPadEnter)
-                        ) {
-                            handleNameEnter()
-                            true
-                        } else false
-                    }
-            )
-
-            if (!isFolder) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            if (outlined) {
                 OutlinedTextField(
-                    value = extField,
+                    value = nameField,
                     onValueChange = { updated ->
                         val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
-                        val cleaned = updated.text.replace(".", "").replace("\n", "").replace("\r", "")
-                        extField = if (cleaned != updated.text) {
+                        val cleaned = updated.text.replace("\n", "").replace("\r", "")
+                        nameField = if (cleaned != updated.text) {
                             updated.copy(
                                 text = cleaned,
                                 selection = TextRange(
@@ -180,86 +152,99 @@ fun FilenameExtensionInput(
                                 )
                             )
                         } else updated
+                        emitChange(nameField.text, extField.text)
                         if (hasNewline) {
-                            handleExtEnter()
+                            handleNameEnter()
                         }
                     },
-                    prefix = { Text(".") },
-                    label = { Text(extensionLabel) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = { handleExtEnter() },
-                        onNext = { handleExtEnter() },
-                        onGo = { handleExtEnter() }
+                    label = {
+                        Text(
+                            text = label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            softWrap = false
+                        )
+                    },
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 5,
+                    isError = isError,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = if (isFolder || disableEnterFocusExt) ImeAction.Done else ImeAction.Next
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(extFocusRequester)
+                    keyboardActions = KeyboardActions(
+                        onNext = { handleNameEnter() },
+                        onDone = { handleNameEnter() }
+                    ),
+                    modifier = (if (isFolder) Modifier.fillMaxWidth() else Modifier.weight(1f))
+                        .then(if (autoFocusName) Modifier.autoShowKeyboard() else Modifier)
+                        .focusRequester(nameFocusRequester)
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown &&
                                 (event.key == Key.Enter || event.key == Key.NumPadEnter)
                             ) {
-                                handleExtEnter()
+                                handleNameEnter()
                                 true
                             } else false
                         }
                 )
-            }
-        } else {
-            TextField(
-                value = nameField,
-                onValueChange = { updated ->
-                    val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
-                    val cleaned = updated.text.replace("\n", "").replace("\r", "")
-                    nameField = if (cleaned != updated.text) {
-                        updated.copy(
-                            text = cleaned,
-                            selection = TextRange(
-                                updated.selection.start.coerceIn(0, cleaned.length),
-                                updated.selection.end.coerceIn(0, cleaned.length)
-                            )
-                        )
-                    } else updated
-                    if (hasNewline) {
-                        handleNameEnter()
-                    }
-                },
-                label = { Text(label) },
-                singleLine = false,
-                minLines = 1,
-                maxLines = 5,
-                shape = shape,
-                colors = textFieldColors,
-                isError = isError,
-                keyboardOptions = KeyboardOptions(
-                    imeAction = if (isFolder || disableEnterFocusExt) ImeAction.Done else ImeAction.Next
-                ),
-                keyboardActions = KeyboardActions(
-                    onNext = { handleNameEnter() },
-                    onDone = { handleNameEnter() }
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (autoFocusName) Modifier.autoShowKeyboard() else Modifier)
-                    .focusRequester(nameFocusRequester)
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
-                            (event.key == Key.Enter || event.key == Key.NumPadEnter)
-                        ) {
-                            handleNameEnter()
-                            true
-                        } else false
-                    }
-            )
 
-            if (!isFolder) {
+                if (!isFolder) {
+                    OutlinedTextField(
+                        value = extField,
+                        onValueChange = { updated ->
+                            val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
+                            val cleaned = updated.text.replace(".", "").replace("\n", "").replace("\r", "")
+                            extField = if (cleaned != updated.text) {
+                                updated.copy(
+                                    text = cleaned,
+                                    selection = TextRange(
+                                        updated.selection.start.coerceIn(0, cleaned.length),
+                                        updated.selection.end.coerceIn(0, cleaned.length)
+                                    )
+                                )
+                            } else updated
+                            emitChange(nameField.text, extField.text)
+                            if (hasNewline) {
+                                handleExtEnter()
+                            }
+                        },
+                        prefix = { Text(".") },
+                        label = {
+                            Text(
+                                text = extensionLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = { handleExtEnter() },
+                            onNext = { handleExtEnter() },
+                            onGo = { handleExtEnter() }
+                        ),
+                        modifier = Modifier
+                            .width(96.dp)
+                            .focusRequester(extFocusRequester)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                                ) {
+                                    handleExtEnter()
+                                    true
+                                } else false
+                            }
+                    )
+                }
+            } else {
                 TextField(
-                    value = extField,
+                    value = nameField,
                     onValueChange = { updated ->
                         val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
-                        val cleaned = updated.text.replace(".", "").replace("\n", "").replace("\r", "")
-                        extField = if (cleaned != updated.text) {
+                        val cleaned = updated.text.replace("\n", "").replace("\r", "")
+                        nameField = if (cleaned != updated.text) {
                             updated.copy(
                                 text = cleaned,
                                 selection = TextRange(
@@ -268,37 +253,101 @@ fun FilenameExtensionInput(
                                 )
                             )
                         } else updated
+                        emitChange(nameField.text, extField.text)
                         if (hasNewline) {
-                            handleExtEnter()
+                            handleNameEnter()
                         }
                     },
-                    prefix = { Text(".") },
-                    label = { Text(extensionLabel) },
-                    singleLine = true,
+                    label = {
+                        Text(
+                            text = label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            softWrap = false
+                        )
+                    },
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 5,
                     shape = shape,
                     colors = textFieldColors,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = { handleExtEnter() },
-                        onNext = { handleExtEnter() },
-                        onGo = { handleExtEnter() }
+                    isError = isError,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = if (isFolder || disableEnterFocusExt) ImeAction.Done else ImeAction.Next
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(extFocusRequester)
+                    keyboardActions = KeyboardActions(
+                        onNext = { handleNameEnter() },
+                        onDone = { handleNameEnter() }
+                    ),
+                    modifier = (if (isFolder) Modifier.fillMaxWidth() else Modifier.weight(1f))
+                        .then(if (autoFocusName) Modifier.autoShowKeyboard() else Modifier)
+                        .focusRequester(nameFocusRequester)
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown &&
                                 (event.key == Key.Enter || event.key == Key.NumPadEnter)
                             ) {
-                                handleExtEnter()
+                                handleNameEnter()
                                 true
                             } else false
                         }
                 )
+
+                if (!isFolder) {
+                    TextField(
+                        value = extField,
+                        onValueChange = { updated ->
+                            val hasNewline = updated.text.contains('\n') || updated.text.contains('\r')
+                            val cleaned = updated.text.replace(".", "").replace("\n", "").replace("\r", "")
+                            extField = if (cleaned != updated.text) {
+                                updated.copy(
+                                    text = cleaned,
+                                    selection = TextRange(
+                                        updated.selection.start.coerceIn(0, cleaned.length),
+                                        updated.selection.end.coerceIn(0, cleaned.length)
+                                    )
+                                )
+                            } else updated
+                            emitChange(nameField.text, extField.text)
+                            if (hasNewline) {
+                                handleExtEnter()
+                            }
+                        },
+                        prefix = { Text(".") },
+                        label = {
+                            Text(
+                                text = extensionLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        singleLine = true,
+                        shape = shape,
+                        colors = textFieldColors,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = { handleExtEnter() },
+                            onNext = { handleExtEnter() },
+                            onGo = { handleExtEnter() }
+                        ),
+                        modifier = Modifier
+                            .width(96.dp)
+                            .focusRequester(extFocusRequester)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                                ) {
+                                    handleExtEnter()
+                                    true
+                                } else false
+                            }
+                    )
+                }
             }
         }
 
         if (supportingText != null) {
+            Spacer(modifier = Modifier.height(4.dp))
             supportingText()
         }
     }

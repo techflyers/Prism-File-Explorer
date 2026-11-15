@@ -63,6 +63,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -246,7 +247,14 @@ fun RenameDialog(
                                         executeRename()
                                     }
                                 },
-                                label = { Text(text = stringResource(R.string.name)) },
+                                label = {
+                                    Text(
+                                        text = stringResource(R.string.name),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        softWrap = false
+                                    )
+                                },
                                 singleLine = false,
                                 minLines = 1,
                                 maxLines = 5,
@@ -269,13 +277,14 @@ fun RenameDialog(
                                 } else null
                             )
                         } else {
-                            Column(
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top
                             ) {
                                 TextField(
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .weight(1f)
                                         .autoShowKeyboard()
                                         .onPreviewKeyEvent { keyEvent ->
                                             if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
@@ -310,7 +319,14 @@ fun RenameDialog(
                                             }
                                         }
                                     },
-                                    label = { Text(text = stringResource(R.string.name)) },
+                                    label = {
+                                    Text(
+                                        text = stringResource(R.string.name),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        softWrap = false
+                                    )
+                                },
                                     singleLine = false,
                                     minLines = 1,
                                     maxLines = 5,
@@ -351,7 +367,7 @@ fun RenameDialog(
                                 )
                                 TextField(
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .width(96.dp)
                                         .focusRequester(extensionFocusRequester)
                                         .onPreviewKeyEvent { keyEvent ->
                                             if ((keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) && keyEvent.type == KeyEventType.KeyDown) {
@@ -369,7 +385,15 @@ fun RenameDialog(
                                             executeRename()
                                         }
                                     },
-                                    label = { Text(text = stringResource(R.string.extension)) },
+                                    prefix = { Text(".") },
+                                    label = {
+                                        Text(
+                                            text = stringResource(R.string.extension),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            softWrap = false
+                                        )
+                                    },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                     keyboardActions = KeyboardActions(

@@ -245,10 +245,12 @@ class ShizukuFileHolder(
                 val localHolder = LocalFileHolder(tempFile)
                 if (isApk() || isApkBundle()) {
                     val activeTab = globalClass.mainActivityManager.getActiveTab()
-                    if (activeTab is FilesTab) {
+                    if (activeTab is FilesTab && !activeTab.isHomeSearchTab) {
                         activeTab.toggleApkDialog(localHolder)
-                        return
+                    } else {
+                        globalClass.mainActivityManager.toggleApkDialog(localHolder)
                     }
+                    return
                 }
                 localHolder.open(context, anonymous, skipSupportedExtensions, customMimeType)
             } else {

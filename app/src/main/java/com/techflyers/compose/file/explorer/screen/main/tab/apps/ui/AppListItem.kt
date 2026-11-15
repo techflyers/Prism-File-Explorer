@@ -101,6 +101,18 @@ fun AppListItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    if (app.isSplitApp) {
+                        VerticalDivider(Modifier
+                            .height(12.dp)
+                            .padding(horizontal = 8.dp))
+
+                        Text(
+                            text = "Split (${app.allApkPaths.size} APKs)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+
                     if (app.isSystemApp) {
                         VerticalDivider(Modifier
                             .height(12.dp)

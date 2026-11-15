@@ -9,8 +9,11 @@ import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.common.toFormattedDate
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.provider.StorageProvider
 import com.reandroid.apkeditor.merge.Merger
 import com.reandroid.apkeditor.merge.MergerOptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 
@@ -105,6 +108,8 @@ class ApksMergeTask(
             return
         }
 
+        var finalApkFile: File? = mergedFile?.file
+
         // mergeBundleFile function will handle failed task
         if (mergedFile != null && parameters!!.autoSign) {
             progressMonitor.apply {
@@ -119,7 +124,7 @@ class ApksMergeTask(
                 return
             }
 
-            signApkFile(mergedFile)
+            finalApkFile = signApkFile(mergedFile)
         }
 
         if (progressMonitor.status == TaskStatus.RUNNING) {
@@ -128,6 +133,18 @@ class ApksMergeTask(
                 progress = 1.0f
                 summary = globalClass.resources.getString(R.string.apk_bundle_merge_success)
                 processName = globalClass.getString(R.string.completed)
+            }
+
+            if (finalApkFile != null && finalApkFile.exists()) {
+                StorageProvider.notifyFileMutated(finalApkFile)
+                withContext(Dispatchers.Main) {
+                    globalClass.mainActivityManager.refreshAllTabs()
+                    try {
+                        ApkBundleInstaller.installSingleApk(globalClass, finalApkFile)
+                    } catch (e: Exception) {
+                        logger.logError(e)
+                    }
+                }
             }
         }
     }
@@ -140,8 +157,9 @@ class ApksMergeTask(
             return null
         }
 
+        val safePrefix = inputFile.nameWithoutExtension.padEnd(3, '_')
         val outputFile = if (parameters!!.autoSign) {
-            File.createTempFile(inputFile.nameWithoutExtension, ".apk")
+            File.createTempFile(safePrefix, ".apk")
         } else {
             File(inputFile.parentFile, inputFile.nameWithoutExtension + "-unsigned.apk")
         }
@@ -188,14 +206,14 @@ class ApksMergeTask(
         return null
     }
 
-    fun signApkFile(mergedFile: LocalFileHolder) {
+    fun signApkFile(mergedFile: LocalFileHolder): File? {
         val sourceFile = sourceContent as LocalFileHolder
         val inputFile = mergedFile.file
 
         if (sourceFile.file.parent == null) {
             inputFile.delete()
             markAsFailed(globalClass.resources.getString(R.string.invalid_bundle_file))
-            return
+            return null
         }
 
         val outputFile = File(
@@ -211,7 +229,7 @@ class ApksMergeTask(
             // Check abortion before loading certificates
             if (aborted) {
                 inputFile.delete()
-                return
+                return null
             }
 
             val (signingKey, certificate) = LocalApkSigningKey.load(globalClass)
@@ -224,7 +242,7 @@ class ApksMergeTask(
             // Check abortion before signing
             if (aborted) {
                 inputFile.delete()
-                return
+                return null
             }
 
             val keyConfig = KeyConfig.Jca(signingKey)
@@ -247,11 +265,12 @@ class ApksMergeTask(
                 inputFile.delete()
                 outputFile.delete()
                 markAsFailed(globalClass.resources.getString(R.string.apk_bundle_sign_failed))
-                return
+                return null
             }
 
             // Clean up temp file after successful signing
             inputFile.delete()
+            return outputFile
 
         } catch (e: Exception) {
             logger.logError(e)
@@ -263,6 +282,7 @@ class ApksMergeTask(
                     e.message ?: emptyString
                 )
             )
+            return null
         }
     }
 

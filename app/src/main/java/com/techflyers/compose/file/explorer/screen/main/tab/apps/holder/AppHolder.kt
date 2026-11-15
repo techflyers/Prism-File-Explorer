@@ -19,5 +19,15 @@ data class AppHolder(
     val dataDir: String,
     val uid: Int,
     val enabled: Boolean,
-    val debuggable: Boolean
-)
+    val debuggable: Boolean,
+    val splitPaths: List<String> = emptyList()
+) {
+    val isSplitApp: Boolean
+        get() = splitPaths.isNotEmpty()
+
+    val allApkPaths: List<String>
+        get() = buildList {
+            if (path.isNotBlank()) add(path)
+            addAll(splitPaths)
+        }.distinct()
+}

@@ -1,6 +1,7 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.coil
 
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.ContentHolder
+import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkBundleFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.apkFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.audioFileType
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.FileMimeType.comicFileType
@@ -16,6 +17,7 @@ fun canUseCoil(contentHolder: ContentHolder): Boolean {
             || videoFileType.contains(ext)
             || audioFileType.contains(ext)
             || ext == apkFileType
+            || apkBundleFileType.contains(ext)
             || ext == pdfFileType
             || comicFileType.contains(ext)
             || ebookFileType.contains(ext)

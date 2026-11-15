@@ -10,8 +10,11 @@ package com.techflyers.compose.file.explorer.common
 fun splitFileName(displayName: String, isFolder: Boolean): Pair<String, String> {
     if (isFolder) return displayName to emptyString
     val lastDot = displayName.lastIndexOf('.')
-    if (lastDot <= 0 || lastDot == displayName.lastIndex) {
+    if (lastDot < 0 || lastDot == displayName.lastIndex) {
         return displayName to emptyString
+    }
+    if (lastDot == 0) {
+        return emptyString to displayName.substring(1)
     }
     return displayName.substring(0, lastDot) to displayName.substring(lastDot + 1)
 }

@@ -1,5 +1,6 @@
 package com.techflyers.compose.file.explorer.screen.main.tab.files.ui.dialog
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.horizontalScroll
@@ -18,14 +19,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
@@ -38,6 +43,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
@@ -45,6 +51,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,7 +60,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,13 +78,18 @@ import coil3.compose.AsyncImage
 import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.App.Companion.logger
 import com.techflyers.compose.file.explorer.R
+import com.techflyers.compose.file.explorer.coil.apk.ApkBundleHelper
 import com.techflyers.compose.file.explorer.common.toFormattedDate
 import com.techflyers.compose.file.explorer.common.toFormattedSize
 import com.techflyers.compose.file.explorer.common.ui.BottomSheetDialog
 import com.techflyers.compose.file.explorer.common.ui.Space
 import com.techflyers.compose.file.explorer.screen.main.tab.files.FilesTab
-import kotlinx.coroutines.launch
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.misc.ApkInfo
+import com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,116 +98,107 @@ fun ApkPreviewDialog(
     tab: FilesTab,
     onDismissRequest: () -> Unit
 ) {
-    if (show) {
+    val apkFile = if (show) tab.targetFile as? LocalFileHolder else null
+    ApkPreviewDialog(
+        show = show && apkFile != null,
+        apkFile = apkFile,
+        onDismissRequest = onDismissRequest
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ApkPreviewDialog(
+    show: Boolean,
+    apkFile: LocalFileHolder?,
+    onDismissRequest: () -> Unit
+) {
+    if (show && apkFile != null) {
         val context = LocalContext.current
-        val apkFile = tab.targetFile!! as LocalFileHolder
         val packageManager = globalClass.packageManager
 
-        var apkInfo by remember { mutableStateOf<ApkInfo?>(null) }
-        var isLoading by remember { mutableStateOf(true) }
-        var selectedTab by remember { mutableIntStateOf(0) }
-        var showExtraDetails by remember { mutableStateOf(false) }
+        var apkInfo by remember(apkFile.uniquePath) { mutableStateOf<ApkInfo?>(null) }
+        var isLoading by remember(apkFile.uniquePath) { mutableStateOf(true) }
+        var selectedTab by remember(apkFile.uniquePath) { mutableIntStateOf(0) }
+        var showExtraDetails by remember(apkFile.uniquePath) { mutableStateOf(false) }
 
-        LaunchedEffect(Unit) {
+        LaunchedEffect(apkFile.uniquePath) {
+            if (!ApkBundleInstaller.isInstalling &&
+                ApkBundleInstaller.activeBundlePath != apkFile.file.absolutePath
+            ) {
+                ApkBundleInstaller.resetStatus()
+            }
+        }
+
+        LaunchedEffect(apkFile.uniquePath, ApkBundleInstaller.installVersion) {
+            if (apkInfo == null) {
+                isLoading = true
+            }
             try {
-                var parsePath = apkFile.uniquePath
-                var tempApkFile: java.io.File? = null
-
                 if (apkFile.isApkBundle()) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        java.util.zip.ZipInputStream(java.io.FileInputStream(apkFile.file)).use { zis ->
-                            var entry = zis.nextEntry
-                            var baseEntryName = ""
-                            var maxApkSize = 0L
+                    apkInfo = withContext(Dispatchers.IO) {
+                        ApkBundleHelper.loadBundleApkInfo(
+                            bundleFile = apkFile.file,
+                            formattedSize = apkFile.size.toFormattedSize()
+                        )
+                    }
+                } else {
+                    val parsePath = apkFile.uniquePath
+                    val archiveInfo = withContext(Dispatchers.IO) {
+                        packageManager.getPackageArchiveInfo(
+                            parsePath,
+                            PackageManager.GET_PERMISSIONS
+                        )
+                    }
 
-                            while (entry != null) {
-                                if (entry.name.endsWith(".apk", ignoreCase = true)) {
-                                    if (entry.name == "base.apk" || entry.size > maxApkSize) {
-                                        maxApkSize = entry.size
-                                        baseEntryName = entry.name
-                                    }
-                                }
-                                zis.closeEntry()
-                                entry = zis.nextEntry
-                            }
+                    if (archiveInfo != null) {
+                        archiveInfo.applicationInfo?.sourceDir = parsePath
+                        archiveInfo.applicationInfo?.publicSourceDir = parsePath
 
-                            if (baseEntryName.isNotEmpty()) {
-                                java.util.zip.ZipInputStream(java.io.FileInputStream(apkFile.file)).use { zis2 ->
-                                    var entry2 = zis2.nextEntry
-                                    while (entry2 != null) {
-                                        if (entry2.name == baseEntryName) {
-                                            val temp = java.io.File(context.cacheDir, "temp_base_${System.currentTimeMillis()}.apk")
-                                            temp.outputStream().use { fos ->
-                                                zis2.copyTo(fos)
-                                            }
-                                            tempApkFile = temp
-                                            parsePath = temp.absolutePath
-                                            break
-                                        }
-                                        zis2.closeEntry()
-                                        entry2 = zis2.nextEntry
-                                    }
-                                }
-                            }
+                        val icon = archiveInfo.applicationInfo?.loadIcon(packageManager)
+                        val appName = archiveInfo.applicationInfo?.loadLabel(packageManager).toString()
+
+                        // Check if app is installed
+                        var isInstalled = false
+                        var installedVersion: String? = null
+                        var installTime: String? = null
+                        var lastUpdateTime: String? = null
+
+                        try {
+                            val installedInfo =
+                                packageManager.getPackageInfo(archiveInfo.packageName, 0)
+                            isInstalled = true
+                            installedVersion = installedInfo.versionName
+                            installTime = installedInfo.firstInstallTime.toFormattedDate()
+                            lastUpdateTime = installedInfo.lastUpdateTime.toFormattedDate()
+                        } catch (_: PackageManager.NameNotFoundException) {
+                            // App not installed
                         }
+
+                        val permissions = archiveInfo.requestedPermissions?.toList() ?: emptyList()
+
+                        apkInfo = ApkInfo(
+                            appName = appName,
+                            packageName = archiveInfo.packageName,
+                            versionName = archiveInfo.versionName
+                                ?: globalClass.getString(R.string.unknown),
+                            versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                archiveInfo.longVersionCode.toString()
+                            } else {
+                                archiveInfo.versionCode.toString()
+                            },
+                            icon = icon,
+                            size = apkFile.size.toFormattedSize(),
+                            isInstalled = isInstalled,
+                            installedVersion = installedVersion,
+                            minSdkVersion = archiveInfo.applicationInfo?.minSdkVersion,
+                            targetSdkVersion = archiveInfo.applicationInfo?.targetSdkVersion,
+                            permissions = permissions,
+                            installTime = installTime,
+                            lastUpdateTime = lastUpdateTime
+                        )
                     }
                 }
-
-                val archiveInfo = packageManager.getPackageArchiveInfo(
-                    parsePath,
-                    PackageManager.GET_PERMISSIONS
-                )
-
-                if (archiveInfo != null) {
-                    archiveInfo.applicationInfo?.sourceDir = parsePath
-                    archiveInfo.applicationInfo?.publicSourceDir = parsePath
-
-                    val icon = archiveInfo.applicationInfo?.loadIcon(packageManager)
-                    val appName = archiveInfo.applicationInfo?.loadLabel(packageManager).toString()
-
-                    // Check if app is installed
-                    var isInstalled = false
-                    var installedVersion: String? = null
-                    var installTime: String? = null
-                    var lastUpdateTime: String? = null
-
-                    try {
-                        val installedInfo =
-                            packageManager.getPackageInfo(archiveInfo.packageName, 0)
-                        isInstalled = true
-                        installedVersion = installedInfo.versionName
-                        installTime = installedInfo.firstInstallTime.toFormattedDate()
-                        lastUpdateTime = installedInfo.lastUpdateTime.toFormattedDate()
-                    } catch (_: PackageManager.NameNotFoundException) {
-                        // App not installed
-                    }
-
-                    val permissions = archiveInfo.requestedPermissions?.toList() ?: emptyList()
-
-                    apkInfo = ApkInfo(
-                        appName = appName,
-                        packageName = archiveInfo.packageName,
-                        versionName = archiveInfo.versionName
-                            ?: globalClass.getString(R.string.unknown),
-                        versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            archiveInfo.longVersionCode.toString()
-                        } else {
-                            archiveInfo.versionCode.toString()
-                        },
-                        icon = icon,
-                        size = apkFile.size.toFormattedSize(),
-                        isInstalled = isInstalled,
-                        installedVersion = installedVersion,
-                        minSdkVersion = archiveInfo.applicationInfo?.minSdkVersion,
-                        targetSdkVersion = archiveInfo.applicationInfo?.targetSdkVersion,
-                        permissions = permissions,
-                        installTime = installTime,
-                        lastUpdateTime = lastUpdateTime
-                    )
-                }
-
-                tempApkFile?.delete()
-
             } catch (e: Exception) {
                 logger.logError(e)
             } finally {
@@ -339,6 +341,7 @@ fun ApkPreviewDialog(
 
                         Space(size = 16.dp)
 
+                        val scope = rememberCoroutineScope()
                         // Action buttons
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -360,12 +363,15 @@ fun ApkPreviewDialog(
                                 Text(stringResource(R.string.explore))
                             }
 
-                            val scope = rememberCoroutineScope()
                             Button(
                                 onClick = {
                                     if (apkFile.isApkBundle()) {
                                         scope.launch {
-                                            com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.install(context, apkFile.file.absolutePath)
+                                            ApkBundleInstaller.install(
+                                                context = context,
+                                                bundlePath = apkFile.file.absolutePath,
+                                                packageNameHint = info.packageName
+                                            )
                                         }
                                     } else {
                                         apkFile.open(
@@ -377,48 +383,59 @@ fun ApkPreviewDialog(
                                         onDismissRequest()
                                     }
                                 },
-                                enabled = !com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.isInstalling,
+                                enabled = !ApkBundleInstaller.isInstalling,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(
-                                    if (info.isInstalled) Icons.Default.Update else Icons.Default.Download,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Space(size = 8.dp)
-                                Text(
-                                    if (info.isInstalled) stringResource(R.string.update) else stringResource(
-                                        R.string.install
-                                    )
-                                )
-                            }
-                        }
-
-                        if (com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.isInstalling) {
-                            Space(size = 16.dp)
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                if (ApkBundleInstaller.isInstalling &&
+                                    ApkBundleInstaller.activeBundlePath == apkFile.file.absolutePath
                                 ) {
-                                    Text(
-                                        text = com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.installStatus,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
-                                    Space(8.dp)
-                                    androidx.compose.material3.LinearProgressIndicator(
-                                        progress = { com.techflyers.compose.file.explorer.screen.main.tab.files.task.ApkBundleInstaller.installProgress },
-                                        modifier = Modifier.fillMaxWidth()
+                                    Space(size = 8.dp)
+                                    Text("Installing…")
+                                } else {
+                                    Icon(
+                                        if (info.isInstalled) Icons.Default.Update else Icons.Default.Download,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Space(size = 8.dp)
+                                    Text(
+                                        if (info.isInstalled) stringResource(R.string.update) else stringResource(
+                                            R.string.install
+                                        )
                                     )
                                 }
                             }
                         }
+
+                        val showStatusForThisFile = apkFile.isApkBundle() &&
+                            ApkBundleInstaller.installState != ApkBundleInstaller.InstallState.IDLE &&
+                            (ApkBundleInstaller.activeBundlePath == null ||
+                                ApkBundleInstaller.activeBundlePath == apkFile.file.absolutePath)
+
+                        if (showStatusForThisFile) {
+                            Space(size = 14.dp)
+                            LiveBundleInstallStatusCard(
+                                packageName = info.packageName,
+                                onRetry = {
+                                    scope.launch {
+                                        ApkBundleInstaller.install(
+                                            context = context,
+                                            bundlePath = apkFile.file.absolutePath,
+                                            packageNameHint = info.packageName
+                                        )
+                                    }
+                                },
+                                onDoneOrDismiss = {
+                                    ApkBundleInstaller.resetStatus()
+                                }
+                            )
+                        }
+                        Space(size = 12.dp)
 
                         if (!showExtraDetails) {
                             OutlinedButton(
@@ -463,6 +480,216 @@ fun ApkPreviewDialog(
                                 0 -> DetailsTab(info)
                                 1 -> PermissionsTab(info.permissions)
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveBundleInstallStatusCard(
+    packageName: String,
+    onRetry: () -> Unit,
+    onDoneOrDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val state = ApkBundleInstaller.installState
+    val phase = ApkBundleInstaller.installPhase
+    val status = ApkBundleInstaller.installStatus
+    val detail = ApkBundleInstaller.installDetail
+    val progress = ApkBundleInstaller.installProgress
+    val isIndeterminate = ApkBundleInstaller.isIndeterminate
+    val isInstalling = ApkBundleInstaller.isInstalling
+
+    val containerColor = when (state) {
+        ApkBundleInstaller.InstallState.SUCCESS -> MaterialTheme.colorScheme.secondaryContainer
+        ApkBundleInstaller.InstallState.FAILED -> MaterialTheme.colorScheme.errorContainer
+        ApkBundleInstaller.InstallState.CANCELLED -> MaterialTheme.colorScheme.surfaceContainerHigh
+        else -> MaterialTheme.colorScheme.primaryContainer
+    }
+    val contentColor = when (state) {
+        ApkBundleInstaller.InstallState.SUCCESS -> MaterialTheme.colorScheme.onSecondaryContainer
+        ApkBundleInstaller.InstallState.FAILED -> MaterialTheme.colorScheme.onErrorContainer
+        ApkBundleInstaller.InstallState.CANCELLED -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    when (state) {
+                        ApkBundleInstaller.InstallState.SUCCESS -> {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = contentColor
+                            )
+                        }
+                        ApkBundleInstaller.InstallState.FAILED -> {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = contentColor
+                            )
+                        }
+                        ApkBundleInstaller.InstallState.CANCELLED -> {
+                            Icon(
+                                imageVector = Icons.Default.Cancel,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = contentColor
+                            )
+                        }
+                        else -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.2.dp,
+                                color = contentColor
+                            )
+                        }
+                    }
+                    Space(size = 10.dp)
+                    Text(
+                        text = phase.ifBlank { "Installing bundle" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = contentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (isInstalling && !isIndeterminate) {
+                    Space(size = 8.dp)
+                    Text(
+                        text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = contentColor
+                    )
+                }
+            }
+
+            if (isInstalling) {
+                Space(size = 10.dp)
+                if (isIndeterminate) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = contentColor,
+                        trackColor = contentColor.copy(alpha = 0.2f)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = contentColor,
+                        trackColor = contentColor.copy(alpha = 0.2f)
+                    )
+                }
+            }
+
+            if (status.isNotBlank()) {
+                Space(size = 10.dp)
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = contentColor
+                )
+            }
+
+            if (detail.isNotBlank()) {
+                Space(size = 4.dp)
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.85f)
+                )
+            }
+
+            if (state == ApkBundleInstaller.InstallState.SUCCESS ||
+                state == ApkBundleInstaller.InstallState.FAILED ||
+                state == ApkBundleInstaller.InstallState.CANCELLED
+            ) {
+                Space(size = 12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDoneOrDismiss) {
+                        Text(
+                            text = if (state == ApkBundleInstaller.InstallState.SUCCESS) "Done" else "Dismiss",
+                            color = contentColor
+                        )
+                    }
+
+                    if (state == ApkBundleInstaller.InstallState.SUCCESS) {
+                        val targetPkg = ApkBundleInstaller.activePackageName?.takeIf { it.isNotBlank() }
+                            ?: packageName
+                        val launchIntent = remember(targetPkg, ApkBundleInstaller.installVersion) {
+                            runCatching {
+                                context.packageManager.getLaunchIntentForPackage(targetPkg)
+                            }.getOrNull()
+                        }
+                        if (launchIntent != null) {
+                            Space(size = 8.dp)
+                            Button(
+                                onClick = {
+                                    runCatching {
+                                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(launchIntent)
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Space(size = 6.dp)
+                                Text("Open App")
+                            }
+                        }
+                    } else {
+                        Space(size = 8.dp)
+                        Button(onClick = onRetry) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Space(size = 6.dp)
+                            Text("Retry")
                         }
                     }
                 }

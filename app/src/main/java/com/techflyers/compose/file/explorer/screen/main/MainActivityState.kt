@@ -5,6 +5,7 @@ import com.techflyers.compose.file.explorer.App.Companion.globalClass
 import com.techflyers.compose.file.explorer.R
 import com.techflyers.compose.file.explorer.common.emptyString
 import com.techflyers.compose.file.explorer.screen.main.tab.Tab
+import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.LocalFileHolder
 import com.techflyers.compose.file.explorer.screen.main.tab.files.holder.StorageDevice
 
 data class MainActivityState(
@@ -14,6 +15,7 @@ data class MainActivityState(
     val showJumpToPathDialog: Boolean = false,
     val showSaveEditorFilesDialog: Boolean = false,
     val showStartupTabsDialog: Boolean = false,
+    val apkDialogFile: LocalFileHolder? = null,
     val isSavingFiles: Boolean = false,
     val selectedTabIndex: Int = 0,
     val storageDevices: List<StorageDevice> = emptyList(),

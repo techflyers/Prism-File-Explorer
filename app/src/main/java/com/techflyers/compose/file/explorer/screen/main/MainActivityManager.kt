@@ -1141,6 +1141,14 @@ class MainActivityManager {
         }
     }
 
+    fun toggleApkDialog(file: LocalFileHolder?) {
+        _state.update {
+            it.copy(
+                apkDialogFile = file
+            )
+        }
+    }
+
     fun reorderTabs(from: Int, to: Int) {
         val active = getActiveTab()
         _state.update { state ->
